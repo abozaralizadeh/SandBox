@@ -3,13 +3,12 @@
 
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!--meta name="viewport" content="width=device-width, initial-scale=1.0, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes"-->
   <title>GenBox</title>
   <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
   <style>
     body {
       background-color: #e0ac69;
-      /* A desert-like color for background */
       display: flex;
       justify-content: center;
       align-items: center;
@@ -19,11 +18,10 @@
 
     #tv {
       background-image: url('static/tv.webp');
-      /* Update this path to the TV image */
       background-size: cover;
       background-position: center;
-      width: 1980px;
-      height: 1720px;
+      width: 100vw;  /* Maintain aspect ratio (1980/1720) */
+      height: 100vh; /* Responsive hight */
       display: flex;
       justify-content: center;
       align-items: center;
@@ -31,22 +29,21 @@
     }
 
     #screen {
-      width: 550px;
-      height: 400px;
-      background-color: rgba(0, 0, 0, 0);
+      width: 28%; /* Responsive width relative to TV */
+      height: 23%; /* Responsive height relative to TV */
+      background-color: rgba(0, 0, 0, 0.8);
       color: #00ff00;
       font-family: monospace;
       padding: 10px;
       overflow: hidden;
-      position: static;
-      margin-top: 200px;
-      margin-left: -40px;
-      border-radius: 75px;
+      border-radius: 2vw; /* Rounded corners proportional to screen size */
       overflow-y: scroll;
       box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.7);
+      position: absolute;
+      top: 15%; /* Position relative to TV */
+      left: 36%;
     }
 
-    /* Modern CSS scrolling text */
     #scrollingText {
       display: inline-block;
       animation: scroll 30s linear infinite;
@@ -57,16 +54,15 @@
       from {
         transform: translateY(240%);
       }
-
       to {
         transform: translateY(-110%);
       }
     }
+
   </style>
 </head>
 
 <body>
-
   <div id="tv">
     <div id="screen">
       <p id="content"></p>
@@ -84,32 +80,26 @@
         })
         .catch(error => {
           console.error('Error fetching the string:', error);
-          return 'Error fetching content'; // Return an error message instead
+          return 'Error fetching content';
         });
     }
 
-    // Function to simulate fetching data from server
-      function fetchServerText() {
-        return new Promise((resolve) => {
-          setTimeout(() => {
-            getContent().then(commandLineText => resolve(commandLineText));
-          }, 1000); // Simulates delay
-        });
-      }
+    function fetchServerText() {
+      return new Promise((resolve) => {
+        setTimeout(() => {
+          getContent().then(commandLineText => resolve(commandLineText));
+        }, 1000);
+      });
+    }
 
-    // Fetch the command-line text and display it
     async function displayServerText() {
       const contentDiv = document.getElementById('content');
       const serverText = await fetchServerText();
-
-      // Wrap server text in a scrolling div
       contentDiv.innerHTML = `<div id="scrollingText">${serverText}</div>`;
     }
 
-    // Initial text display when the page loads
     displayServerText();
   </script>
-
 </body>
 
 </html>
