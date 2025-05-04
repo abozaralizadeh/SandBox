@@ -48,6 +48,9 @@
             height: 5%;
             text-align: center;
             margin: 10px 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
 
         .control-line button {
@@ -69,6 +72,11 @@
             font-size: 18px;
             margin: 0 20px;
             font-weight: bold;
+            cursor: pointer;
+        }
+
+        .date-display:hover {
+            text-decoration: underline;
         }
 
         @keyframes spin {
@@ -88,16 +96,166 @@
             padding: 20px;
             padding-top: 0px;
         }
+
+        .home-button {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background-color: #a7a7a7;
+            color: white;
+            text-decoration: none;
+            padding: 8px 15px;
+            border-radius: 5px;
+            font-size: 16px;
+            z-index: 1000;
+        }
+
+        .home-button:hover {
+            background-color: #646464;
+        }
+
+        /* Date picker container */
+        .date-picker-container {
+            position: absolute;
+            top: 60px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: white;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+            padding: 15px;
+            z-index: 1001;
+            display: none;
+        }
+
+        /* Calendar header */
+        .calendar-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .calendar-header button {
+            background-color: #a7a7a7;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            cursor: pointer;
+            border-radius: 3px;
+        }
+
+        .calendar-header button:hover {
+            background-color: #646464;
+        }
+
+        /* Calendar grid */
+        .calendar-grid {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 5px;
+        }
+
+        .calendar-grid .day-name {
+            text-align: center;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .calendar-grid .day {
+            text-align: center;
+            padding: 5px;
+            cursor: pointer;
+            border-radius: 3px;
+        }
+
+        .calendar-grid .day:hover {
+            background-color: #f0f0f0;
+        }
+
+        .calendar-grid .day.selected {
+            background-color: #3498db;
+            color: white;
+        }
+
+        .calendar-grid .day.other-month {
+            color: #ccc;
+        }
+
+        /* Time picker for dates before Jan 25, 2025 */
+        .time-picker {
+            margin-top: 15px;
+            display: none;
+        }
+
+        .time-picker select {
+            padding: 5px;
+            width: 100%;
+            margin-bottom: 10px;
+        }
+
+        /* Action buttons */
+        .date-picker-actions {
+            display: flex;
+            justify-content: flex-end;
+            margin-top: 15px;
+        }
+
+        .date-picker-actions button {
+            background-color: #a7a7a7;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            cursor: pointer;
+            border-radius: 3px;
+            margin-left: 10px;
+        }
+
+        .date-picker-actions button.apply {
+            background-color: #3498db;
+        }
+
+        .date-picker-actions button:hover {
+            background-color: #646464;
+        }
+
+        .date-picker-actions button.apply:hover {
+            background-color: #2980b9;
+        }
     </style>
 </head>
 
 <body>
+
+    <a href="/" class="home-button">Home</a>
 
     <!-- Control Line -->
     <div class="control-line">
         <button id="previousBtn">◀</button>
         <span class="date-display" id="currentDate">2025-01-01 00:00</span>
         <button id="nextBtn">▶</button>
+    </div>
+
+    <!-- Date Picker Container -->
+    <div class="date-picker-container" id="datePicker">
+        <div class="calendar-header">
+            <button id="prevMonth">◀</button>
+            <div id="monthYearDisplay">January 2025</div>
+            <button id="nextMonth">▶</button>
+        </div>
+        <div class="calendar-grid" id="calendarGrid">
+            <!-- Days will be populated by JavaScript -->
+        </div>
+        <div class="time-picker" id="timePicker">
+            <select id="hourSelect">
+                <!-- Hours will be populated by JavaScript -->
+            </select>
+        </div>
+        <div class="date-picker-actions">
+            <button id="cancelDatePicker">Cancel</button>
+            <button id="applyDatePicker" class="apply">Apply</button>
+        </div>
     </div>
 
     <!-- Spinner div -->
@@ -135,6 +293,11 @@
         } else {
             currentDate.setMinutes(0, 0, 0);
         }
+
+        // Global variables for date picker
+        let selectedDate = new Date(currentDate);
+        let displayedMonth = selectedDate.getMonth();
+        let displayedYear = selectedDate.getFullYear();
 
         function updateIframe() {
             //const formattedDate = currentDate.toISOString();
@@ -195,6 +358,177 @@
             updateIframe();
         });
 
+        // Date picker functionality
+        function initDatePicker() {
+            // Initialize the date picker components
+            const datePickerElement = document.getElementById('datePicker');
+            const currentDateElement = document.getElementById('currentDate');
+            const prevMonthBtn = document.getElementById('prevMonth');
+            const nextMonthBtn = document.getElementById('nextMonth');
+            const calendarGrid = document.getElementById('calendarGrid');
+            const monthYearDisplay = document.getElementById('monthYearDisplay');
+            const timePicker = document.getElementById('timePicker');
+            const hourSelect = document.getElementById('hourSelect');
+            const cancelBtn = document.getElementById('cancelDatePicker');
+            const applyBtn = document.getElementById('applyDatePicker');
+
+            // Populate hour select
+            for (let i = 0; i < 24; i++) {
+                const option = document.createElement('option');
+                option.value = i;
+                option.textContent = `${i.toString().padStart(2, '0')}:00`;
+                hourSelect.appendChild(option);
+            }
+
+            // Show date picker when clicking on the date display
+            currentDateElement.addEventListener('click', () => {
+                selectedDate = new Date(currentDate);
+                displayedMonth = selectedDate.getMonth();
+                displayedYear = selectedDate.getFullYear();
+                updateCalendar();
+                datePickerElement.style.display = 'block';
+            });
+
+            // Update calendar when clicking on prev/next month buttons
+            prevMonthBtn.addEventListener('click', () => {
+                displayedMonth--;
+                if (displayedMonth < 0) {
+                    displayedMonth = 11;
+                    displayedYear--;
+                }
+                updateCalendar();
+            });
+
+            nextMonthBtn.addEventListener('click', () => {
+                displayedMonth++;
+                if (displayedMonth > 11) {
+                    displayedMonth = 0;
+                    displayedYear++;
+                }
+                updateCalendar();
+            });
+
+            // Cancel button closes the date picker
+            cancelBtn.addEventListener('click', () => {
+                datePickerElement.style.display = 'none';
+            });
+
+            // Apply button sets the selected date and closes the date picker
+            applyBtn.addEventListener('click', () => {
+                if (selectedDate < new Date("2025-01-25T00:00:00")) {
+                    // For dates before Jan 25, 2025, set the hour
+                    selectedDate.setHours(parseInt(hourSelect.value), 0, 0, 0);
+                } else {
+                    // For dates on or after Jan 25, 2025, set time to 00:00
+                    selectedDate.setHours(0, 0, 0, 0);
+                }
+                currentDate = new Date(selectedDate);
+                updateIframe();
+                datePickerElement.style.display = 'none';
+            });
+
+            // Function to update the calendar display
+            function updateCalendar() {
+                // Update month/year display
+                const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+                monthYearDisplay.textContent = `${months[displayedMonth]} ${displayedYear}`;
+
+                // Clear existing calendar grid
+                calendarGrid.innerHTML = '';
+
+                // Add day names
+                const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+                dayNames.forEach(day => {
+                    const dayElement = document.createElement('div');
+                    dayElement.className = 'day-name';
+                    dayElement.textContent = day;
+                    calendarGrid.appendChild(dayElement);
+                });
+
+                // Get first day of the month and total days
+                const firstDay = new Date(displayedYear, displayedMonth, 1).getDay();
+                const daysInMonth = new Date(displayedYear, displayedMonth + 1, 0).getDate();
+                
+                // Get days from previous month to fill in the first row
+                const daysInPrevMonth = new Date(displayedYear, displayedMonth, 0).getDate();
+                
+                // Add days from previous month
+                for (let i = 0; i < firstDay; i++) {
+                    const dayElement = document.createElement('div');
+                    dayElement.className = 'day other-month';
+                    dayElement.textContent = daysInPrevMonth - firstDay + i + 1;
+                    // Set date for previous month days
+                    const prevMonthDate = new Date(displayedYear, displayedMonth - 1, daysInPrevMonth - firstDay + i + 1);
+                    dayElement.addEventListener('click', () => selectDay(prevMonthDate));
+                    calendarGrid.appendChild(dayElement);
+                }
+
+                // Add days of current month
+                for (let i = 1; i <= daysInMonth; i++) {
+                    const dayElement = document.createElement('div');
+                    dayElement.className = 'day';
+                    dayElement.textContent = i;
+                    
+                    // Check if this day is the selected day
+                    const currentMonthDate = new Date(displayedYear, displayedMonth, i);
+                    if (currentMonthDate.getDate() === selectedDate.getDate() && 
+                        currentMonthDate.getMonth() === selectedDate.getMonth() && 
+                        currentMonthDate.getFullYear() === selectedDate.getFullYear()) {
+                        dayElement.classList.add('selected');
+                    }
+                    
+                    dayElement.addEventListener('click', () => selectDay(currentMonthDate));
+                    calendarGrid.appendChild(dayElement);
+                }
+
+                // Fill in remaining grid with days from next month
+                const totalCells = 42; // 6 rows x 7 days
+                const remainingCells = totalCells - (firstDay + daysInMonth);
+                for (let i = 1; i <= remainingCells; i++) {
+                    const dayElement = document.createElement('div');
+                    dayElement.className = 'day other-month';
+                    dayElement.textContent = i;
+                    // Set date for next month days
+                    const nextMonthDate = new Date(displayedYear, displayedMonth + 1, i);
+                    dayElement.addEventListener('click', () => selectDay(nextMonthDate));
+                    calendarGrid.appendChild(dayElement);
+                }
+
+                // Show/hide time picker based on selected date
+                updateTimePicker();
+            }
+
+            // Function to select a day
+            function selectDay(date) {
+                selectedDate = new Date(date);
+                
+                // Maintain the hour if before Jan 25, 2025
+                if (selectedDate < new Date("2025-01-25T00:00:00") && currentDate < new Date("2025-01-25T00:00:00")) {
+                    selectedDate.setHours(currentDate.getHours());
+                }
+                
+                // Update the calendar to show the selected day
+                updateCalendar();
+                
+                // Update time picker visibility
+                updateTimePicker();
+            }
+
+            // Function to update time picker visibility
+            function updateTimePicker() {
+                if (selectedDate < new Date("2025-01-25T00:00:00")) {
+                    timePicker.style.display = 'block';
+                    hourSelect.value = selectedDate.getHours();
+                } else {
+                    timePicker.style.display = 'none';
+                }
+            }
+        }
+
+        // Initialize the date picker
+        document.addEventListener('DOMContentLoaded', initDatePicker);
+
+        // Initial iframe load
         updateIframe();
     </script>
 </body>
