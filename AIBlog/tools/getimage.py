@@ -16,7 +16,7 @@ client = AzureOpenAI(
 def get_image_by_text(text: str) -> str:
     """get the url of an image created as the input text explains, the input text should describe well the expected output"""
     result = client.images.generate(
-        model="dall-e-3", # the name of your DALL-E 3 deployment
+        model=os.environ.get("AZURE_OPENAI_MODEL_DALLE", "dall-e-3"), # the name of your DALL-E 3 deployment
         prompt=text,
         n=1
     )
