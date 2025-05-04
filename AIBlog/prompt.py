@@ -30,6 +30,8 @@ async def getaiblog(parsed_date):
     - Conduct a second detailed search specifically about your chosen narrow topic using academic and credible resources, including but not limited to: arxiv.org, nature.com, science.org, deepmind.google/blog, openai.com/blog, ai.googleblog.com, and other reputable sources.
     - Carefully read and extract detailed information, including technical specifics, algorithms, experimental results, figures, and key insights from multiple authoritative sources.
     - Recursively follow references and citations within these articles to gather deeper insights.
+    - Collect the most relevant and significant findings, methods, and implications of the advancement.
+    - Search for critical reviews or discussions about the advancement to understand its impact and limitations.
 
     Content and Structure of the Blog:
 
@@ -52,7 +54,7 @@ async def getaiblog(parsed_date):
     Output Requirements:
 
     - Provide only the complete HTML code for the fully formatted blog page.
-    - Ensure the HTML is ready to render immediately in a browser, with all images embedded directly using their URLs.
+    - Ensure the HTML is ready to render immediately in a browser, with all images embedded directly using their URLs and without text behind them.
     - No extra markdown or explanations—just the HTML.
     """
 
