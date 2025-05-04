@@ -21,7 +21,7 @@ async def getaiblog(parsed_date):
     prompt = f"""
     Search and Identify a Narrow Topic:
 
-    - Perform a search for: "AI {timestamp.strftime('%Y-%b-%d')} site:arxiv.org OR site:nature.com OR site:openai.com/blog OR site:deepmind.google/blog".
+    - Perform a search for: "AI {timestamp.strftime('%Y-%b-%d')} site:arxiv.org OR site:nature.com OR site:openai.com/blog OR site:deepmind.google/blog site:huggingface.co/posts".
     - Navigate to the results, carefully read summaries or abstracts, and identify one specific, narrowly-focused advancement in AI or Generative AI technology (e.g., a new training method, specific algorithm improvement, a novel application in a particular field, new architecture improvements like transformers, attention mechanisms, diffusion models, multimodal advancements, etc.).
     - Ensure the topic is recent, detailed, technically rich, and sufficiently narrow to allow an in-depth scientific discussion.
 
