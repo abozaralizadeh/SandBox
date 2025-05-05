@@ -4,7 +4,7 @@ from TomorrowNews.azurestorage import get_row, insert_history
 from TomorrowNews.graph import news_graph
 from TomorrowNews.ReAct import supervisor
 from TomorrowNews.supervisor import ma_graph
-from utils import get_flat_date, get_flat_date_hour, parse_flat_date_hour
+from utils import get_flat_date, get_flat_date_hour, parse_flat_date_hour, strtobool
 
 def gettomorrownews(parsed_date):
     timestamp = datetime.utcnow()
@@ -17,7 +17,7 @@ def gettomorrownews(parsed_date):
     else:
         flat_date_hour = get_flat_date(parsed_date) + "_00"
 
-    if not os.environ.get("DEBUG", False):
+    if not strtobool(os.environ.get("DEBUG", False)):
         if lasthournews := get_row(flat_date_hour):
             return lasthournews["html_content"], parse_flat_date_hour(flat_date_hour)
         flat_date_hour = get_flat_date() + "_00"
