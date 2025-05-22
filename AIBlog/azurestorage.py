@@ -1,5 +1,6 @@
 from azure.storage.blob import BlobServiceClient, BlobClient, ContainerClient
 from azure.data.tables import TableServiceClient, TableEntity
+from azure.data.tables import UpdateMode
 from utils import get_flat_date_hour, get_flat_date_full
 from io import BytesIO
 from dotenv import load_dotenv
@@ -63,6 +64,48 @@ def insert_history(rowkey, html_content):
     try:
         table_client.create_entity(entity=entity)
         print("Row inserted successfully!")
+    except Exception as e:
+        print(f"Error inserting row: {e}")
+
+def upsert_history(rowkey, html_content):
+    # Define the entity (row) to insert
+    entity = {
+        "PartitionKey": "getimagetool",  # Logical grouping for entities
+        "RowKey": rowkey,                # Unique identifier within the partition
+        "html_content": html_content
+    }
+    # Insert the entity
+    try:
+        table_client.upsert_entity(entity=entity, mode=UpdateMode.MERGE)
+        print("Row upserted successfully!")
+    except Exception as e:
+        print(f"Error inserting row: {e}")
+
+def insert_title(rowkey, title):
+    # Define the entity (row) to insert
+    entity = {
+        "PartitionKey": "getimagetool",  # Logical grouping for entities
+        "RowKey": rowkey,                # Unique identifier within the partition
+        "title": title
+    }
+    # Insert the entity
+    try:
+        table_client.create_entity(entity=entity)
+        print("Row inserted successfully!")
+    except Exception as e:
+        print(f"Error inserting row: {e}")
+
+def upsert_title(rowkey, title):
+    # Define the entity (row) to insert
+    entity = {
+        "PartitionKey": "getimagetool",  # Logical grouping for entities
+        "RowKey": rowkey,                # Unique identifier within the partition
+        "title": title
+    }
+    # Insert the entity
+    try:
+        table_client.upsert_entity(entity=entity, mode=UpdateMode.MERGE)
+        print("Row upserted successfully!")
     except Exception as e:
         print(f"Error inserting row: {e}")
 

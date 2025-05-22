@@ -1,7 +1,7 @@
 import os
 import asyncio
 from datetime import datetime, timedelta
-from AIBlog.azurestorage import get_row, insert_history
+from AIBlog.azurestorage import get_row, upsert_history, get_last_n_rows
 from AIBlog.graph import *
 from utils import get_flat_date, get_flat_date_hour, parse_flat_date_hour, strtobool
 
@@ -16,14 +16,18 @@ async def getaiblog(parsed_date):
         flat_date_hour = get_flat_date() + "_00"
         if parsed_date is not None and (lastdayblog := get_row(flat_date_hour)):
             return lastdayblog["html_content"], parse_flat_date_hour(flat_date_hour)
+        
+    lastdayblogs = get_last_n_rows(30)
+    lastdayblogstitles = [row.get("title", "") for row in lastdayblogs]
 
     react_agent = await get_react_agent()
     prompt = f"""
 Search and Identify a Narrow Topic:
 
-- Perform a search for: "AI {timestamp.strftime('%Y-%b-%d')} site:arxiv.org OR site:nature.com OR site:openai.com/blog OR site:deepmind.google/blog OR site:huggingface.co/posts".
-- Navigate to the results, carefully read summaries or abstracts, and identify one specific, narrowly-focused advancement in AI or Generative AI technology (e.g., a new training method, specific algorithm improvement, a novel application in a particular field, new architecture improvements like transformers, attention mechanisms, diffusion models, multimodal advancements, etc.).
-- Ensure the topic is recent, detailed, technically rich, and sufficiently narrow to allow an in-depth scientific discussion.
+- Search for: "AI {timestamp.strftime('%Y-%b-%d')} site:arxiv.org OR site:nature.com OR site:openai.com/blog OR site:deepmind.google/blog OR site:huggingface.co/posts".
+- Exclude topics covered in the last 30 blog posts: {str(lastdayblogstitles)}
+- Review the results, read summaries or abstracts, and select one recent, narrowly-focused advancement in AI or Generative AI (e.g., a new training method, algorithmic improvement, novel application, or architectural innovation such as transformers, attention mechanisms, diffusion models, or multimodal systems).
+- Ensure the topic is recent, technically detailed, and specific enough for an in-depth scientific discussion.
 
 Deep Research and Data Collection:
 
@@ -36,13 +40,13 @@ Deep Research and Data Collection:
 
 Content and Structure of the Blog:
 
-- **Title:** Craft a precise, scientifically appealing title that specifically names or describes the particular AI or GenAI advancement, avoiding generic terms like "2025" or broad phrases.
+- **Title:** Craft a precise, scientifically appealing title that specifically names or describes the particular AI or GenAI advancement, avoiding generic terms like "2025" or broad phrases. and then use the set_title tool to save the title.
     - Good Example: "Advancing Transformer Efficiency: Sparse Attention Mechanisms for High-Resolution Image Generation"
     - Bad Example: "Latest AI Advancements of 2025"
 - **Abstract (Optional but Recommended):** Summarize briefly the focus, significance, method, and findings of the advancement.
 - **Introduction:** Provide the context, briefly explain why this specific advancement is significant in the AI/GenAI community.
 - **Detailed Technical Sections:** Clearly divided into sections with scientific depth (e.g., Methods, Algorithms, Experimental Results, Comparisons to Previous Methods, Limitations, etc.).
-- **Figures and Images:** Present all figures and tables in clear textual format (e.g., using HTML tables, ASCII diagrams, or descriptive text) unless a realistic or artistic graphic is specifically needed, in which case provide a precise description for the image generation tool.
+- **Figures and Images:** Present all figures and tables in clear textual format (e.g., using HTML tables, ASCII diagrams, or descriptive text) unless a realistic graphic is specifically needed, in which case provide a precise description for the image generation tool.
 - **Code Snippets (if relevant):** Include clearly formatted and contextually explained code examples illustrating critical technical points or methods discussed in the article.
 - **Conclusion:** Discuss implications, potential applications, future directions, and open questions or limitations clearly and insightfully.
 
@@ -67,5 +71,5 @@ Output Requirements:
         for value in event.values():
             print("React Agent:", value["messages"][-1].content)
     content = value["messages"][-1].content
-    insert_history(rowkey=flat_date_hour, html_content=content)
+    upsert_history(rowkey=flat_date_hour, html_content=content)
     return content, timestamp

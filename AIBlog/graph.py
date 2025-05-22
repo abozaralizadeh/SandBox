@@ -3,6 +3,7 @@ import os
 
 from typing import Annotated
 
+from AIBlog.tools.settitle import set_title
 from AIBlog.tools.getimage import get_image_by_text
 from AIBlog.tools.getnews import get_todays_news_feed
 from AIBlog.tools.searchinternet import askinternettool, searchinternettool
@@ -24,8 +25,9 @@ if "AZURE_OPENAI_ENDPOINT" not in os.environ:
 
 async def get_react_agent():
     newstool = get_todays_news_feed
+    savetitletool = set_title
     imagetool = get_image_by_text
-    tools = [searchinternettool, imagetool]
+    tools = [searchinternettool, imagetool, savetitletool]
     tools += await get_browsewebtools()
 
     llm = AzureChatOpenAI(
