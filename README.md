@@ -1,6 +1,6 @@
 # SandBox
 
-This projects are not an isolated tools but one facet of a broader exploration into AI autonomy. The presence of these three distinct yet related projects reveals a cohesive vision. My work is not merely about code but about exploring the potential of agentic AI to interact with and reason about the real world in increasingly sophisticated ways. The repository's associated topics, such as AI governance, ethics, and simulation, underscore this focus on the higher-order implications of autonomous systems.
+These projects are not isolated tools but rather facets of a broader exploration into AI autonomy. The presence of these three distinct yet related projects reveals a cohesive vision. My work is not merely about code but about exploring the potential of agentic AI to interact with and reason about the real world in increasingly sophisticated ways. The repository's associated topics, such as AI governance, ethics, and simulation, underscore this focus on the higher-order implications of autonomous systems.
 
 ## AI Blog
 
