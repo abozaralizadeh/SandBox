@@ -20,7 +20,7 @@ Live Demo
 View the daily AI-written blog:
 https://SandBoxes.Live/aiblog
 
-![AIBlog](https://raw.githubusercontent.com/abozaralizadeh/SandBox/refs/heads/main/static/AIB3.jpeg)
+![AIBlog](https://raw.githubusercontent.com/abozaralizadeh/SandBox/refs/heads/main/static/AIBlog.png)
 
 ## Tomorrow News
 

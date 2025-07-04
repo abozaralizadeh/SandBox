@@ -12,7 +12,7 @@ langchain-community
 langgraph==0.3.21
 xmltodict==0.14.2
 pydantic==2.11.1
-duckduckgo-search==8.0.2
+duckduckgo-search==8.0.5
 playwright
 lxml
 beautifulsoup4
