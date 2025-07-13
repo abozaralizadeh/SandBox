@@ -5,8 +5,7 @@ from typing import Annotated
 
 from AIBlog.tools.settitle import set_title
 from AIBlog.tools.getimage import get_image_by_text
-from AIBlog.tools.getnews import get_todays_news_feed
-from AIBlog.tools.searchinternet import searchinternettool
+from AIBlog.tools.searchinternet import *
 from AIBlog.tools.browseweb import *
 from langchain_core.messages import BaseMessage
 from typing_extensions import TypedDict
@@ -17,17 +16,10 @@ from langgraph.prebuilt import ToolNode, tools_condition
 
 from langchain_openai import AzureChatOpenAI
 
-if "AZURE_OPENAI_API_KEY" not in os.environ:
-    raise Exception("No AZURE_OPENAI_API_KEY found in environment!")
-
-if "AZURE_OPENAI_ENDPOINT" not in os.environ:
-    raise Exception("No AZURE_OPENAI_ENDPOINT found in environment!")
-
 async def get_react_agent():
-    newstool = get_todays_news_feed
     savetitletool = set_title
     imagetool = get_image_by_text
-    tools = [searchinternettool, imagetool, savetitletool]
+    tools = [tavilysearchinternettool, ddgsearchinternettool, imagetool, savetitletool]
     tools += await get_browsewebtools()
 
     llm = AzureChatOpenAI(
@@ -36,7 +28,7 @@ async def get_react_agent():
         temperature=1,
         max_tokens=None,
         timeout=None,
-        max_retries=2,
+        max_retries=10,
         # other params...
     )
 

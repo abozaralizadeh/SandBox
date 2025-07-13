@@ -25,14 +25,21 @@ async def getaiblog(parsed_date):
     Search and Identify a Narrow Topic:
 
     - Search for: "AI {timestamp.strftime('%Y-%b-%d')} site:arxiv.org OR site:nature.com OR site:openai.com/blog OR site:deepmind.google/blog OR site:huggingface.co/posts".
-    - Exclude topics covered or similar in the last 30 blog posts, here is the list: {str(lastdayblogstitles)}
+    - Exclude topics covered or similar in the last 30 blog posts, here is the list to exclude: {str(lastdayblogstitles)}
     - Review the results, read summaries or abstracts, and select one recent, narrowly-focused advancement in AI or Generative AI (e.g., a new training method, algorithmic improvement, novel application, or architectural innovation such as transformers, attention mechanisms, diffusion models, or multimodal systems).
     - Ensure the topic is recent, technically detailed, and specific enough for an in-depth scientific discussion.
 
     Deep Research and Data Collection:
 
     - Conduct a second detailed search specifically about your chosen narrow topic using academic and credible resources, including but not limited to: arxiv.org, nature.com, science.org, deepmind.google/blog, openai.com/blog, ai.googleblog.com, and other reputable sources.
-    - Carefully read and extract detailed information, including technical specifics, algorithms, experimental results, figures, and key insights from multiple authoritative sources.
+    - Carefully read and extract detailed information, including technical specifics, algorithms, experimental results, figures, and key insights from multiple authoritative sources. to navigating the results use the tools provided by the react agent: 
+           (ClickTool,
+            NavigateTool,
+            NavigateBackTool,
+            ExtractTextTool,
+            ExtractHyperlinksTool,
+            GetElementsTool,
+            CurrentWebPageTool)
     - Recursively follow references and citations within these articles to gather deeper insights.
     - Collect the most relevant and significant findings, methods, and implications of the advancement.
     - Search for critical reviews or discussions about the advancement to understand its impact and limitations.
