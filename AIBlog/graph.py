@@ -16,6 +16,12 @@ from langgraph.prebuilt import ToolNode, tools_condition
 
 from langchain_openai import AzureChatOpenAI
 
+if "AZURE_OPENAI_API_KEY" not in os.environ:
+    raise Exception("No AZURE_OPENAI_API_KEY found in environment!")
+
+if "AZURE_OPENAI_ENDPOINT" not in os.environ:
+    raise Exception("No AZURE_OPENAI_ENDPOINT found in environment!")
+
 async def get_react_agent():
     savetitletool = set_title
     imagetool = get_image_by_text
@@ -28,7 +34,7 @@ async def get_react_agent():
         temperature=1,
         max_tokens=None,
         timeout=None,
-        max_retries=10,
+        max_retries=3,
         # other params...
     )
 
