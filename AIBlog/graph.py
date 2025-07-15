@@ -32,7 +32,7 @@ async def get_react_agent():
         azure_deployment=os.environ["AZURE_OPENAI_MODEL"],  # or your deployment
         api_version=os.environ["AZURE_OPENAI_API_VERSION"],  # or your api version
         temperature=1,
-        max_tokens=50000,
+        max_tokens=None,
         timeout=None,
         max_retries=3,
         # other params...
