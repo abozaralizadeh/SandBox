@@ -53,6 +53,29 @@ def save_photo_to_blob(photo_url):
 
     return blob_url
 
+def upload_image_bytes_to_blob(image_bytes):
+    """
+    Uploads image bytes to Azure Blob Storage.
+
+    :param image_bytes: Bytes of the image (e.g., from base64 decoding).
+    :param container_client: An instance of azure.storage.blob.ContainerClient.
+    :return: URL of the saved blob.
+    """
+    try:
+        container_client.create_container()
+    except Exception:
+        # Container likely already exists
+        pass
+
+    # Generate a unique blob name
+    blob_name = f"{get_flat_date_full()}_{uuid.uuid4()}.png"
+    
+    # Upload image
+    blob_client = container_client.get_blob_client(blob_name)
+    blob_client.upload_blob(BytesIO(image_bytes), overwrite=True)
+
+    return blob_client.url
+
 def insert_history(rowkey, html_content):
     # Define the entity (row) to insert
     entity = {
