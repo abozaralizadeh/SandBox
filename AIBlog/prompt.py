@@ -40,6 +40,7 @@ async def getaiblog(parsed_date):
             ExtractHyperlinksTool,
             GetElementsTool,
             CurrentWebPageTool)
+        Note: arxiv.org (or any other academic website) shows only the abstract of the paper, so you need to click on the "HTML (experimental)" under the "Access Paper:" (or any other link that shows the full paper) to read the full paper.
     - Recursively follow references and citations within these articles to gather deeper insights.
     - Collect the most relevant and significant findings, methods, and implications of the advancement.
     - Search for critical reviews or discussions about the advancement to understand its impact and limitations.
