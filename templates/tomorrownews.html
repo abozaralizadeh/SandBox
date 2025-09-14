@@ -294,7 +294,42 @@
     </div>
 
     <script>
-        let currentDate = new Date();
+        // Function to get URL hash fragment
+        function getUrlHash() {
+            return window.location.hash.substring(1); // Remove the # symbol
+        }
+
+        // Function to update URL with current date using hash fragment (date only)
+        function updateUrlWithDate(date) {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            const dateOnly = `${year}-${month}-${day}`;
+            window.location.hash = dateOnly;
+        }
+
+        // Initialize currentDate from URL hash or default to current date
+        let currentDate;
+        const urlDateTime = getUrlHash();
+        
+        if (urlDateTime) {
+            try {
+                // Parse date-only format (YYYY-MM-DD) and set time to T00:00:00.000
+                const dateOnly = urlDateTime.split('T')[0]; // Remove time part if present
+                currentDate = new Date(dateOnly + 'T00:00:00.000');
+                // Validate the date
+                if (isNaN(currentDate.getTime())) {
+                    throw new Error('Invalid date');
+                }
+            } catch (error) {
+                console.warn('Invalid date in URL hash, using current date:', error);
+                currentDate = new Date();
+            }
+        } else {
+            currentDate = new Date();
+        }
+
+        // Apply time constraints based on date
         if (currentDate >= new Date("2025-01-25T00:00:00")) {
             currentDate.setHours(0, 0, 0, 0);
         } else {
@@ -310,6 +345,10 @@
             //const formattedDate = currentDate.toISOString();
             var tzoffset = (currentDate).getTimezoneOffset() * 60000; //offset in milliseconds
             var localISOTime = (new Date(currentDate - tzoffset)).toISOString().slice(0, -1);
+            
+            // Update URL with current date (date only)
+            updateUrlWithDate(currentDate);
+            
             fetch(`/tomorrownewscontent?dt=${encodeURIComponent(localISOTime)}`)
                 .then(response => {
                     const timestamp = response.headers.get('Timestamp');
