@@ -3,6 +3,11 @@ import sys
 sys.path = [p for p in sys.path if not p.startswith("/agents/python")]
 
 import os
+import sys
+
+# Remove Azure App Service's legacy helpers that shadow modern libraries
+sys.path = [p for p in sys.path if not p.startswith("/agents/python")]
+
 from dotenv import load_dotenv
 load_dotenv()
 from flask import Flask, jsonify, make_response, request, render_template
