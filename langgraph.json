@@ -2,7 +2,8 @@
     "graphs": {
     "my_agent": "./TomorrowNews/supervisor.py:ma_graph",
     "single_agent": "./TomorrowNews/graph.py:news_graph",
-    "aiblog_react_agent": "./AIBlog/graph.py:get_react_agent"
+    "aiblog_react_agent": "./AIBlog/graph.py:get_react_agent",
+    "ai_open_problem_solver": "./AIOpenProblemSolver/graph.py:get_open_deep_search_agent"
     },
     "env": ".env",
     "dependencies": [

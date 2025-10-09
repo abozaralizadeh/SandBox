@@ -22,6 +22,22 @@ https://SandBoxes.Live/aiblog
 
 ![AIBlog](https://raw.githubusercontent.com/abozaralizadeh/SandBox/refs/heads/main/static/AIBlog.png)
 
+## AI Open Problem Solver
+
+Autonomous Deep-Search Mathematics Researcher  
+AI Open Problem Solver extends the LangGraph infrastructure with an open deep-search agent dedicated to long-horizon mathematical research. Given a free-form statement of an unsolved problem, the system resumes prior progress, explores the web with multi-modal tooling, and records daily breakthroughs as rich HTML lab notes.
+
+#### Key Capabilities
+- **Deep Search Agent**: Uses LangGraph's open deep-search workflow (with a ReAct fallback) to iteratively plan, browse, and validate new leads.
+- **Persistent Research Memory**: Stores every daily update, plus structured summaries, next steps, and citations in Azure Table Storage.
+- **Resume & Continue**: On each run, the agent ingests the historical context and advances the same problem instead of starting from scratch.
+- **Infinite Timeline UI**: A new Flask route (`/ai-open-problem-solver`) serves an infinite-scroll page that streams the latest findings first and lazily loads earlier milestones from storage.
+- **Tooling Reuse**: Shares the Tavily/DDG search stack and Playwright browsing toolkit used by AI Blog, ensuring consistent web research capabilities across projects.
+- **Dynamic Problem Picker**: The UI queries Azure Table Storage to populate a dropdown of all tracked problems, so you can switch research threads instantly.
+- **Problem Catalog Table**: Configure `aiops_problem_table_name` for the dedicated problem registry table; add or remove problems there to control which threads are available in the UI.
+
+Set up the storage names (`aiops_table_name`, `aiops_blob_name`) and optionally define `AIOPS_DEFAULT_PROBLEM` in `.env` to choose the default unsolved problem tackled by the agent.
+
 ## Tomorrow News
 
 AI-Driven News Prediction and Decision-Making

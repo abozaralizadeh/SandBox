@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="license" content="MIT License">
+    <meta name="author" content="Abozar Alizadeh">
+    <title>AI Open Problem Solver</title>
+    <link rel="icon" type="image/png" href="/static/faviconAB.png">
+    <style>
+        :root {
+            color-scheme: light dark;
+            --bg: #0b1120;
+            --fg: #f9fafb;
+            --accent: #38bdf8;
+            --card-bg: rgba(15, 23, 42, 0.75);
+            --border: rgba(148, 163, 184, 0.35);
+        }
+
+        body {
+            margin: 0;
+            font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+            background: radial-gradient(circle at top, rgba(56, 189, 248, 0.25), transparent 45%), var(--bg);
+            color: var(--fg);
+            min-height: 100vh;
+        }
+
+        a {
+            color: var(--accent);
+        }
+
+        header {
+            position: sticky;
+            top: 0;
+            backdrop-filter: blur(12px);
+            background: rgba(15, 23, 42, 0.85);
+            border-bottom: 1px solid var(--border);
+            padding: 1.5rem clamp(1rem, 4vw, 3rem);
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            gap: 1.25rem;
+        }
+
+        header .title-bar {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 1rem;
+            justify-content: space-between;
+        }
+
+        header h1 {
+            margin: 0;
+            font-size: clamp(1.8rem, 3vw, 2.4rem);
+            letter-spacing: 0.04em;
+        }
+
+        header form {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+            align-items: center;
+        }
+
+        .sr-only {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border: 0;
+        }
+
+        .input-group {
+            flex: 1 1 320px;
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        input[type="text"],
+        select {
+            flex: 1;
+            padding: 0.75rem 1rem;
+            border-radius: 0.75rem;
+            border: 1px solid var(--border);
+            background: rgba(15, 23, 42, 0.65);
+            color: var(--fg);
+            font-size: 1rem;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        input[type="text"]:focus,
+        select:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.25);
+        }
+
+        button {
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.75rem;
+            border: none;
+            font-weight: 600;
+            font-size: 1rem;
+            background: var(--accent);
+            color: #0f172a;
+            cursor: pointer;
+            transition: transform 0.15s ease, box-shadow 0.15s ease;
+        }
+
+        button:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 10px 20px rgba(56, 189, 248, 0.35);
+        }
+
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        main {
+            padding: 2rem clamp(1rem, 4vw, 3rem) 4rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        .status {
+            font-size: 0.95rem;
+            opacity: 0.85;
+        }
+
+        .entries {
+            display: flex;
+            flex-direction: column;
+            gap: 2rem;
+        }
+
+        .entry {
+            border: 1px solid var(--border);
+            border-radius: 1.25rem;
+            padding: clamp(1.5rem, 3vw, 2.25rem);
+            background: var(--card-bg);
+            box-shadow: 0 20px 45px rgba(15, 23, 42, 0.35);
+            display: flex;
+            flex-direction: column;
+            gap: 1.25rem;
+        }
+
+        .entry header {
+            position: static;
+            background: transparent;
+            backdrop-filter: none;
+            border: 0;
+            padding: 0;
+            gap: 0.4rem;
+        }
+
+        .entry h2 {
+            margin: 0;
+            font-size: 1.5rem;
+        }
+
+        .entry time {
+            font-size: 0.95rem;
+            opacity: 0.75;
+        }
+
+        .html-content {
+            border-radius: 0.75rem;
+            background: rgba(15, 23, 42, 0.55);
+            padding: 1.5rem;
+            line-height: 1.6;
+            overflow-x: auto;
+        }
+
+        .html-content h1,
+        .html-content h2,
+        .html-content h3 {
+            color: var(--accent);
+        }
+
+        .metadata {
+            display: grid;
+            gap: 1.25rem;
+        }
+
+        .metadata section {
+            border-top: 1px solid var(--border);
+            padding-top: 1rem;
+        }
+
+        .metadata h3 {
+            margin: 0 0 0.5rem;
+            font-size: 1.1rem;
+            letter-spacing: 0.02em;
+        }
+
+        ul {
+            padding-left: 1.25rem;
+        }
+
+        .loader {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            border: 4px solid rgba(148, 163, 184, 0.25);
+            border-top-color: var(--accent);
+            animation: spin 1s linear infinite;
+            margin-inline: auto;
+        }
+
+        .end-message {
+            text-align: center;
+            opacity: 0.7;
+            font-size: 0.9rem;
+            margin-top: 1rem;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        @media (max-width: 768px) {
+            button {
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <header>
+        <div class="title-bar">
+            <h1>AI Open Problem Solver</h1>
+            <a class="home-link" href="/" style="color: var(--accent); text-decoration: none;">← Back to Home</a>
+        </div>
+        <form id="problemForm">
+            <div class="input-group">
+                <label for="problemSelect" class="sr-only">Open Problem</label>
+                <select id="problemSelect" name="problem" disabled>
+                    <option value="">Loading problems…</option>
+                </select>
+            </div>
+            <button type="submit" id="updateProblem" disabled>Load Progress</button>
+        </form>
+        <div class="status" id="statusLine">Loading problems…</div>
+    </header>
+    <main>
+        <div class="entries" id="entries"></div>
+        <div class="loader" id="loader" hidden></div>
+        <div class="end-message" id="endMessage" hidden>No more recorded progress. Check back tomorrow!</div>
+    </main>
+
+    <script>
+        const defaultProblem = {{ default_problem|tojson }};
+        const entriesContainer = document.getElementById("entries");
+        const loader = document.getElementById("loader");
+        const endMessage = document.getElementById("endMessage");
+        const statusLine = document.getElementById("statusLine");
+        const problemForm = document.getElementById("problemForm");
+        const problemSelect = document.getElementById("problemSelect");
+        const updateButton = document.getElementById("updateProblem");
+
+        let currentProblem = defaultProblem || "";
+        let offset = 0;
+        let loading = false;
+        let hasMore = true;
+        let firstLoad = true;
+        let problemsCache = [];
+
+        function updateStatus(text) {
+            statusLine.textContent = text;
+        }
+
+        function createList(items) {
+            if (!items || !items.length) {
+                return "<p>No data available.</p>";
+            }
+            return `<ul>${items.map(item => `<li>${item}</li>`).join("")}</ul>`;
+        }
+
+        function formatEntry(entry) {
+            const createdAt = entry.created_at || entry.timestamp || entry.rowKey;
+            const date = createdAt ? new Date(createdAt).toLocaleString() : "Unknown timestamp";
+            const metadata = entry.metadata || {};
+            const nextStepsMarkup = createList(metadata.next_steps || []);
+            const referencesMarkup = createList(metadata.references || []);
+
+            const wrapper = document.createElement("article");
+            wrapper.className = "entry";
+            wrapper.innerHTML = `
+                <header>
+                    <h2>Update • ${date}</h2>
+                    <time>${entry.summary || "No summary provided."}</time>
+                </header>
+                <section class="html-content">${entry.html_content || "<p>No HTML content returned.</p>"}</section>
+                <section class="metadata">
+                    <section>
+                        <h3>Next Steps</h3>
+                        ${nextStepsMarkup}
+                    </section>
+                    <section>
+                        <h3>References</h3>
+                        ${referencesMarkup}
+                    </section>
+                </section>
+            `;
+            entriesContainer.appendChild(wrapper);
+        }
+
+        async function loadProblemOptions() {
+            try {
+                const response = await fetch('/ai-open-problem-solver/problems');
+                if (!response.ok) {
+                    throw new Error(`Server error (${response.status})`);
+                }
+                const payload = await response.json();
+                const problems = payload.problems || [];
+                problemsCache = Array.from(new Set([...(defaultProblem ? [defaultProblem] : []), ...problems]));
+
+                problemSelect.innerHTML = "";
+
+                if (problemsCache.length === 0) {
+                    problemSelect.innerHTML = '<option value="">No problems found</option>';
+                    problemSelect.disabled = true;
+                    updateButton.disabled = true;
+                    updateStatus("No stored problems available. Add entries via storage to begin.");
+                    currentProblem = "";
+                    return;
+                }
+
+                problemsCache.forEach((problem) => {
+                    const option = document.createElement("option");
+                    option.value = problem;
+                    option.textContent = problem;
+                    problemSelect.appendChild(option);
+                });
+
+                if (!currentProblem || !problemsCache.includes(currentProblem)) {
+                    currentProblem = problemsCache[0];
+                }
+                problemSelect.value = currentProblem;
+                problemSelect.disabled = false;
+                updateButton.disabled = false;
+                updateStatus(`Loaded ${problemsCache.length} problem${problemsCache.length === 1 ? "" : "s"}.`);
+            } catch (error) {
+                console.error(error);
+                problemSelect.innerHTML = '<option value="">Unable to load problems</option>';
+                problemSelect.disabled = true;
+                updateButton.disabled = true;
+                updateStatus(`Failed to load problems: ${error.message}`);
+                currentProblem = "";
+            }
+        }
+
+        async function loadMoreEntries(reset = false) {
+            if (loading || (!hasMore && !reset)) {
+                return;
+            }
+
+            if (reset) {
+                entriesContainer.innerHTML = "";
+                offset = 0;
+                hasMore = true;
+                endMessage.hidden = true;
+                firstLoad = true;
+            }
+
+            if (!currentProblem) {
+                updateStatus("Provide an open mathematics problem to investigate.");
+                return;
+            }
+
+            loading = true;
+            loader.hidden = false;
+            updateStatus("Researching… this can take several minutes for deep web exploration.");
+
+            const params = new URLSearchParams({
+                problem: currentProblem,
+                offset: offset.toString(),
+                limit: "3"
+            });
+
+            if (firstLoad) {
+                params.set("ensure_latest", "true");
+            }
+
+            try {
+                const response = await fetch(`/ai-open-problem-solver/history?${params.toString()}`);
+                if (!response.ok) {
+                    throw new Error(`Server error (${response.status})`);
+                }
+                const payload = await response.json();
+
+                const entries = payload.entries || [];
+                if (reset) {
+                    entriesContainer.innerHTML = "";
+                }
+
+                if (entries.length === 0 && offset === 0) {
+                    updateStatus("No recorded progress yet. Triggering a fresh research iteration.");
+                }
+
+                entries.forEach(formatEntry);
+
+                if (payload.next_offset === null || typeof payload.next_offset === "undefined") {
+                    hasMore = false;
+                    endMessage.hidden = entries.length === 0;
+                } else {
+                    offset = payload.next_offset;
+                }
+
+                if (entries.length > 0) {
+                    updateStatus(`Showing ${entriesContainer.children.length} updates for "${currentProblem}".`);
+                } else if (!hasMore) {
+                    updateStatus(`No results stored for "${currentProblem}" yet. Re-run later.`);
+                }
+            } catch (error) {
+                console.error(error);
+                updateStatus(`Failed to load progress: ${error.message}`);
+            } finally {
+                loader.hidden = true;
+                loading = false;
+                firstLoad = false;
+            }
+        }
+
+        problemForm.addEventListener("submit", (event) => {
+            event.preventDefault();
+            currentProblem = problemSelect.value.trim();
+            if (!currentProblem) {
+                updateStatus("Please describe the open problem you want to tackle.");
+                return;
+            }
+            loadMoreEntries(true);
+        });
+
+        problemSelect.addEventListener("change", () => {
+            const nextProblem = problemSelect.value.trim();
+            if (!nextProblem || nextProblem === currentProblem) {
+                return;
+            }
+            currentProblem = nextProblem;
+            loadMoreEntries(true);
+        });
+
+        window.addEventListener("scroll", () => {
+            if (loading || !hasMore) {
+                return;
+            }
+            const scrollPosition = window.scrollY + window.innerHeight;
+            const threshold = document.body.offsetHeight - 600;
+            if (scrollPosition >= threshold) {
+                loadMoreEntries();
+            }
+        });
+
+        loadProblemOptions().then(() => {
+            if (currentProblem) {
+                loadMoreEntries(true);
+            } else if (problemSelect.disabled) {
+                // Status already set in loadProblemOptions
+            } else {
+                updateStatus("Select a problem to get started.");
+            }
+        });
+    </script>
+</body>
+
+</html>

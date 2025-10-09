@@ -1,10 +1,12 @@
+import os
 from dotenv import load_dotenv
 load_dotenv()
-
 from flask import Flask, jsonify, make_response, request, render_template
 from AIBlog.prompt import *
 from TomorrowNews.prompt import *
 from GenBox.prompt import get_llm_response
+from AIOpenProblemSolver.prompt import get_problem_history
+from AIOpenProblemSolver.azurestorage import list_problems
 
 app = Flask(__name__)
 
@@ -107,6 +109,39 @@ async def aiblogcontent():
 @app.route('/genbox')
 def genbox():
     return render_template('tv.html')
+
+@app.route('/ai-open-problem-solver', methods=['GET'])
+def ai_open_problem_solver():
+    default_problem = os.environ.get("AIOPS_DEFAULT_PROBLEM", "Riemann Hypothesis")
+    return render_template('aiopenproblemsolver.html', default_problem=default_problem)
+
+@app.route('/ai-open-problem-solver/history', methods=['GET'])
+async def ai_open_problem_solver_history():
+    problem = request.args.get("problem") or os.environ.get("AIOPS_DEFAULT_PROBLEM")
+    if not problem:
+        return jsonify({"error": "Missing 'problem' parameter."}), 400
+
+    try:
+        offset = int(request.args.get("offset", 0))
+        limit = int(request.args.get("limit", 5))
+    except ValueError:
+        return jsonify({"error": "Offset and limit must be integers."}), 400
+
+    ensure_latest = request.args.get("ensure_latest", "false").lower() == "true"
+    limit = max(1, min(limit, 10))
+
+    history = await get_problem_history(
+        problem,
+        offset=offset,
+        limit=limit,
+        ensure_latest=ensure_latest,
+    )
+    return jsonify({"problem": problem, **history})
+
+@app.route('/ai-open-problem-solver/problems', methods=['GET'])
+def ai_open_problem_solver_problems():
+    problems = list_problems()
+    return jsonify({"problems": problems})
 
 @app.route('/')
 def home():
