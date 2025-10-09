@@ -1,3 +1,7 @@
+# main.py (right at the top, before other imports)
+import sys
+sys.path = [p for p in sys.path if not p.startswith("/agents/python")]
+
 import os
 from dotenv import load_dotenv
 load_dotenv()
