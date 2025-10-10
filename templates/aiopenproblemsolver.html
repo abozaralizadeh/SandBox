@@ -30,7 +30,7 @@
             color: var(--accent);
         }
 
-        header {
+        .page-header {
             position: sticky;
             top: 0;
             backdrop-filter: blur(12px);
@@ -43,7 +43,7 @@
             gap: 1.25rem;
         }
 
-        header .title-bar {
+        .page-header .title-bar {
             display: flex;
             flex-wrap: wrap;
             align-items: center;
@@ -51,13 +51,13 @@
             justify-content: space-between;
         }
 
-        header h1 {
+        .page-header h1 {
             margin: 0;
             font-size: clamp(1.8rem, 3vw, 2.4rem);
             letter-spacing: 0.04em;
         }
 
-        header form {
+        .page-header form {
             display: flex;
             flex-wrap: wrap;
             gap: 0.75rem;
@@ -239,7 +239,7 @@
 </head>
 
 <body>
-    <header>
+    <header class="page-header">
         <div class="title-bar">
             <h1>AI Open Problem Solver</h1>
             <a class="home-link" href="/" style="color: var(--accent); text-decoration: none;">← Back to Home</a>
