@@ -11,7 +11,7 @@ from AIBlog.prompt import *
 from TomorrowNews.prompt import *
 from GenBox.prompt import get_llm_response
 from AIOpenProblemSolver.prompt import get_problem_history
-from AIOpenProblemSolver.azurestorage import list_problems
+from AIOpenProblemSolver.azurestorage import get_problem_details, list_problems
 
 app = Flask(__name__)
 
@@ -118,7 +118,16 @@ def genbox():
 @app.route('/ai-open-problem-solver', methods=['GET'])
 def ai_open_problem_solver():
     default_problem = os.environ.get("AIOPS_DEFAULT_PROBLEM", "Riemann Hypothesis")
-    return render_template('aiopenproblemsolver.html', default_problem=default_problem)
+    description = ""
+    if default_problem:
+        details = get_problem_details(default_problem)
+        if details:
+            description = details.get("description", "")
+    return render_template(
+        'aiopenproblemsolver.html',
+        default_problem=default_problem,
+        default_problem_description=description,
+    )
 
 @app.route('/ai-open-problem-solver/history', methods=['GET'])
 async def ai_open_problem_solver_history():
@@ -147,6 +156,22 @@ async def ai_open_problem_solver_history():
 def ai_open_problem_solver_problems():
     problems = list_problems()
     return jsonify({"problems": problems})
+
+
+@app.route('/ai-open-problem-solver/problem-details', methods=['GET'])
+def ai_open_problem_solver_problem_details():
+    problem = request.args.get("problem")
+    if not problem:
+        return jsonify({"error": "Missing 'problem' parameter."}), 400
+    details = get_problem_details(problem)
+    if not details:
+        return jsonify({"problem": problem, "description": ""})
+    return jsonify(
+        {
+            "problem": problem,
+            "description": details.get("description", ""),
+        }
+    )
 
 @app.route('/')
 def home():

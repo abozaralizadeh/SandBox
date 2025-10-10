@@ -125,21 +125,39 @@ def latest_iteration(problem: str) -> Optional[Dict[str, Any]]:
     return entries[0] if entries else None
 
 
-def list_problems(max_entities: int = 2000) -> List[str]:
-    problems = set()
+def list_problems(max_entities: int = 2000) -> List[Dict[str, Optional[str]]]:
+    problems: Dict[str, Dict[str, Optional[str]]] = {}
     try:
         count = 0
         for entity in problems_table_client.list_entities(results_per_page=1000):
             problem = entity.get("problem")
-            if problem:
-                problems.add(problem)
+            if not problem:
+                continue
+            normalized = problem.strip()
+            if normalized not in problems:
+                problems[normalized] = {
+                    "name": normalized,
+                    "description": entity.get("description"),
+                }
             count += 1
             if max_entities and count >= max_entities:
                 break
     except Exception as exc:
         print(f"Error retrieving problems: {exc}")
         return []
-    return sorted(problems, key=lambda value: value.lower())
+    return sorted(problems.values(), key=lambda entry: entry["name"].lower())
+
+
+def get_problem_details(problem: str) -> Optional[Dict[str, Any]]:
+    if not problem:
+        return None
+    partition_key = "catalog"
+    row_key = _problem_partition(problem)
+    try:
+        entity = problems_table_client.get_entity(partition_key=partition_key, row_key=row_key)
+    except ResourceNotFoundError:
+        return None
+    return dict(entity)
 
 
 def register_problem(problem: str, description: Optional[str] = None) -> None:

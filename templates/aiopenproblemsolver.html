@@ -261,6 +261,7 @@
             <button type="submit" id="updateProblem" disabled>Load Progress</button>
         </form>
         <div class="status" id="statusLine">Loading problems…</div>
+        <p id="problemDescription" style="margin: 0; opacity: 0.85;"></p>
     </header>
     <main>
         <div class="entries" id="entries"></div>
@@ -277,13 +278,15 @@
         const problemForm = document.getElementById("problemForm");
         const problemSelect = document.getElementById("problemSelect");
         const updateButton = document.getElementById("updateProblem");
+        const problemDescription = document.getElementById("problemDescription");
+        const defaultProblemDescription = {{ default_problem_description|tojson }};
 
         let currentProblem = defaultProblem || "";
         let offset = 0;
         let loading = false;
         let hasMore = true;
         let firstLoad = true;
-        let problemsCache = [];
+        let problemsCache = new Map();
 
         function updateStatus(text) {
             statusLine.textContent = text;
@@ -333,33 +336,57 @@
                 }
                 const payload = await response.json();
                 const problems = payload.problems || [];
-                problemsCache = Array.from(new Set([...(defaultProblem ? [defaultProblem] : []), ...problems]));
+
+                problemsCache.clear();
+                if (defaultProblem) {
+                    problemsCache.set(defaultProblem, {
+                        name: defaultProblem,
+                        description: defaultProblemDescription || "",
+                    });
+                }
+
+                problems.forEach((entry) => {
+                    const name = (entry && (entry.name || entry.problem)) ? String(entry.name || entry.problem).trim() : "";
+                    if (!name) {
+                        return;
+                    }
+                    const description = entry && entry.description ? String(entry.description) : "";
+                    if (!problemsCache.has(name) || !problemsCache.get(name).description) {
+                        problemsCache.set(name, { name, description });
+                    }
+                });
 
                 problemSelect.innerHTML = "";
 
-                if (problemsCache.length === 0) {
+                if (problemsCache.size === 0) {
                     problemSelect.innerHTML = '<option value="">No problems found</option>';
                     problemSelect.disabled = true;
                     updateButton.disabled = true;
                     updateStatus("No stored problems available. Add entries via storage to begin.");
                     currentProblem = "";
+                    problemDescription.textContent = "";
                     return;
                 }
 
-                problemsCache.forEach((problem) => {
+                const sortedProblems = Array.from(problemsCache.values()).sort((a, b) =>
+                    a.name.localeCompare(b.name)
+                );
+
+                sortedProblems.forEach(({ name }) => {
                     const option = document.createElement("option");
-                    option.value = problem;
-                    option.textContent = problem;
+                    option.value = name;
+                    option.textContent = name;
                     problemSelect.appendChild(option);
                 });
 
-                if (!currentProblem || !problemsCache.includes(currentProblem)) {
-                    currentProblem = problemsCache[0];
+                if (!currentProblem || !problemsCache.has(currentProblem)) {
+                    currentProblem = sortedProblems[0].name;
                 }
                 problemSelect.value = currentProblem;
                 problemSelect.disabled = false;
                 updateButton.disabled = false;
-                updateStatus(`Loaded ${problemsCache.length} problem${problemsCache.length === 1 ? "" : "s"}.`);
+                updateStatus(`Loaded ${sortedProblems.length} problem${sortedProblems.length === 1 ? "" : "s"}.`);
+                updateProblemDescription(currentProblem);
             } catch (error) {
                 console.error(error);
                 problemSelect.innerHTML = '<option value="">Unable to load problems</option>';
@@ -367,6 +394,7 @@
                 updateButton.disabled = true;
                 updateStatus(`Failed to load problems: ${error.message}`);
                 currentProblem = "";
+                problemDescription.textContent = "";
             }
         }
 
@@ -449,6 +477,7 @@
                 updateStatus("Please describe the open problem you want to tackle.");
                 return;
             }
+            updateProblemDescription(currentProblem);
             loadMoreEntries(true);
         });
 
@@ -458,6 +487,7 @@
                 return;
             }
             currentProblem = nextProblem;
+            updateProblemDescription(currentProblem);
             loadMoreEntries(true);
         });
 
@@ -474,6 +504,9 @@
 
         loadProblemOptions().then(() => {
             if (currentProblem) {
+                if (!problemDescription.textContent && defaultProblemDescription) {
+                    problemDescription.textContent = defaultProblemDescription;
+                }
                 loadMoreEntries(true);
             } else if (problemSelect.disabled) {
                 // Status already set in loadProblemOptions
@@ -481,6 +514,37 @@
                 updateStatus("Select a problem to get started.");
             }
         });
+
+        function updateProblemDescription(problem) {
+            if (!problem) {
+                problemDescription.textContent = "";
+                return;
+            }
+            const cached = problemsCache.get(problem);
+            if (cached && cached.description) {
+                problemDescription.textContent = cached.description;
+                return;
+            }
+            fetch(`/ai-open-problem-solver/problem-details?problem=${encodeURIComponent(problem)}`)
+                .then(response => response.json())
+                .then(data => {
+                    const description = (data && data.description) || "";
+                    problemDescription.textContent = description.trim();
+                    if (cached) {
+                        cached.description = description;
+                        problemsCache.set(problem, cached);
+                    } else if (description) {
+                        problemsCache.set(problem, { name: problem, description });
+                    }
+                })
+                .catch(() => {
+                    problemDescription.textContent = "";
+                });
+        }
+
+        if (defaultProblemDescription) {
+            problemDescription.textContent = defaultProblemDescription;
+        }
     </script>
 </body>
 
