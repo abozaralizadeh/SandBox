@@ -143,29 +143,4 @@ def list_problems(max_entities: int = 2000) -> List[str]:
 
 
 def register_problem(problem: str, description: Optional[str] = None) -> None:
-    if not problem:
-        return
-    partition_key = "catalog"
-    row_key = _problem_partition(problem)
-    try:
-        existing = problems_table_client.get_entity(partition_key=partition_key, row_key=row_key)
-    except ResourceNotFoundError:
-        entity = {
-            "PartitionKey": partition_key,
-            "RowKey": row_key,
-            "problem": problem,
-            "description": description or "",
-            "created_at": datetime.utcnow().isoformat(),
-        }
-        problems_table_client.create_entity(entity=entity)
-        return
-
-    if description and existing.get("description") != description:
-        problems_table_client.update_entity(
-            {
-                "PartitionKey": partition_key,
-                "RowKey": row_key,
-                "description": description,
-            },
-            mode=UpdateMode.MERGE,
-        )
+    raise NotImplementedError("Problem registration must be handled manually.")

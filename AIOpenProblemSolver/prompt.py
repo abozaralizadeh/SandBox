@@ -6,7 +6,6 @@ from typing import Any, Dict, List, Optional
 from AIOpenProblemSolver.azurestorage import (
     get_iteration_slice,
     latest_iteration,
-    register_problem,
     save_iteration,
 )
 from AIOpenProblemSolver.graph import get_open_deep_search_agent
@@ -159,7 +158,6 @@ async def get_problem_history(
     limit: int = DEFAULT_PAGE_SIZE,
     ensure_latest: bool = False,
 ) -> Dict[str, Any]:
-    register_problem(problem)
     if ensure_latest and offset == 0:
         await ensure_latest_iteration(problem)
 
