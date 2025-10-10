@@ -38,6 +38,12 @@ AI Open Problem Solver extends the LangGraph infrastructure with an open deep-se
 
 Set up the storage names (`aiops_table_name`, `aiops_blob_name`) and optionally define `AIOPS_DEFAULT_PROBLEM` in `.env` to choose the default unsolved problem tackled by the agent.
 
+Live Demo
+View the daily progress of AI open problems solver:
+https://sandboxes.live/ai-open-problem-solver
+
+![AIBlog](https://raw.githubusercontent.com/abozaralizadeh/SandBox/refs/heads/main/static/AiProblemSolverImage.png)
+
 ## Tomorrow News
 
 AI-Driven News Prediction and Decision-Making
