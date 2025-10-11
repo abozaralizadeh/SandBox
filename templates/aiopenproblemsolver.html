@@ -261,8 +261,18 @@
             <button type="submit" id="updateProblem" disabled>Load Progress</button>
         </form>
         <div class="status" id="statusLine">Loading problems…</div>
-        <p id="problemDescription" style="margin: 0; opacity: 0.85;"></p>
-        <p id="problemProgress" style="margin: 0; opacity: 0.85;"></p>
+        <p id="problemDescription" style="margin: 0; opacity: 0.85;">{{ default_problem_description }}</p>
+        {% set initial_progress_text = "" %}
+        {% if default_problem_progress_percent is not none %}
+            {% set rounded = (default_problem_progress_percent * 10)|round|int / 10 %}
+            {% set initial_progress_text = "Progress: " ~ ("%0.1f"|format(rounded)).rstrip('0').rstrip('.') ~ "%" %}
+            {% if default_problem_progress_comment %}
+                {% set initial_progress_text = initial_progress_text ~ " — " ~ default_problem_progress_comment %}
+            {% endif %}
+        {% elif default_problem_progress_comment %}
+            {% set initial_progress_text = default_problem_progress_comment %}
+        {% endif %}
+        <p id="problemProgress" style="margin: 0; opacity: 0.85;">{{ initial_progress_text }}</p>
     </header>
     <main>
         <div class="entries" id="entries"></div>
@@ -551,25 +561,27 @@
                 return;
             }
             const cached = problemsCache.get(problem);
-            if (cached) {
-                if (cached.description) {
-                    problemDescription.textContent = cached.description;
-                }
-                renderProgress(cached.progressPercent, cached.progressComment);
-            } else {
-                problemDescription.textContent = "";
-                problemProgress.textContent = "";
+            if (cached && cached.description) {
+                problemDescription.textContent = cached.description;
             }
+            renderProgress(
+                cached && typeof cached.progressPercent === "number" ? cached.progressPercent : null,
+                cached ? cached.progressComment : ""
+            );
             fetch(`/ai-open-problem-solver/problem-details?problem=${encodeURIComponent(problem)}`)
                 .then(response => response.json())
                 .then(data => {
-                    const description = (data && data.description) || "";
-                    problemDescription.textContent = description.trim();
+                    const description = ((data && data.description) || "").trim();
+                    if (description) {
+                        problemDescription.textContent = description;
+                    }
                     const percent = typeof data.progress_percent === "number" ? data.progress_percent : null;
                     const comment = ((data && data.progress_comment) || "").trim();
                     renderProgress(percent, comment);
                     if (cached) {
-                        cached.description = description;
+                        if (description) {
+                            cached.description = description;
+                        }
                         cached.progressPercent = percent;
                         cached.progressComment = comment;
                         problemsCache.set(problem, cached);
@@ -583,14 +595,10 @@
                     }
                 })
                 .catch(() => {
-                    problemDescription.textContent = "";
-                    problemProgress.textContent = "";
+                    // Keep existing description/progress on fetch failure.
                 });
         }
 
-        if (defaultProblemDescription) {
-            problemDescription.textContent = defaultProblemDescription;
-        }
         renderProgress(
             typeof defaultProblemProgressPercent === "number" ? defaultProblemProgressPercent : null,
             (defaultProblemProgressComment || "").trim()
