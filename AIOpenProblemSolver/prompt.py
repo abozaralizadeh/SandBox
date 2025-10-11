@@ -36,6 +36,20 @@ def _decode_metadata(raw: str) -> Dict[str, Any]:
 
 def _format_entity(entity: Dict[str, Any]) -> Dict[str, Any]:
     metadata = _decode_metadata(entity.get("metadata"))
+    progress_percent = metadata.get("progress_percent")
+    try:
+        progress_percent = float(progress_percent)
+    except (TypeError, ValueError):
+        progress_percent = None
+
+    if progress_percent is not None:
+        progress_percent = max(0.0, min(100.0, progress_percent))
+
+    progress_comment = metadata.get("progress_comment", "")
+    if not isinstance(progress_comment, str):
+        progress_comment = str(progress_comment or "")
+    progress_comment = progress_comment.strip()
+
     return {
         "rowKey": entity.get("RowKey"),
         "problem": entity.get("problem"),
@@ -44,6 +58,8 @@ def _format_entity(entity: Dict[str, Any]) -> Dict[str, Any]:
         "metadata": metadata,
         "created_at": entity.get("created_at"),
         "timestamp": entity.get("Timestamp"),
+        "progress_percent": progress_percent,
+        "progress_comment": progress_comment,
     }
 
 
@@ -86,6 +102,8 @@ When you respond, output valid JSON with the keys:
 - html_content: HTML describing today's work. Use semantic tags (e.g., <section>, <h2>, <p>, <ul>) and include references inline.
 - next_steps: array of 2-5 concrete follow-up actions.
 - references: array of citation strings formatted as "Title — URL".
+- progress_percent: number between 0 and 100 representing cumulative progress toward fully solving the problem.
+- progress_comment: short (<= 120 characters) status note contextualizing the progress_percent value.
 
 Never wrap the JSON in code fences.
 """
@@ -115,10 +133,26 @@ Task: Continue the research and report today's progress. Cite every external cla
 
     html_content = parsed.get("html_content", "")
     summary = parsed.get("summary", "")
+    raw_progress = parsed.get("progress_percent", None)
+    try:
+        progress_percent = float(raw_progress)
+    except (TypeError, ValueError):
+        progress_percent = None
+
+    if progress_percent is not None:
+        progress_percent = max(0.0, min(100.0, progress_percent))
+
+    progress_comment = parsed.get("progress_comment", "")
+    if not isinstance(progress_comment, str):
+        progress_comment = str(progress_comment or "")
+    progress_comment = progress_comment.strip()
+
     metadata = {
         "next_steps": parsed.get("next_steps", []),
         "references": parsed.get("references", []),
         "raw_response": parsed,
+        "progress_percent": progress_percent,
+        "progress_comment": progress_comment,
     }
 
     rowkey = _rowkey_now()
@@ -138,6 +172,8 @@ Task: Continue the research and report today's progress. Cite every external cla
             "html_content": html_content,
             "metadata": json.dumps(metadata),
             "created_at": datetime.utcnow().isoformat(),
+            "progress_percent": progress_percent,
+            "progress_comment": progress_comment,
         }
     )
 
@@ -163,4 +199,14 @@ async def get_problem_history(
 
     slice_entries, next_offset = get_iteration_slice(problem, offset=offset, limit=limit)
     formatted = [_format_entity(entity) for entity in slice_entries]
-    return {"entries": formatted, "next_offset": next_offset}
+    latest_progress = None
+    latest_comment = ""
+    if offset == 0 and formatted:
+        latest_progress = formatted[0].get("progress_percent")
+        latest_comment = formatted[0].get("progress_comment", "")
+    return {
+        "entries": formatted,
+        "next_offset": next_offset,
+        "progress_percent": latest_progress,
+        "progress_comment": latest_comment,
+    }

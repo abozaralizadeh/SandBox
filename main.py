@@ -11,7 +11,11 @@ from AIBlog.prompt import *
 from TomorrowNews.prompt import *
 from GenBox.prompt import get_llm_response
 from AIOpenProblemSolver.prompt import get_problem_history
-from AIOpenProblemSolver.azurestorage import get_problem_details, list_problems
+from AIOpenProblemSolver.azurestorage import (
+    get_problem_details,
+    get_problem_progress,
+    list_problems,
+)
 
 app = Flask(__name__)
 
@@ -119,14 +123,21 @@ def genbox():
 def ai_open_problem_solver():
     default_problem = os.environ.get("AIOPS_DEFAULT_PROBLEM", "Riemann Hypothesis")
     description = ""
+    progress_percent = None
+    progress_comment = ""
     if default_problem:
         details = get_problem_details(default_problem)
         if details:
             description = details.get("description", "")
+        status = get_problem_progress(default_problem)
+        progress_percent = status.get("progress_percent")
+        progress_comment = status.get("progress_comment", "")
     return render_template(
         'aiopenproblemsolver.html',
         default_problem=default_problem,
         default_problem_description=description,
+        default_problem_progress_percent=progress_percent,
+        default_problem_progress_comment=progress_comment,
     )
 
 @app.route('/ai-open-problem-solver/history', methods=['GET'])
@@ -164,12 +175,22 @@ def ai_open_problem_solver_problem_details():
     if not problem:
         return jsonify({"error": "Missing 'problem' parameter."}), 400
     details = get_problem_details(problem)
+    progress = get_problem_progress(problem)
     if not details:
-        return jsonify({"problem": problem, "description": ""})
+        return jsonify(
+            {
+                "problem": problem,
+                "description": "",
+                "progress_percent": progress.get("progress_percent"),
+                "progress_comment": progress.get("progress_comment"),
+            }
+        )
     return jsonify(
         {
             "problem": problem,
             "description": details.get("description", ""),
+            "progress_percent": progress.get("progress_percent"),
+            "progress_comment": progress.get("progress_comment"),
         }
     )
 

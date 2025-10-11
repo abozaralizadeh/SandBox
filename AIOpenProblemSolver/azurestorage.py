@@ -69,6 +69,17 @@ def _serialize_metadata(metadata: Optional[Dict[str, Any]]) -> str:
         return "{}"
 
 
+def _deserialize_metadata(raw: Any) -> Dict[str, Any]:
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str):
+        try:
+            return json.loads(raw)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return {}
+    return {}
+
+
 def upload_bytes_to_blob(data: bytes, suffix: str = ".json") -> str:
     _ensure_container()
     blob_name = f"{get_flat_date_full()}_{hashlib.sha1(data).hexdigest()}{suffix}"
@@ -96,7 +107,7 @@ def save_iteration(
         "created_at": datetime.utcnow().isoformat(),
     }
     table_client.upsert_entity(entity=entity, mode=UpdateMode.MERGE)
-    register_problem(problem)
+    #register_problem(problem)
 
 
 def get_iterations(problem: str) -> List[Dict[str, Any]]:
@@ -158,6 +169,32 @@ def get_problem_details(problem: str) -> Optional[Dict[str, Any]]:
     except ResourceNotFoundError:
         return None
     return dict(entity)
+
+
+def get_problem_progress(problem: str) -> Dict[str, Optional[Any]]:
+    history = get_iterations(problem)
+    if not history:
+        return {"progress_percent": None, "progress_comment": ""}
+    entry = history[-1]
+
+    metadata = _deserialize_metadata(entry.get("metadata"))
+    progress_percent = metadata.get("progress_percent")
+    try:
+        progress_percent = float(progress_percent)
+    except (TypeError, ValueError):
+        progress_percent = None
+    if progress_percent is not None:
+        progress_percent = max(0.0, min(100.0, progress_percent))
+
+    progress_comment = metadata.get("progress_comment", "")
+    if not isinstance(progress_comment, str):
+        progress_comment = str(progress_comment or "")
+    progress_comment = progress_comment.strip()
+
+    return {
+        "progress_percent": progress_percent,
+        "progress_comment": progress_comment,
+    }
 
 
 def register_problem(problem: str, description: Optional[str] = None) -> None:

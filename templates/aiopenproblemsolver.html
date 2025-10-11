@@ -262,6 +262,7 @@
         </form>
         <div class="status" id="statusLine">Loading problems…</div>
         <p id="problemDescription" style="margin: 0; opacity: 0.85;"></p>
+        <p id="problemProgress" style="margin: 0; opacity: 0.85;"></p>
     </header>
     <main>
         <div class="entries" id="entries"></div>
@@ -279,7 +280,10 @@
         const problemSelect = document.getElementById("problemSelect");
         const updateButton = document.getElementById("updateProblem");
         const problemDescription = document.getElementById("problemDescription");
+        const problemProgress = document.getElementById("problemProgress");
         const defaultProblemDescription = {{ default_problem_description|tojson }};
+        const defaultProblemProgressPercent = {{ default_problem_progress_percent|tojson }};
+        const defaultProblemProgressComment = {{ default_problem_progress_comment|tojson }};
 
         let currentProblem = defaultProblem || "";
         let offset = 0;
@@ -342,6 +346,8 @@
                     problemsCache.set(defaultProblem, {
                         name: defaultProblem,
                         description: defaultProblemDescription || "",
+                        progressPercent: typeof defaultProblemProgressPercent === "number" ? defaultProblemProgressPercent : null,
+                        progressComment: (defaultProblemProgressComment || "").trim(),
                     });
                 }
 
@@ -351,8 +357,17 @@
                         return;
                     }
                     const description = entry && entry.description ? String(entry.description) : "";
-                    if (!problemsCache.has(name) || !problemsCache.get(name).description) {
-                        problemsCache.set(name, { name, description });
+                    const existing = problemsCache.get(name);
+                    if (!existing) {
+                        problemsCache.set(name, {
+                            name,
+                            description,
+                            progressPercent: null,
+                            progressComment: "",
+                        });
+                    } else if (!existing.description) {
+                        existing.description = description;
+                        problemsCache.set(name, existing);
                     }
                 });
 
@@ -365,6 +380,7 @@
                     updateStatus("No stored problems available. Add entries via storage to begin.");
                     currentProblem = "";
                     problemDescription.textContent = "";
+                    problemProgress.textContent = "";
                     return;
                 }
 
@@ -395,6 +411,7 @@
                 updateStatus(`Failed to load problems: ${error.message}`);
                 currentProblem = "";
                 problemDescription.textContent = "";
+                problemProgress.textContent = "";
             }
         }
 
@@ -456,6 +473,18 @@
                 }
 
                 if (entries.length > 0) {
+                    if (reset) {
+                        const latest = entries[0];
+                        const percent = typeof latest.progress_percent === "number" ? latest.progress_percent : null;
+                        const comment = (latest.progress_comment || "").trim();
+                        if (problemsCache.has(currentProblem)) {
+                            const cached = problemsCache.get(currentProblem);
+                            cached.progressPercent = percent;
+                            cached.progressComment = comment;
+                            problemsCache.set(currentProblem, cached);
+                        }
+                        renderProgress(percent, comment);
+                    }
                     updateStatus(`Showing ${entriesContainer.children.length} updates for "${currentProblem}".`);
                 } else if (!hasMore) {
                     updateStatus(`No results stored for "${currentProblem}" yet. Re-run later.`);
@@ -518,32 +547,69 @@
         function updateProblemDescription(problem) {
             if (!problem) {
                 problemDescription.textContent = "";
+                problemProgress.textContent = "";
                 return;
             }
             const cached = problemsCache.get(problem);
-            if (cached && cached.description) {
-                problemDescription.textContent = cached.description;
-                return;
+            if (cached) {
+                if (cached.description) {
+                    problemDescription.textContent = cached.description;
+                }
+                renderProgress(cached.progressPercent, cached.progressComment);
+            } else {
+                problemDescription.textContent = "";
+                problemProgress.textContent = "";
             }
             fetch(`/ai-open-problem-solver/problem-details?problem=${encodeURIComponent(problem)}`)
                 .then(response => response.json())
                 .then(data => {
                     const description = (data && data.description) || "";
                     problemDescription.textContent = description.trim();
+                    const percent = typeof data.progress_percent === "number" ? data.progress_percent : null;
+                    const comment = ((data && data.progress_comment) || "").trim();
+                    renderProgress(percent, comment);
                     if (cached) {
                         cached.description = description;
+                        cached.progressPercent = percent;
+                        cached.progressComment = comment;
                         problemsCache.set(problem, cached);
-                    } else if (description) {
-                        problemsCache.set(problem, { name: problem, description });
+                    } else if (description || comment || percent !== null) {
+                        problemsCache.set(problem, {
+                            name: problem,
+                            description,
+                            progressPercent: percent,
+                            progressComment: comment,
+                        });
                     }
                 })
                 .catch(() => {
                     problemDescription.textContent = "";
+                    problemProgress.textContent = "";
                 });
         }
 
         if (defaultProblemDescription) {
             problemDescription.textContent = defaultProblemDescription;
+        }
+        renderProgress(
+            typeof defaultProblemProgressPercent === "number" ? defaultProblemProgressPercent : null,
+            (defaultProblemProgressComment || "").trim()
+        );
+
+        function renderProgress(percent, comment) {
+            let text = "";
+            if (typeof percent === "number" && !Number.isNaN(percent)) {
+                const rounded = Math.round(percent * 10) / 10;
+                text = `Progress: ${rounded}%`;
+                if (comment) {
+                    text += ` — ${comment}`;
+                }
+            } else if (comment) {
+                text = comment;
+            } else {
+                text = "";
+            }
+            problemProgress.textContent = text;
         }
     </script>
 </body>

@@ -32,21 +32,32 @@ async def get_open_deep_search_agent():
     browse_tools = await get_browse_web_tools()
     tools = [*search_tools, *browse_tools]
 
+    instructions = (
+        "You are an open deep-search research agent tackling frontier mathematics problems. "
+        "Break the problem into sub-goals, use the available search and browsing tools extensively, "
+        "and produce rigorous, well-structured progress updates with citations. "
+        "Iterate until you reach a meaningful advancement or identify next steps."
+    )
+
     try:
         from langgraph.prebuilt import create_openai_deep_search_agent
 
         agent = create_openai_deep_search_agent(llm=llm, tools=tools)
     except (ImportError, AttributeError):
-        from langgraph.prebuilt import create_react_agent
+        try:
+            from deepagents import create_deep_agent
 
-        agent = create_react_agent(
-            llm,
-            tools=tools,
-            state_modifier=(
-                "You are an open deep-search research agent tackling frontier mathematics problems. "
-                "Break the problem into sub-goals, use the available search and browsing tools extensively, "
-                "and produce rigorous, well-structured progress updates with citations. "
-                "Iterate until you reach a meaningful advancement or identify next steps."
-            ),
-        )
+            agent = create_deep_agent(
+                model=llm,
+                tools=tools,
+                instructions=instructions,
+            )
+        except (ImportError, TypeError):
+            from langgraph.prebuilt import create_react_agent
+
+            agent = create_react_agent(
+                llm,
+                tools=tools,
+                prompt=instructions,
+            )
     return agent
