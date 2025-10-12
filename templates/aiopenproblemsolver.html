@@ -315,7 +315,8 @@
 
         function formatEntry(entry) {
             const createdAt = entry.created_at || entry.timestamp || entry.rowKey;
-            const date = createdAt ? new Date(createdAt).toLocaleString() : "Unknown timestamp";
+            const dateObj = createdAt ? new Date(createdAt) : null;
+            const date = dateObj ? dateObj.toLocaleDateString() : "Unknown date";
             const metadata = entry.metadata || {};
             const nextStepsMarkup = createList(metadata.next_steps || []);
             const referencesMarkup = createList(metadata.references || []);
@@ -493,7 +494,7 @@
                             cached.progressComment = comment;
                             problemsCache.set(currentProblem, cached);
                         }
-                        renderProgress(percent, comment);
+                        renderProgress(percent, comment, true);
                     }
                     updateStatus(`Showing ${entriesContainer.children.length} updates for "${currentProblem}".`);
                 } else if (!hasMore) {
@@ -557,17 +558,26 @@
         function updateProblemDescription(problem) {
             if (!problem) {
                 problemDescription.textContent = "";
-                problemProgress.textContent = "";
+                renderProgress(null, "", true);
                 return;
             }
             const cached = problemsCache.get(problem);
             if (cached && cached.description) {
                 problemDescription.textContent = cached.description;
+            } else {
+                problemDescription.textContent = "";
             }
+
+            const cachedHasProgress =
+                cached &&
+                ((typeof cached.progressPercent === "number" && !Number.isNaN(cached.progressPercent)) ||
+                    (cached.progressComment && cached.progressComment.length));
             renderProgress(
-                cached && typeof cached.progressPercent === "number" ? cached.progressPercent : null,
-                cached ? cached.progressComment : ""
+                cachedHasProgress ? cached.progressPercent : null,
+                cachedHasProgress ? cached.progressComment : "",
+                true
             );
+
             fetch(`/ai-open-problem-solver/problem-details?problem=${encodeURIComponent(problem)}`)
                 .then(response => response.json())
                 .then(data => {
@@ -601,10 +611,17 @@
 
         renderProgress(
             typeof defaultProblemProgressPercent === "number" ? defaultProblemProgressPercent : null,
-            (defaultProblemProgressComment || "").trim()
+            (defaultProblemProgressComment || "").trim(),
+            true
         );
 
-        function renderProgress(percent, comment) {
+        function renderProgress(percent, comment, force = false) {
+            const hasValue =
+                (typeof percent === "number" && !Number.isNaN(percent)) ||
+                (comment && comment.length);
+            if (!hasValue && !force) {
+                return;
+            }
             let text = "";
             if (typeof percent === "number" && !Number.isNaN(percent)) {
                 const rounded = Math.round(percent * 10) / 10;
@@ -614,8 +631,6 @@
                 }
             } else if (comment) {
                 text = comment;
-            } else {
-                text = "";
             }
             problemProgress.textContent = text;
         }
