@@ -25,12 +25,24 @@
             --border: rgba(148, 163, 184, 0.35);
         }
 
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+        }
+
+        html {
+            width: 100%;
+            overflow-x: hidden;
+        }
+
         body {
             margin: 0;
             font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
             background: radial-gradient(circle at top, rgba(56, 189, 248, 0.25), transparent 45%), var(--bg);
             color: var(--fg);
             min-height: 100vh;
+            overflow-x: hidden;
         }
 
         a {
@@ -87,6 +99,7 @@
             flex: 1 1 320px;
             display: flex;
             gap: 0.5rem;
+            min-width: 0;
         }
 
         input[type="text"],
@@ -99,6 +112,10 @@
             color: var(--fg);
             font-size: 1rem;
             transition: border-color 0.2s ease, box-shadow 0.2s ease;
+            min-width: 0;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            overflow: hidden;
         }
 
         input[type="text"]:focus,
@@ -106,6 +123,7 @@
             outline: none;
             border-color: var(--accent);
             box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.25);
+            white-space: normal;
         }
 
         button {
@@ -137,6 +155,7 @@
             display: flex;
             flex-direction: column;
             gap: 1.5rem;
+            overflow-x: hidden;
         }
 
         .status {
@@ -159,6 +178,7 @@
             display: flex;
             flex-direction: column;
             gap: 1.25rem;
+            max-width: 100%;
         }
 
         .entry header {
@@ -186,6 +206,7 @@
             padding: 1.5rem;
             line-height: 1.6;
             overflow-x: auto;
+            overflow-wrap: anywhere;
         }
 
         .html-content h1,
@@ -197,6 +218,7 @@
         .metadata {
             display: grid;
             gap: 1.25rem;
+            overflow-wrap: anywhere;
         }
 
         .metadata section {
@@ -212,6 +234,8 @@
 
         ul {
             padding-left: 1.25rem;
+            margin-inline: 0;
+            overflow-wrap: anywhere;
         }
 
         .loader {
@@ -261,7 +285,7 @@
             <button type="submit" id="updateProblem" disabled>Load Progress</button>
         </form>
         <div class="status" id="statusLine">Loading problems…</div>
-        <p id="problemDescription" style="margin: 0; opacity: 0.85;">{{ default_problem_description }}</p>
+        <p id="problemDescription" style="margin: 0; opacity: 0.85; overflow-wrap: anywhere;">{{ default_problem_description }}</p>
         {% set initial_progress_text = "" %}
         {% if default_problem_progress_percent is not none %}
             {% set rounded = (default_problem_progress_percent * 10)|round|int / 10 %}
@@ -272,7 +296,7 @@
         {% elif default_problem_progress_comment %}
             {% set initial_progress_text = default_problem_progress_comment %}
         {% endif %}
-        <p id="problemProgress" style="margin: 0; opacity: 0.85;">{{ initial_progress_text }}</p>
+        <p id="problemProgress" style="margin: 0; opacity: 0.85; overflow-wrap: anywhere;">{{ initial_progress_text }}</p>
     </header>
     <main>
         <div class="entries" id="entries"></div>
