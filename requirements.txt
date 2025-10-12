@@ -9,7 +9,7 @@ langchain
 langchain-openai
 langchain-deepseek
 langchain-community
-langgraph==0.3.21
+langgraph>=0.4.0
 langsmith
 xmltodict==0.14.2
 pydantic==2.11.1
@@ -18,3 +18,4 @@ ddgs
 playwright
 lxml
 beautifulsoup4
+deepagents
