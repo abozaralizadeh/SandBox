@@ -114,20 +114,23 @@ def _truncate_tool_output(tool):
     if hasattr(tool, "_run"):
         original_run = tool._run
 
-        def _run(*args, **kwargs):
-            result = original_run(*args, **kwargs)
+        def _run(self, *args, **kwargs):
+            result = original_run(self, *args, **kwargs)
             return _truncate_value(result)
 
-        object.__setattr__(tool, "_run", _run)
+        object.__setattr__(tool, "_run", types.MethodType(_run, tool))
 
     if hasattr(tool, "_arun"):
         original_arun = tool._arun
 
-        async def _arun(*args, **kwargs):
-            result = await original_arun(*args, **kwargs)
+        async def _arun(self, *args, **kwargs):
+            result = await original_arun(self, *args, **kwargs)
             return _truncate_value(result)
 
-        object.__setattr__(tool, "_arun", _arun)
+        object.__setattr__(tool, "_arun", types.MethodType(_arun, tool))
 
-    tool.__wrapped_trunc__ = True
+    try:
+        object.__setattr__(tool, "__wrapped_trunc__", True)
+    except Exception:
+        pass
     return tool
