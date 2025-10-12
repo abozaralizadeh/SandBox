@@ -49,6 +49,103 @@
             color: var(--accent);
         }
 
+        .topbar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 20;
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 0.6rem;
+            padding: 0.6rem clamp(1rem, 4vw, 3rem);
+            background: rgba(11, 17, 32, 0.92);
+            border-bottom: 1px solid rgba(148, 163, 184, 0.35);
+            box-shadow: 0 12px 30px rgba(8, 15, 28, 0.35);
+            transform: translateY(-110%);
+            opacity: 0;
+            pointer-events: none;
+            transition: transform 0.35s ease, opacity 0.35s ease;
+        }
+
+        .topbar.visible {
+            transform: translateY(0);
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .topbar-left {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            min-width: 0;
+            flex: 1 1 240px;
+        }
+
+        .topbar-home {
+            font-size: 0.9rem;
+            font-weight: 600;
+            text-decoration: none;
+            color: var(--accent);
+            white-space: nowrap;
+        }
+
+        .topbar-title {
+            margin: 0;
+            font-size: 1rem;
+            font-weight: 600;
+            line-height: 1.2;
+            color: var(--fg);
+            white-space: normal;
+            overflow-wrap: anywhere;
+        }
+
+        .topbar-right {
+            display: flex;
+            align-items: center;
+            gap: 0.45rem;
+            min-width: 0;
+            flex: 1 1 320px;
+            justify-content: flex-end;
+            flex-wrap: wrap;
+        }
+
+        .topbar-select {
+            flex: 1 1 240px;
+            min-width: 0;
+            padding: 0.45rem 0.75rem;
+            border-radius: 0.6rem;
+            border: 1px solid var(--border);
+            background: rgba(10, 31, 53, 0.85);
+            color: var(--fg);
+            font-size: 0.9rem;
+            white-space: normal;
+            line-height: 1.4;
+        }
+
+        .topbar-button {
+            width: 36px;
+            height: 36px;
+            padding: 0;
+            border-radius: 0.6rem;
+            border: none;
+            font-weight: 600;
+            font-size: 0.85rem;
+            background: var(--accent);
+            color: #0f172a;
+            cursor: pointer;
+            transition: transform 0.15s ease, box-shadow 0.15s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .topbar-button:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 8px 18px rgba(56, 189, 248, 0.35);
+        }
+
         .page-header {
             position: sticky;
             top: 0;
@@ -102,7 +199,6 @@
             min-width: 0;
         }
 
-        input[type="text"],
         select {
             flex: 1;
             padding: 0.75rem 1rem;
@@ -118,7 +214,6 @@
             overflow: hidden;
         }
 
-        input[type="text"]:focus,
         select:focus {
             outline: none;
             border-color: var(--accent);
@@ -138,7 +233,7 @@
             transition: transform 0.15s ease, box-shadow 0.15s ease;
         }
 
-        button:hover {
+        button:hover:not(:disabled) {
             transform: translateY(-1px);
             box-shadow: 0 10px 20px rgba(56, 189, 248, 0.35);
         }
@@ -156,6 +251,25 @@
             flex-direction: column;
             gap: 1.5rem;
             overflow-x: hidden;
+        }
+
+        .loader-wrapper {
+            display: none;
+            justify-content: center;
+            padding: 1rem 0;
+        }
+
+        .loader-wrapper.visible {
+            display: flex;
+        }
+
+        .loader {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            border: 4px solid rgba(148, 163, 184, 0.25);
+            border-top-color: var(--accent);
+            animation: spin 1s linear infinite;
         }
 
         .status {
@@ -184,7 +298,6 @@
         .entry header {
             position: static;
             background: transparent;
-            backdrop-filter: none;
             border: 0;
             padding: 0;
             gap: 0.4rem;
@@ -238,16 +351,6 @@
             overflow-wrap: anywhere;
         }
 
-        .loader {
-            width: 32px;
-            height: 32px;
-            border-radius: 50%;
-            border: 4px solid rgba(148, 163, 184, 0.25);
-            border-top-color: var(--accent);
-            animation: spin 1s linear infinite;
-            margin-inline: auto;
-        }
-
         .end-message {
             text-align: center;
             opacity: 0.7;
@@ -261,15 +364,54 @@
             }
         }
 
-        @media (max-width: 768px) {
-            button {
+        @media (max-width: 640px) {
+            .topbar {
+                padding: 0.45rem 0.75rem;
+                gap: 0.5rem;
+                justify-content: center;
+            }
+            .topbar-left,
+            .topbar-right {
+                flex: 1 1 100%;
+                justify-content: center;
+            }
+            .topbar-right {
+                flex-direction: row;
+                align-items: center;
+            }
+            .topbar-select {
+                flex: 1 1 75%;
                 width: 100%;
+            }
+            .topbar-button {
+                width: 34px;
+                height: 34px;
+                flex: 0 0 34px;
+            }
+            .topbar-title {
+                font-size: 0.95rem;
+                text-align: center;
+            }
+            .topbar-home {
+                font-size: 0.85rem;
             }
         }
     </style>
 </head>
 
 <body>
+    <div class="topbar" id="floatingToolbar">
+        <div class="topbar-left">
+            <a class="topbar-home" href="/">← Home</a>
+            <h2 class="topbar-title">AI Open Problem Solver</h2>
+        </div>
+        <div class="topbar-right">
+            <select id="topbarProblemSelect" class="topbar-select" disabled>
+                <option>Loading…</option>
+            </select>
+            <button type="button" id="scrollTopBtn" class="topbar-button" title="Back to top">↑</button>
+        </div>
+    </div>
     <header class="page-header">
         <div class="title-bar">
             <h1>AI Open Problem Solver</h1>
@@ -299,35 +441,56 @@
         <p id="problemProgress" style="margin: 0; opacity: 0.85; overflow-wrap: anywhere;">{{ initial_progress_text }}</p>
     </header>
     <main>
+        <div id="loaderWrapper" class="loader-wrapper">
+            <div class="loader"></div>
+        </div>
         <div class="entries" id="entries"></div>
-        <div class="loader" id="loader" hidden></div>
         <div class="end-message" id="endMessage" hidden>No more recorded progress. Check back tomorrow!</div>
     </main>
 
+    <footer style="padding: 2rem clamp(1rem,4vw,3rem); text-align: center; font-size: 0.9rem; opacity: 0.75;">
+        © {{ (now().year if now else 2025) }} <a href="https://github.com/abozaralizadeh/SandBox" target="_blank" rel="noopener" style="color: var(--accent); text-decoration: none;">SandBox Project</a>. Open source and community-driven.
+    </footer>
+
     <script>
         const defaultProblem = {{ default_problem|tojson }};
-        const entriesContainer = document.getElementById("entries");
-        const loader = document.getElementById("loader");
-        const endMessage = document.getElementById("endMessage");
-        const statusLine = document.getElementById("statusLine");
-        const problemForm = document.getElementById("problemForm");
-        const problemSelect = document.getElementById("problemSelect");
-        const updateButton = document.getElementById("updateProblem");
-        const problemDescription = document.getElementById("problemDescription");
-        const problemProgress = document.getElementById("problemProgress");
         const defaultProblemDescription = {{ default_problem_description|tojson }};
         const defaultProblemProgressPercent = {{ default_problem_progress_percent|tojson }};
         const defaultProblemProgressComment = {{ default_problem_progress_comment|tojson }};
+
+        const entriesContainer = document.getElementById("entries");
+        const loaderWrapper = document.getElementById("loaderWrapper");
+        const endMessage = document.getElementById("endMessage");
+        const statusLine = document.getElementById("statusLine");
+        const problemForm = document.getElementById("problemForm");
+        const topbar = document.getElementById("floatingToolbar");
+        const scrollTopBtn = document.getElementById("scrollTopBtn");
+        const problemSelect = document.getElementById("problemSelect");
+        const topbarSelect = document.getElementById("topbarProblemSelect");
+        const updateButton = document.getElementById("updateProblem");
+        const problemDescription = document.getElementById("problemDescription");
+        const problemProgress = document.getElementById("problemProgress");
+
+        const primarySelects = [problemSelect, topbarSelect];
+        const loadButtons = [updateButton];
+        const problemsCache = new Map();
 
         let currentProblem = defaultProblem || "";
         let offset = 0;
         let loading = false;
         let hasMore = true;
         let firstLoad = true;
-        let problemsCache = new Map();
 
         function updateStatus(text) {
             statusLine.textContent = text;
+        }
+
+        function toggleLoader(show) {
+            if (show) {
+                loaderWrapper.classList.add("visible");
+            } else {
+                loaderWrapper.classList.remove("visible");
+            }
         }
 
         function createList(items) {
@@ -367,12 +530,18 @@
             entriesContainer.appendChild(wrapper);
         }
 
+        function syncSelectors(value) {
+            primarySelects.forEach(select => {
+                select.value = value;
+                select.disabled = !value;
+            });
+            loadButtons.forEach(btn => (btn.disabled = !value));
+        }
+
         async function loadProblemOptions() {
             try {
                 const response = await fetch('/ai-open-problem-solver/problems');
-                if (!response.ok) {
-                    throw new Error(`Server error (${response.status})`);
-                }
+                if (!response.ok) throw new Error(`Server error (${response.status})`);
                 const payload = await response.json();
                 const problems = payload.problems || [];
 
@@ -386,11 +555,9 @@
                     });
                 }
 
-                problems.forEach((entry) => {
+                problems.forEach(entry => {
                     const name = (entry && (entry.name || entry.problem)) ? String(entry.name || entry.problem).trim() : "";
-                    if (!name) {
-                        return;
-                    }
+                    if (!name) return;
                     const description = entry && entry.description ? String(entry.description) : "";
                     const existing = problemsCache.get(name);
                     if (!existing) {
@@ -400,18 +567,21 @@
                             progressPercent: null,
                             progressComment: "",
                         });
-                    } else if (!existing.description) {
+                    } else if (!existing.description && description) {
                         existing.description = description;
                         problemsCache.set(name, existing);
                     }
                 });
 
-                problemSelect.innerHTML = "";
+                primarySelects.forEach(select => {
+                    select.innerHTML = "";
+                    select.disabled = true;
+                });
 
                 if (problemsCache.size === 0) {
-                    problemSelect.innerHTML = '<option value="">No problems found</option>';
-                    problemSelect.disabled = true;
-                    updateButton.disabled = true;
+                    const fallback = '<option value="">No problems found</option>';
+                    primarySelects.forEach(select => (select.innerHTML = fallback));
+                    syncSelectors("");
                     updateStatus("No stored problems available. Add entries via storage to begin.");
                     currentProblem = "";
                     problemDescription.textContent = "";
@@ -427,22 +597,21 @@
                     const option = document.createElement("option");
                     option.value = name;
                     option.textContent = name;
-                    problemSelect.appendChild(option);
+                    problemSelect.appendChild(option.cloneNode(true));
+                    topbarSelect.appendChild(option);
                 });
 
                 if (!currentProblem || !problemsCache.has(currentProblem)) {
                     currentProblem = sortedProblems[0].name;
                 }
-                problemSelect.value = currentProblem;
-                problemSelect.disabled = false;
-                updateButton.disabled = false;
+                syncSelectors(currentProblem);
                 updateStatus(`Loaded ${sortedProblems.length} problem${sortedProblems.length === 1 ? "" : "s"}.`);
                 updateProblemDescription(currentProblem);
             } catch (error) {
                 console.error(error);
-                problemSelect.innerHTML = '<option value="">Unable to load problems</option>';
-                problemSelect.disabled = true;
-                updateButton.disabled = true;
+                const fallback = '<option value="">Unable to load problems</option>';
+                primarySelects.forEach(select => (select.innerHTML = fallback));
+                syncSelectors("");
                 updateStatus(`Failed to load problems: ${error.message}`);
                 currentProblem = "";
                 problemDescription.textContent = "";
@@ -450,49 +619,35 @@
             }
         }
 
-        async function loadMoreEntries(reset = false) {
-            if (loading || (!hasMore && !reset)) {
-                return;
-            }
+        async function loadMoreEntries({ reset = false, showSpinner = false } = {}) {
+            if (loading && !reset) return;
 
             if (reset) {
-                entriesContainer.innerHTML = "";
                 offset = 0;
                 hasMore = true;
                 endMessage.hidden = true;
                 firstLoad = true;
             }
 
-            if (!currentProblem) {
-                updateStatus("Provide an open mathematics problem to investigate.");
-                return;
-            }
-
             loading = true;
-            loader.hidden = false;
+            if (showSpinner) toggleLoader(true);
             updateStatus("Researching… this can take several minutes for deep web exploration.");
 
             const params = new URLSearchParams({
                 problem: currentProblem,
                 offset: offset.toString(),
-                limit: "3"
+                limit: "3",
             });
 
-            if (firstLoad) {
-                params.set("ensure_latest", "true");
-            }
+            if (firstLoad) params.set("ensure_latest", "true");
 
             try {
                 const response = await fetch(`/ai-open-problem-solver/history?${params.toString()}`);
-                if (!response.ok) {
-                    throw new Error(`Server error (${response.status})`);
-                }
+                if (!response.ok) throw new Error(`Server error (${response.status})`);
                 const payload = await response.json();
 
                 const entries = payload.entries || [];
-                if (reset) {
-                    entriesContainer.innerHTML = "";
-                }
+                if (reset) entriesContainer.innerHTML = "";
 
                 if (entries.length === 0 && offset === 0) {
                     updateStatus("No recorded progress yet. Triggering a fresh research iteration.");
@@ -528,41 +683,40 @@
                 console.error(error);
                 updateStatus(`Failed to load progress: ${error.message}`);
             } finally {
-                loader.hidden = true;
+                toggleLoader(false);
                 loading = false;
                 firstLoad = false;
             }
         }
 
-        problemForm.addEventListener("submit", (event) => {
-            event.preventDefault();
-            currentProblem = problemSelect.value.trim();
-            if (!currentProblem) {
+        function handleLoadRequest(select) {
+            const nextProblem = select.value.trim();
+            if (!nextProblem) {
                 updateStatus("Please describe the open problem you want to tackle.");
                 return;
             }
-            updateProblemDescription(currentProblem);
-            loadMoreEntries(true);
-        });
-
-        problemSelect.addEventListener("change", () => {
-            const nextProblem = problemSelect.value.trim();
-            if (!nextProblem || nextProblem === currentProblem) {
-                return;
+            if (nextProblem !== currentProblem) {
+                currentProblem = nextProblem;
+                updateProblemDescription(currentProblem);
+                loadMoreEntries({ reset: true, showSpinner: true });
+            } else {
+                loadMoreEntries({ reset: true, showSpinner: true });
             }
-            currentProblem = nextProblem;
-            updateProblemDescription(currentProblem);
-            loadMoreEntries(true);
+            syncSelectors(nextProblem);
+        }
+
+        problemForm.addEventListener("submit", (event) => {
+            event.preventDefault();
+            handleLoadRequest(problemSelect);
         });
+        primarySelects.forEach(select => select.addEventListener("change", () => handleLoadRequest(select)));
 
         window.addEventListener("scroll", () => {
-            if (loading || !hasMore) {
-                return;
-            }
+            if (loading || !hasMore) return;
             const scrollPosition = window.scrollY + window.innerHeight;
             const threshold = document.body.offsetHeight - 600;
             if (scrollPosition >= threshold) {
-                loadMoreEntries();
+                loadMoreEntries({ reset: false, showSpinner: false });
             }
         });
 
@@ -571,10 +725,13 @@
                 if (!problemDescription.textContent && defaultProblemDescription) {
                     problemDescription.textContent = defaultProblemDescription;
                 }
-                loadMoreEntries(true);
-            } else if (problemSelect.disabled) {
-                // Status already set in loadProblemOptions
-            } else {
+                renderProgress(
+                    typeof defaultProblemProgressPercent === "number" ? defaultProblemProgressPercent : null,
+                    (defaultProblemProgressComment || "").trim(),
+                    true
+                );
+                loadMoreEntries({ reset: true, showSpinner: false });
+            } else if (!problemSelect.disabled) {
                 updateStatus("Select a problem to get started.");
             }
         });
@@ -613,9 +770,7 @@
                     const comment = ((data && data.progress_comment) || "").trim();
                     renderProgress(percent, comment);
                     if (cached) {
-                        if (description) {
-                            cached.description = description;
-                        }
+                        if (description) cached.description = description;
                         cached.progressPercent = percent;
                         cached.progressComment = comment;
                         problemsCache.set(problem, cached);
@@ -629,15 +784,9 @@
                     }
                 })
                 .catch(() => {
-                    // Keep existing description/progress on fetch failure.
+                    // Keep existing description/progress if details fetch fails.
                 });
         }
-
-        renderProgress(
-            typeof defaultProblemProgressPercent === "number" ? defaultProblemProgressPercent : null,
-            (defaultProblemProgressComment || "").trim(),
-            true
-        );
 
         function renderProgress(percent, comment, force = false) {
             const hasValue =
@@ -655,9 +804,28 @@
                 }
             } else if (comment) {
                 text = comment;
+            } else {
+                text = "";
             }
             problemProgress.textContent = text;
         }
+
+        const headerSection = document.querySelector(".page-header");
+        const observer = new IntersectionObserver(
+            ([entry]) => {
+                if (entry.intersectionRatio <= 0.1) {
+                    topbar.classList.add("visible");
+                } else {
+                    topbar.classList.remove("visible");
+                }
+            },
+            { threshold: [0, 0.1, 0.2, 0.4] }
+        );
+        observer.observe(headerSection);
+
+        scrollTopBtn.addEventListener("click", () => {
+            window.scrollTo({ top: 0, behavior: "smooth" });
+        });
     </script>
 </body>
 
