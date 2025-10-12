@@ -49,17 +49,17 @@
             color: var(--accent);
         }
 
-        .topbar {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            z-index: 20;
-            display: flex;
-            flex-wrap: wrap;
-            align-items: center;
-            gap: 0.6rem;
-            padding: 0.6rem clamp(1rem, 4vw, 3rem);
+.topbar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 20;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.6rem;
+    padding: calc(0.6rem + env(safe-area-inset-top, 0px)) clamp(1rem, 4vw, 3rem) 0.6rem clamp(1rem, 4vw, 3rem);
             background: rgba(11, 17, 32, 0.92);
             border-bottom: 1px solid rgba(148, 163, 184, 0.35);
             box-shadow: 0 12px 30px rgba(8, 15, 28, 0.35);
@@ -364,12 +364,12 @@
             }
         }
 
-        @media (max-width: 640px) {
-            .topbar {
-                padding: 0.45rem 0.75rem;
-                gap: 0.5rem;
-                justify-content: center;
-            }
+@media (max-width: 640px) {
+    .topbar {
+        padding: calc(0.45rem + env(safe-area-inset-top, 0px)) 0.75rem 0.45rem 0.75rem;
+        gap: 0.5rem;
+        justify-content: center;
+    }
             .topbar-left,
             .topbar-right {
                 flex: 1 1 100%;
@@ -811,15 +811,22 @@
         }
 
         const headerSection = document.querySelector(".page-header");
+        let toolbarVisible = false;
         const observer = new IntersectionObserver(
             ([entry]) => {
-                if (entry.intersectionRatio <= 0.1) {
+                const ratio = entry.intersectionRatio;
+                const headerMostlyHidden = ratio <= 0.05 && entry.boundingClientRect.top < -20;
+                const headerMostlyVisible = ratio >= 0.6;
+
+                if (!toolbarVisible && headerMostlyHidden) {
+                    toolbarVisible = true;
                     topbar.classList.add("visible");
-                } else {
+                } else if (toolbarVisible && headerMostlyVisible) {
+                    toolbarVisible = false;
                     topbar.classList.remove("visible");
                 }
             },
-            { threshold: [0, 0.1, 0.2, 0.4] }
+            { threshold: [0, 0.05, 0.6, 1] }
         );
         observer.observe(headerSection);
 
