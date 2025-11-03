@@ -14,7 +14,7 @@ from langgraph.graph import StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode, tools_condition
 
-from langchain_openai import AzureChatOpenAI
+from AIBlog.token_controller import TokenAwareAzureChatOpenAI
 
 if "AZURE_OPENAI_API_KEY" not in os.environ:
     raise Exception("No AZURE_OPENAI_API_KEY found in environment!")
@@ -28,13 +28,24 @@ async def get_react_agent():
     tools = [tavilysearchinternettool, ddgsearchinternettool, imagetool, savetitletool]
     tools += await get_browsewebtools()
 
-    llm = AzureChatOpenAI(
+    max_input_tokens = int(os.environ.get("AZURE_OPENAI_MAX_INPUT_TOKENS", "240000"))
+    tool_token_limit = int(
+        os.environ.get("AZURE_OPENAI_TOOL_MESSAGE_TOKEN_LIMIT", "12000")
+    )
+    summary_chunk_tokens = int(
+        os.environ.get("AZURE_OPENAI_SUMMARY_CHUNK_TOKENS", "4000")
+    )
+
+    llm = TokenAwareAzureChatOpenAI(
         azure_deployment=os.environ["AZURE_OPENAI_MODEL"],  # or your deployment
         api_version=os.environ["AZURE_OPENAI_API_VERSION"],  # or your api version
         temperature=1,
         max_tokens=None,
         timeout=None,
         max_retries=3,
+        max_input_tokens=max_input_tokens,
+        tool_message_token_limit=tool_token_limit,
+        summary_chunk_tokens=summary_chunk_tokens,
         # other params...
     )
 
