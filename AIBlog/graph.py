@@ -28,12 +28,18 @@ async def get_react_agent():
     tools = [tavilysearchinternettool, ddgsearchinternettool, imagetool, savetitletool]
     tools += await get_browsewebtools()
 
-    max_input_tokens = int(os.environ.get("AZURE_OPENAI_MAX_INPUT_TOKENS", "240000"))
+    max_input_tokens = int(os.environ.get("AZURE_OPENAI_MAX_INPUT_TOKENS", "270000"))
     tool_token_limit = int(
-        os.environ.get("AZURE_OPENAI_TOOL_MESSAGE_TOKEN_LIMIT", "12000")
+        os.environ.get("AZURE_OPENAI_TOOL_MESSAGE_TOKEN_LIMIT", "270000")
     )
     summary_chunk_tokens = int(
-        os.environ.get("AZURE_OPENAI_SUMMARY_CHUNK_TOKENS", "4000")
+        os.environ.get("AZURE_OPENAI_SUMMARY_CHUNK_TOKENS", "50000")
+    )
+    max_map_chunks = int(
+        os.environ.get("AZURE_OPENAI_MAX_MAP_CHUNKS", "5")
+    )
+    summary_target_tokens = int(
+        os.environ.get("AZURE_OPENAI_SUMMARY_TARGET_TOKENS", "50000")
     )
 
     llm = TokenAwareAzureChatOpenAI(
@@ -46,6 +52,8 @@ async def get_react_agent():
         max_input_tokens=max_input_tokens,
         tool_message_token_limit=tool_token_limit,
         summary_chunk_tokens=summary_chunk_tokens,
+        summary_target_tokens=summary_target_tokens,
+        max_map_chunks=max_map_chunks,
         # other params...
     )
 
