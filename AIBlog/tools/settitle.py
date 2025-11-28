@@ -9,7 +9,8 @@ def set_title(title: str) -> str:
     try:
         if not strtobool(os.environ.get("DEBUG", False)):
             flat_date_hour = get_flat_date() + "_00"
-            insert_title(rowkey=flat_date_hour, title=title)
+            if not strtobool(os.environ.get("DEBUG", False)) or strtobool(os.environ.get("DEBUG_SAVE", False)):
+                insert_title(rowkey=flat_date_hour, title=title)
         return "Title set successfully"
     except Exception as e:
         return f"Error setting title: {e}"

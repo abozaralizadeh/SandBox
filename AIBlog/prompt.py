@@ -81,5 +81,6 @@ async def getaiblog(parsed_date):
         for value in event.values():
             print("React Agent:", value["messages"][-1].content)
     content = value["messages"][-1].content
-    upsert_history(rowkey=flat_date_hour, html_content=content)
+    if not strtobool(os.environ.get("DEBUG", False)) or strtobool(os.environ.get("DEBUG_SAVE", False)):
+        upsert_history(rowkey=flat_date_hour, html_content=content)
     return content, timestamp
