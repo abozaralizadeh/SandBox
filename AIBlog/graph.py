@@ -25,7 +25,6 @@ if "AZURE_OPENAI_ENDPOINT" not in os.environ:
 async def get_react_agent():
     savetitletool = set_title
     imagetool = get_image_by_text
-    #tools = [tavilysearchinternettool, ddgsearchinternettool, imagetool, savetitletool]
     tools = [{"type": "web_search"}, imagetool, savetitletool]
     tools += await get_browsewebtools()
 
@@ -50,6 +49,7 @@ async def get_react_agent():
         max_tokens=None,
         timeout=None,
         max_retries=3,
+        output_version=os.environ.get("AZURE_OPENAI_OUTPUT_VERSION", "responses/v1"),
         max_input_tokens=max_input_tokens,
         tool_message_token_limit=tool_token_limit,
         summary_chunk_tokens=summary_chunk_tokens,
