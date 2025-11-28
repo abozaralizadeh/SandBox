@@ -25,7 +25,8 @@ if "AZURE_OPENAI_ENDPOINT" not in os.environ:
 async def get_react_agent():
     savetitletool = set_title
     imagetool = get_image_by_text
-    tools = [tavilysearchinternettool, ddgsearchinternettool, imagetool, savetitletool]
+    #tools = [tavilysearchinternettool, ddgsearchinternettool, imagetool, savetitletool]
+    tools = [{ type: "web_search" }, imagetool, savetitletool]
     tools += await get_browsewebtools()
 
     max_input_tokens = int(os.environ.get("AZURE_OPENAI_MAX_INPUT_TOKENS", "270000"))
