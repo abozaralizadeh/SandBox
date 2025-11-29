@@ -10,12 +10,17 @@ async def getaiblog(parsed_date):
     timestamp = datetime.utcnow()
     flat_date_hour = get_flat_date(parsed_date) + "_00"
 
-    if not strtobool(os.environ.get("DEBUG", False)):
-        if lastdayblog := get_row(flat_date_hour):
-            return lastdayblog["html_content"], parse_flat_date_hour(flat_date_hour)
-        flat_date_hour = get_flat_date() + "_00"
-        if parsed_date is not None and (lastdayblog := get_row(flat_date_hour)):
-            return lastdayblog["html_content"], parse_flat_date_hour(flat_date_hour)
+    try:
+        if not strtobool(os.environ.get("DEBUG", False)):
+            if lastdayblog := get_row(flat_date_hour):
+                return lastdayblog["html_content"], parse_flat_date_hour(flat_date_hour)
+            flat_date_hour = get_flat_date() + "_00"
+            if parsed_date is not None and (lastdayblog := get_row(flat_date_hour)):
+                return lastdayblog["html_content"], parse_flat_date_hour(flat_date_hour)
+    except Exception as e:
+        print("Error fetching from storage:", e)
+        if str(e) == "KeyError: 'html_content'":
+            pass
         
     lastdayblogs = get_last_n_rows(30)
     lastdayblogstitles = [row.get("title", "") for row in lastdayblogs]
