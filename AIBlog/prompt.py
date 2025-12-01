@@ -1,6 +1,6 @@
 import os
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from AIBlog.azurestorage import get_row, upsert_history, get_last_n_rows
 from AIBlog.graph import *
 from utils import get_flat_date, get_flat_date_hour, parse_flat_date_hour, strtobool
@@ -19,8 +19,19 @@ async def getaiblog(parsed_date):
                 return lastdayblog["html_content"], parse_flat_date_hour(flat_date_hour)
     except Exception as e:
         print("Error fetching from storage:", e)
-        if str(e) == "KeyError: 'html_content'":
-            pass
+        if str(e) == 'html_content':
+            if ldbtimestamp := lastdayblog["Timestamp"]:                 # datetime with timezone
+                now = datetime.now(timezone.utc)
+                age = now - ldbtimestamp
+
+                if age > timedelta(minutes=30):
+                    print("Entity is older than 30 minutes.")
+                    pass
+                else:
+                    print("Entity is fresh.")
+                    raise e
+        else:
+            raise e
         
     lastdayblogs = get_last_n_rows(30)
     lastdayblogstitles = [row.get("title", "") for row in lastdayblogs]
