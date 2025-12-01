@@ -9,10 +9,133 @@ from AIOpenProblemSolver.azurestorage import (
     save_iteration,
 )
 from AIOpenProblemSolver.graph import get_open_deep_search_agent
-from langgraph.types import Overwrite, StateSnapshot
+
+try:  # LangGraph >= 0.2
+    from langgraph.types import Overwrite, StateSnapshot
+except ImportError:  # pragma: no cover - fallback for older installations
+    Overwrite = None  # type: ignore[assignment]
+    StateSnapshot = None  # type: ignore[assignment]
+
+try:  # LangChain >= 0.2
+    from langchain_core.messages import AIMessage
+except ImportError:  # pragma: no cover - fallback for minimal installs
+    AIMessage = None  # type: ignore[assignment]
 
 DEFAULT_PAGE_SIZE = int(os.getenv("AIOPS_PAGE_SIZE", "5"))
 GRAPH_RECURSION_LIMIT = int(os.getenv("GRAPH_RECURSION_LIMIT", "1000"))
+
+
+def _maybe_overwrite_value(value: Any) -> Any:
+    if Overwrite is not None and isinstance(value, Overwrite):
+        return value.value
+    return value
+
+
+def _is_assistant_role(role: Optional[str]) -> bool:
+    return bool(role) and role.lower() in {"ai", "assistant"}
+
+
+def _stringify_content(content: Any) -> Optional[str]:
+    if content is None:
+        return None
+    if isinstance(content, str):
+        return content
+    if isinstance(content, (int, float, bool)):
+        return str(content)
+    if isinstance(content, dict):
+        text = content.get("text") or content.get("content")
+        if isinstance(text, str):
+            return text
+        if isinstance(text, list):
+            return _stringify_content(text)
+    if isinstance(content, list):
+        pieces: List[str] = []
+        for item in content:
+            text = _stringify_content(item)
+            if isinstance(text, str) and text.strip():
+                pieces.append(text.strip())
+        if pieces:
+            return "\n".join(pieces)
+    return None
+
+
+def _assistant_message_content(message: Any) -> Optional[str]:
+    msg = _maybe_overwrite_value(message)
+    if AIMessage is not None and isinstance(msg, AIMessage):
+        content = _stringify_content(getattr(msg, "content", None))
+        if content:
+            return content
+
+    msg_role = getattr(msg, "type", None) or getattr(msg, "role", None)
+    if _is_assistant_role(msg_role):
+        content = _stringify_content(getattr(msg, "content", None))
+        if content:
+            return content
+
+    if isinstance(msg, dict):
+        role = msg.get("type") or msg.get("role")
+        if _is_assistant_role(role):
+            content = _stringify_content(msg.get("content"))
+            if content:
+                return content
+
+    if isinstance(msg, tuple) and len(msg) == 2:
+        role, content = msg
+        if _is_assistant_role(role):
+            text = _stringify_content(content)
+            if text:
+                return text
+
+    return None
+
+
+def _extract_assistant_reply(messages: Any) -> Optional[str]:
+    if messages is None or isinstance(messages, str):
+        return None
+
+    try:
+        iterable = list(messages)
+    except TypeError:
+        return None
+
+    fallback_json: Optional[str] = None
+    fallback_plain: Optional[str] = None
+    for candidate in reversed(iterable):
+        text = _assistant_message_content(candidate)
+        if isinstance(text, str) and text.strip():
+            return text
+
+        fallback_source = candidate
+        if isinstance(candidate, tuple) and len(candidate) == 2:
+            fallback_source = candidate[1]
+
+        fallback_text = _stringify_content(fallback_source)
+        if isinstance(fallback_text, str):
+            stripped = fallback_text.strip()
+            if stripped.startswith("{") and stripped.endswith("}"):
+                fallback_json = fallback_text
+                break
+            if fallback_plain is None and stripped:
+                fallback_plain = fallback_text
+
+    return fallback_json or fallback_plain
+
+
+def _extract_message_container(payload: Any) -> Optional[Dict[str, Any]]:
+    obj = _maybe_overwrite_value(payload)
+    if StateSnapshot is not None and isinstance(obj, StateSnapshot):
+        obj = obj.values
+
+    if isinstance(obj, dict):
+        return obj
+
+    if isinstance(obj, (list, tuple)):
+        for item in reversed(obj):
+            container = _extract_message_container(item)
+            if container:
+                return container
+
+    return None
 
 
 def _rowkey_now() -> str:
@@ -114,25 +237,17 @@ Date (UTC): {today.strftime('%Y-%m-%d')}
 Task: Continue the research and report today's progress. Cite every external claim with links.
 """
 
-    final_message: Optional[str] = None
-    async for event in agent.astream(
-        {"messages": [("system", system_prompt.strip()), ("user", user_prompt.strip())]},
-        {"recursion_limit": GRAPH_RECURSION_LIMIT},
-    ):
-        for value in event.values():
-            payload = value.value if isinstance(value, Overwrite) else value
-            if isinstance(payload, StateSnapshot):
-                payload = payload.values
-            if not isinstance(payload, dict):
-                continue
-            messages = payload.get("messages") or []
-            if not messages:
-                continue
-            message = messages[-1]
-            if hasattr(message, "content") and isinstance(message.content, str):
-                final_message = message.content
+    agent_input = {"messages": [("system", system_prompt.strip()), ("user", user_prompt.strip())]}
+    final_state = await agent.ainvoke(agent_input, {"recursion_limit": GRAPH_RECURSION_LIMIT})
 
-    if not final_message:
+    payload = _extract_message_container(final_state)
+
+    final_message: Optional[str] = None
+    if payload:
+        messages = _maybe_overwrite_value(payload.get("messages") or [])
+        final_message = _extract_assistant_reply(messages)
+
+    if final_message is None:
         raise RuntimeError("The research agent did not return any content.")
 
     try:

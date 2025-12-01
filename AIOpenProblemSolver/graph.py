@@ -38,7 +38,7 @@ async def get_open_deep_search_agent():
     )
 
     #search_tools: List = [ddg_search_results, ddg_search, tavily_search]
-    search_tools: List = [{ type: "web_search" }, ddg_search_results, ddg_search, tavily_search]
+    search_tools: List = [{ 'type': "web_search" }, ddg_search_results, ddg_search, tavily_search]
     browse_tools = await get_browse_web_tools()
     tools = [_truncate_tool_output(tool) for tool in [*search_tools, *browse_tools]]
 
