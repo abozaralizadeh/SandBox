@@ -9,6 +9,7 @@ from AIOpenProblemSolver.azurestorage import (
     save_iteration,
 )
 from AIOpenProblemSolver.graph import get_open_deep_search_agent
+from langgraph.types import Overwrite, StateSnapshot
 
 DEFAULT_PAGE_SIZE = int(os.getenv("AIOPS_PAGE_SIZE", "5"))
 GRAPH_RECURSION_LIMIT = int(os.getenv("GRAPH_RECURSION_LIMIT", "1000"))
@@ -119,7 +120,15 @@ Task: Continue the research and report today's progress. Cite every external cla
         {"recursion_limit": GRAPH_RECURSION_LIMIT},
     ):
         for value in event.values():
-            message = value["messages"][-1]
+            payload = value.value if isinstance(value, Overwrite) else value
+            if isinstance(payload, StateSnapshot):
+                payload = payload.values
+            if not isinstance(payload, dict):
+                continue
+            messages = payload.get("messages") or []
+            if not messages:
+                continue
+            message = messages[-1]
             if hasattr(message, "content") and isinstance(message.content, str):
                 final_message = message.content
 
