@@ -58,7 +58,7 @@ You are Open Deep Search, an autonomous mathematician tasked with advancing fron
         agent = create_deep_agent(
             model=llm,
             tools=tools,
-            instructions=instructions,
+            system_prompt=instructions,
         )
         return agent
     except TypeError as exc:
