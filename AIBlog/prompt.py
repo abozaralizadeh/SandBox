@@ -20,7 +20,7 @@ async def getaiblog(parsed_date):
     except Exception as e:
         print("Error fetching from storage:", e)
         if isinstance(e, KeyError) and e.args[0] == 'html_content':
-            if ldbtimestamp := lastdayblog["Timestamp"]:                 # datetime with timezone
+            if ldbtimestamp := lastdayblog.metadata["timestamp"]:                 # datetime with timezone
                 now = datetime.now(timezone.utc)
                 age = now - ldbtimestamp
 
