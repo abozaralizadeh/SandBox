@@ -12,7 +12,7 @@ def _extract_text_from_last_message(last_message: Any) -> str:
     try:
         if isinstance(last_message.content, str):
             return last_message.content
-        return last_message.text
+        return str(last_message.text)
     except Exception:
         return str("last_message:", last_message)
 
@@ -40,7 +40,8 @@ async def getaiblog(parsed_date):
                     pass
                 else:
                     print("Entity is fresh.")
-                    raise e
+                    if not strtobool(os.environ.get("DEBUG", False)):
+                        raise e
         else:
             raise e
         
