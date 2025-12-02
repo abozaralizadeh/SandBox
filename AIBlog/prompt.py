@@ -1,9 +1,20 @@
 import os
 import asyncio
 from datetime import datetime, timedelta, timezone
+from typing import Any, List
 from AIBlog.azurestorage import get_row, upsert_history, get_last_n_rows
 from AIBlog.graph import *
 from utils import get_flat_date, get_flat_date_hour, parse_flat_date_hour, strtobool
+
+
+def _extract_text_from_last_message(last_message: Any) -> str:
+    """Extract text content from the last message, handling different formats."""
+    try:
+        if isinstance(last_message.content, str):
+            return last_message.content
+        return last_message.text
+    except Exception:
+        return str("last_message:", last_message)
 
 
 async def getaiblog(parsed_date):
@@ -96,7 +107,10 @@ async def getaiblog(parsed_date):
         print("event: ", event)
         for value in event.values():
             print("React Agent:", value["messages"][-1].content)
-    content = value["messages"][-1].content
+
+    last_message = value["messages"][-1]
+    # When the web_search tool is active, responses arrive as structured chunks.
+    content = _extract_text_from_last_message(last_message)
     if not strtobool(os.environ.get("DEBUG", False)) or strtobool(os.environ.get("DEBUG_SAVE", False)):
         upsert_history(rowkey=flat_date_hour, html_content=content)
     return content, timestamp
