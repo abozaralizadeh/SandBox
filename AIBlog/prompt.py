@@ -1,20 +1,53 @@
 import os
+import re
 import asyncio
 from datetime import datetime, timedelta, timezone
-from typing import Any, List
+from typing import Any, Iterable, List
 from AIBlog.azurestorage import get_row, upsert_history, get_last_n_rows
 from AIBlog.graph import *
 from utils import get_flat_date, get_flat_date_hour, parse_flat_date_hour, strtobool
 
 
+_PRIVATE_USE_RE = re.compile(r"[\ue000-\uf8ff]")
+
+
+def _flatten_message_content(payload: Any) -> str:
+    """Recursively extract plain text from LangChain/LangGraph message payloads."""
+    if payload is None:
+        return ""
+    if isinstance(payload, str):
+        return payload
+    if isinstance(payload, dict):
+        # Azure responses store text blocks under {'type': 'text', 'text': '...'}
+        if "text" in payload and payload.get("type") in (None, "text", "output_text"):
+            return str(payload["text"])
+        # Skip annotation metadata; just flatten actual values.
+        pieces = []
+        for key, value in payload.items():
+            if key == "annotations":
+                continue
+            pieces.append(_flatten_message_content(value))
+        return "".join(pieces)
+    if isinstance(payload, Iterable) and not isinstance(payload, (bytes, bytearray)):
+        return "".join(_flatten_message_content(item) for item in payload)
+    if hasattr(payload, "content"):
+        return _flatten_message_content(payload.content)
+    if hasattr(payload, "text"):
+        return _flatten_message_content(payload.text)
+    return str(payload)
+
+
 def _extract_text_from_last_message(last_message: Any) -> str:
     """Extract text content from the last message, handling different formats."""
+    # Fall back to direct attributes if flattening failed.
     try:
         if isinstance(last_message.content, str):
-            return last_message.content
-        return str(last_message.text)
+            raw = last_message.content
+        elif hasattr(last_message, "text"):
+            raw = str(last_message.text)
     except Exception:
-        return str("last_message:", last_message)
+        raw = str(last_message)
+    return _PRIVATE_USE_RE.sub(" ", raw)
 
 
 async def getaiblog(parsed_date):
