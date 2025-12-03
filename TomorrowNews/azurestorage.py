@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 import requests
 import os
 import uuid
+from urllib.parse import urlparse
 
 load_dotenv()
 # Configuration
@@ -21,6 +22,74 @@ table_client = service_client.get_table_client(table_name)
 blob_service_client = BlobServiceClient.from_connection_string(connection_string)
 # Create the container if it does not exist
 container_client = blob_service_client.get_container_client(container_name)
+
+MAX_TABLE_PROPERTY_CHARS = 32000
+
+
+def _ensure_container(client):
+    try:
+        client.create_container()
+    except Exception:
+        # Container already exists (or similar benign error)
+        pass
+
+
+def _get_blob_client(identifier: str):
+    """Return a BlobClient for either a blob name or a full URL."""
+    if identifier.startswith(("https://", "http://")):
+        parsed = urlparse(identifier)
+        path = parsed.path.lstrip("/")
+        if "/" not in path:
+            raise ValueError("Blob URL missing container/blob segments")
+        container, blob_name = path.split("/", 1)
+        return blob_service_client.get_blob_client(container=container, blob=blob_name)
+    return container_client.get_blob_client(identifier)
+
+
+def upload_html_to_blob(html_content: str) -> str:
+    """Upload large HTML payloads to blob storage."""
+    _ensure_container(container_client)
+    blob_name = f"{get_flat_date_full()}_{uuid.uuid4()}.html"
+    blob_client = container_client.get_blob_client(blob_name)
+    blob_client.upload_blob(html_content.encode("utf-8"), overwrite=True)
+    return blob_name
+
+
+def download_html_from_blob(identifier: str) -> str:
+    blob_client = _get_blob_client(identifier)
+    downloader = blob_client.download_blob()
+    return downloader.readall().decode("utf-8")
+
+
+def _should_offload_to_blob(html_content: str) -> bool:
+    return bool(html_content) and len(html_content) > MAX_TABLE_PROPERTY_CHARS
+
+
+def _attach_html_payload(entity: dict, html_content: str) -> dict:
+    try:
+        if _should_offload_to_blob(html_content):
+            blob_name = upload_html_to_blob(html_content)
+            entity["html_content"] = ""
+            entity["html_blob_name"] = blob_name
+        else:
+            entity["html_content"] = html_content or ""
+            entity["html_blob_name"] = ""
+    except Exception as blob_error:
+        print(f"Error uploading HTML to blob, trimming payload instead: {blob_error}")
+        trimmed_html = (html_content or "")[:MAX_TABLE_PROPERTY_CHARS]
+        entity["html_content"] = trimmed_html
+        entity["html_blob_name"] = ""
+    return entity
+
+
+def _hydrate_html_content(entity: dict) -> dict:
+    blob_name = entity.get("html_blob_name")
+    if blob_name:
+        try:
+            entity["html_content"] = download_html_from_blob(blob_name)
+        except Exception as e:
+            print(f"Error downloading HTML blob '{blob_name}': {e}")
+    return entity
 
 def save_photo_to_blob(photo_url):
     """
@@ -80,8 +149,8 @@ def insert_history(rowkey, html_content):
     entity = {
         "PartitionKey": "getimagetool",  # Logical grouping for entities
         "RowKey": rowkey,                # Unique identifier within the partition
-        "html_content": html_content
     }
+    _attach_html_payload(entity, html_content)
     # Insert the entity
     try:
         table_client.create_entity(entity=entity)
@@ -119,6 +188,7 @@ def get_row(rowkey):
     try:
         # Retrieve the entity (row) using the PartitionKey and RowKey
         entity = table_client.get_entity(partition_key="getimagetool", row_key=rowkey)
+        entity = _hydrate_html_content(entity)
         print(f"Row retrieved successfully: {entity}")
         return entity
     except Exception as e:
