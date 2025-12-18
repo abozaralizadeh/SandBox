@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>ComicBook</title>
+    <link rel="icon" type="image/png" href="/static/faviconTN.png">
+    <style>
+        :root {
+            --bg: radial-gradient(circle at 20% 20%, #0d1b2a, #060b16 45%);
+            --card: rgba(14, 24, 40, 0.8);
+            --accent: #ff6f4c;
+            --muted: #8fb3ff;
+            --text: #e4ecff;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            min-height: 100vh;
+            background: var(--bg);
+            color: var(--text);
+            font-family: "Space Grotesk", "Inter", system-ui, -apple-system, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 24px;
+        }
+        .home-link {
+            align-self: flex-start;
+            color: var(--muted);
+            text-decoration: none;
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+        .home-link:hover { color: var(--text); }
+        .shell {
+            width: min(1100px, 100%);
+            background: var(--card);
+            border: 1px solid #1f3553;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.35);
+            overflow: hidden;
+        }
+        .header {
+            padding: 20px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid #1f3553;
+        }
+        .title {
+            font-size: 28px;
+            letter-spacing: 0.6px;
+            font-weight: 700;
+        }
+        .controls {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .controls input, .controls button {
+            padding: 10px 12px;
+            border-radius: 10px;
+            border: 1px solid #25406a;
+            background: #0d1829;
+            color: var(--text);
+            font-size: 14px;
+        }
+        .controls button {
+            background: linear-gradient(135deg, var(--accent), #f8ba78);
+            color: #0d0d0f;
+            font-weight: 700;
+            cursor: pointer;
+            border: none;
+        }
+        .controls button:hover { filter: brightness(1.05); }
+        .status {
+            font-size: 13px;
+            color: var(--muted);
+        }
+        #comicContainer {
+            min-height: 60vh;
+            background: #0c1525;
+            padding: 20px;
+            overflow: auto;
+        }
+        .loader {
+            width: 42px;
+            height: 42px;
+            border: 4px solid #1e3050;
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            margin: 40px auto;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @media (max-width: 720px) {
+            .header { flex-direction: column; align-items: flex-start; }
+            .title { font-size: 22px; }
+        }
+    </style>
+</head>
+<body>
+    <a class="home-link" href="/">← Back</a>
+    <div class="shell">
+        <div class="header">
+            <div class="title">ComicBook — Daily AI Comics</div>
+            <div class="controls">
+                <input type="date" id="datePicker" aria-label="Pick a date">
+                <button id="loadBtn">Load Comic</button>
+            </div>
+            <div class="status" id="statusText">Live arc loading…</div>
+        </div>
+        <div id="comicContainer">
+            <div class="loader" id="loader"></div>
+        </div>
+    </div>
+    <script>
+        const container = document.getElementById("comicContainer");
+        const loader = document.getElementById("loader");
+        const statusText = document.getElementById("statusText");
+        const datePicker = document.getElementById("datePicker");
+        const loadBtn = document.getElementById("loadBtn");
+
+        function isoFromDateInput(value) {
+            if (!value) return "";
+            const date = new Date(value);
+            if (Number.isNaN(date.getTime())) return "";
+            return date.toISOString();
+        }
+
+        async function loadComic() {
+            const dt = isoFromDateInput(datePicker.value);
+            const url = dt ? `/comicbookcontent?dt=${encodeURIComponent(dt)}` : "/comicbookcontent";
+            loader.style.display = "block";
+            container.innerHTML = "";
+            statusText.textContent = "Fetching today's strip…";
+            try {
+                const res = await fetch(url);
+                const text = await res.text();
+                const arcId = res.headers.get("Arc-Id") || "";
+                const timestamp = res.headers.get("Timestamp") || "";
+                container.innerHTML = text;
+                statusText.textContent = arcId ? `Arc: ${arcId} — ${timestamp}` : `Updated: ${timestamp}`;
+            } catch (err) {
+                container.innerHTML = "<p style='color:#ff6f4c'>Failed to load comic.</p>";
+                statusText.textContent = "Error loading comic.";
+                console.error(err);
+            } finally {
+                loader.style.display = "none";
+            }
+        }
+
+        loadBtn.addEventListener("click", loadComic);
+        document.addEventListener("DOMContentLoaded", loadComic);
+    </script>
+</body>
+</html>

@@ -9,6 +9,7 @@ load_dotenv()
 from flask import Flask, jsonify, make_response, request, render_template
 from AIBlog.prompt import *
 from TomorrowNews.prompt import *
+from ComicBook.prompt import get_comicbook
 from GenBox.prompt import get_llm_response
 from AIOpenProblemSolver.prompt import get_problem_history
 from AIOpenProblemSolver.azurestorage import (
@@ -69,6 +70,30 @@ def tomorrownewscontent():
         # Create a response object and add a custom header
         response = make_response(tomorrownews)
         response.headers['Timestamp'] = datetime  # Replace 'Custom-Header' and 'CustomValue' with your desired values
+        return response
+    else:
+        return "404 Not Found", 404
+
+@app.route('/comicbook', methods=['GET'])
+def comicbook():
+    return render_template('comicbook.html')
+
+@app.route('/comicbookcontent', methods=['GET'])
+def comicbookcontent():
+    referer = request.headers.get('Referer', '')
+    if referer:
+        parsed_date = None
+        date_param = request.args.get('dt')
+        if date_param:
+            try:
+                from datetime import datetime
+                parsed_date = datetime.fromisoformat(date_param)
+            except Exception:
+                parsed_date = None
+        comic_html, dt, arc_id = get_comicbook(parsed_date)
+        response = make_response(comic_html)
+        response.headers['Timestamp'] = dt
+        response.headers['Arc-Id'] = arc_id or ""
         return response
     else:
         return "404 Not Found", 404

@@ -101,4 +101,15 @@ I invite you to explore the very simple interface at https://SandBoxes.Live/genb
 
 ![TV](https://github.com/abozaralizadeh/SandBox/blob/main/static/sample.png?raw=true)
 
+## ComicBook
+
+Multi-Agent AI Comics Pipeline  
+ComicBook is a daily AI-driven comic strip generator orchestrated with an OpenAI Agents-style workflow (Director → Storyteller → Cartoonist → Layout). It reuses the shared DALL·E image tool, stores every episode in Azure Table/Blob Storage, and keeps story arcs alive for 7–10 days before launching a fresh plot.
+
+#### Highlights
+- **Role Hand‑offs**: Director sets beats, Storyteller writes scripts, Cartoonist calls the shared image tool, Layout renders responsive HTML.
+- **Arc Memory**: Azure storage tracks arc metadata, daily summaries, and panel prompts so each strip honors continuity.
+- **Auto Rollover**: When an arc runs 7–10 days, the system closes it and opens a new one automatically.
+- **Frontend**: `/comicbook` fetches the latest (or a selected date) and streams the rendered comic page.
+
 gunicorn --bind=0.0.0.0 --timeout 600 main:app
