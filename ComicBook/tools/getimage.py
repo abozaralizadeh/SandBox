@@ -39,7 +39,7 @@ def get_image_by_text(text: str) -> str:
         size="1024x1024",
     )
 
-    if model == "gpt-image-1":
+    if model != "dall-e-3":
         image_base64 = result.data[0].b64_json
         image_bytes = base64.b64decode(image_base64)
         blob_image_url = upload_image_bytes_to_blob(image_bytes)
@@ -64,7 +64,7 @@ def get_image_by_text_with_reference(text: str, reference_image_url: str = "") -
         "prompt": text,
         "size": "1024x1024",
     }
-    if reference_bytes and model == "gpt-image-1":
+    if reference_bytes and model != "dall-e-3":
         reference_file = BytesIO(reference_bytes)
         reference_file.name = "reference.png"  # Helps the client send a valid image mimetype
         kwargs["image"] = reference_file
@@ -72,7 +72,7 @@ def get_image_by_text_with_reference(text: str, reference_image_url: str = "") -
     # Use generate with an image parameter to steer style/characters
     result = client.images.edit(**kwargs)
 
-    if model == "gpt-image-1":
+    if model != "dall-e-3":
         image_base64 = result.data[0].b64_json
         image_bytes = base64.b64decode(image_base64)
         blob_image_url = upload_image_bytes_to_blob(image_bytes)

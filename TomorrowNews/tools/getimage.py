@@ -23,7 +23,7 @@ def get_image_by_text(text: str) -> str:
         n=1
     )
 
-    if model == "gpt-image-1":
+    if model != "dall-e-3":
         image_base64 = result.data[0].b64_json
         image_bytes = base64.b64decode(image_base64)
         blob_image_url = upload_image_bytes_to_blob(image_bytes)
