@@ -1,0 +1,706 @@
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import os
+import re
+from datetime import datetime, timezone
+from typing import Any, Dict, List
+
+from agents import Agent, Runner, OpenAIResponsesModel, set_tracing_disabled
+from agents.items import ToolCallOutputItem
+from agents.tool import function_tool
+
+set_tracing_disabled(True)
+from openai import AsyncAzureOpenAI
+
+from ComicBook.azurestorage import (
+    close_arc as _storage_close_arc,
+    get_active_arc,
+    get_recent_episodes,
+    save_episode,
+    start_new_arc as _storage_start_new_arc,
+    update_arc_metadata,
+)
+from ComicBook.tools.getimage import create_image, create_image_with_reference
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
+logger = logging.getLogger("ComicBook")
+
+
+# ---------------------------------------------------------------------------
+# OpenAI client
+# ---------------------------------------------------------------------------
+
+def _build_openai_client() -> AsyncAzureOpenAI:
+    return AsyncAzureOpenAI(
+        api_key=os.environ["AZURE_OPENAI_API_KEY"],
+        api_version=os.environ.get("AZURE_OPENAI_API_VERSION", "2025-04-01-preview"),
+        azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
+        azure_deployment=os.environ.get("AZURE_OPENAI_MODEL", "gpt-4o"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _extract_first_image_url(html: str) -> str:
+    if not html:
+        return ""
+    match = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', html, re.IGNORECASE)
+    return match.group(1) if match else ""
+
+
+def _summarize_episodes(episodes: list) -> str:
+    if not episodes:
+        return "No prior episodes — this is a fresh start."
+    lines = []
+    for ep in episodes:
+        day = ep.get("episode_number", "?")
+        date = ep.get("RowKey", "")
+        summary = ep.get("story_summary", "")
+        lines.append(f"Episode {day} ({date}): {summary}")
+    return "\n".join(lines)
+
+
+def _escape_html(text: str) -> str:
+    return (text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+
+
+def _panel_grid_area(index: int, size: str, total: int) -> str:
+    """Assign CSS grid-area name based on panel index, size, and total count."""
+    return f"p{index + 1}"
+
+
+def _build_grid_template(panels: list) -> str:
+    """Build a CSS grid-template that arranges panels in a comic-book layout.
+
+    Rules:
+    - 'wide' panels span the full row (2 columns)
+    - 'tall' panels take 2 rows in a single column
+    - 'square' panels pair up side-by-side when adjacent
+    The grid uses 2 equal columns. Each row is auto-height.
+    """
+    areas: List[List[str]] = []
+    i = 0
+    n = len(panels)
+    while i < n:
+        size = panels[i].get("size", "square")
+        name = f"p{i + 1}"
+
+        if size == "wide":
+            areas.append([name, name])
+            i += 1
+        elif size == "tall":
+            next_i = i + 1
+            if next_i < n and panels[next_i].get("size") == "tall":
+                name2 = f"p{next_i + 1}"
+                areas.append([name, name2])
+                areas.append([name, name2])
+                i += 2
+            elif next_i < n and panels[next_i].get("size") == "square":
+                name2 = f"p{next_i + 1}"
+                areas.append([name, name2])
+                areas.append([name, "."])
+                i += 2
+            elif next_i < n and panels[next_i].get("size") == "wide":
+                name2 = f"p{next_i + 1}"
+                areas.append([name, name])
+                areas.append([name, name])
+                areas.append([name2, name2])
+                i += 2
+            else:
+                areas.append([name, "."])
+                areas.append([name, "."])
+                i += 1
+        else:
+            next_i = i + 1
+            if next_i < n and panels[next_i].get("size") == "square":
+                name2 = f"p{next_i + 1}"
+                areas.append([name, name2])
+                i += 2
+            elif next_i < n and panels[next_i].get("size") == "tall":
+                name2 = f"p{next_i + 1}"
+                areas.append([name, name2])
+                areas.append([".", name2])
+                i += 2
+            else:
+                areas.append([name, name])
+                i += 1
+
+    rows_str = " ".join(f'"{r[0]} {r[1]}"' for r in areas)
+    return rows_str
+
+
+def _assemble_html(
+    arc_title: str,
+    episode_number: int,
+    date_str: str,
+    recap: str,
+    teaser: str,
+    panels: list,
+) -> str:
+    grid_template = _build_grid_template(panels)
+
+    panel_html_parts = []
+    for idx, p in enumerate(panels):
+        num = p.get("number", idx + 1)
+        img = p.get("image_url", "")
+        size = p.get("size", "square")
+        dialogue = p.get("dialogue", "")
+        caption = p.get("caption", "")
+        sfx = p.get("sfx", "")
+
+        size_class = f"panel-{size}" if size in ("wide", "tall", "square") else "panel-square"
+        area_name = f"p{idx + 1}"
+
+        overlay_parts = []
+        if caption:
+            overlay_parts.append(f'<div class="caption-box">{_escape_html(caption)}</div>')
+        if dialogue:
+            for line in dialogue.split("\n"):
+                line = line.strip()
+                if line:
+                    overlay_parts.append(f'<div class="speech-bubble">{_escape_html(line)}</div>')
+        if sfx:
+            overlay_parts.append(f'<div class="sfx">{_escape_html(sfx)}</div>')
+
+        overlay_section = ""
+        if overlay_parts:
+            overlay_section = '<div class="panel-overlay">' + "\n".join(overlay_parts) + "</div>"
+
+        panel_html_parts.append(
+            f'<div class="panel {size_class}" style="grid-area:{area_name}">'
+            f'<img src="{_escape_html(img)}" alt="Panel {num}" loading="lazy">'
+            f"{overlay_section}"
+            f"</div>"
+        )
+
+    panels_block = "\n".join(panel_html_parts)
+    safe_title = _escape_html(arc_title)
+    safe_recap = _escape_html(recap)
+    safe_teaser = _escape_html(teaser)
+
+    return f"""<style>
+@import url('https://fonts.googleapis.com/css2?family=Bangers&display=swap');
+.comic-page {{ font-family: 'Bangers', 'Comic Sans MS', cursive, sans-serif; max-width: 960px; margin: 0 auto; background: #f5f0e1; border-radius: 12px; padding: 24px; box-shadow: 0 4px 24px rgba(0,0,0,0.18); }}
+.comic-header {{ text-align: center; border-bottom: 4px solid #111; padding-bottom: 16px; margin-bottom: 20px; }}
+.comic-title {{ font-size: 2.6em; color: #111; text-transform: uppercase; letter-spacing: 3px; margin: 0; text-shadow: 2px 2px 0 #c0a060; }}
+.comic-meta {{ color: #333; font-size: 1em; margin-top: 6px; letter-spacing: 1px; font-weight: bold; }}
+.comic-recap {{ color: #222; margin: 14px 0 20px; padding: 12px 16px; background: #fff8dc; border-left: 5px solid #b8860b; border-radius: 4px; font-family: Georgia, serif; font-size: 0.95em; line-height: 1.6; font-style: italic; }}
+.comic-panels {{ display: grid; grid-template-columns: 1fr 1fr; grid-template-areas: {grid_template}; gap: 10px; }}
+.panel {{ position: relative; border: 3px solid #111; border-radius: 6px; overflow: hidden; background: #fff; box-shadow: 2px 3px 6px rgba(0,0,0,0.25); }}
+.panel img {{ width: 100%; height: 100%; object-fit: cover; display: block; }}
+.panel-overlay {{ position: absolute; bottom: 0; left: 0; right: 0; padding: 10px 12px; display: flex; flex-direction: column; gap: 5px; align-items: flex-start; pointer-events: none; background: linear-gradient(transparent 0%, rgba(0,0,0,0.45) 100%); }}
+.speech-bubble {{ background: #fff; color: #111; border: 2px solid #000; border-radius: 18px; padding: 7px 14px; font-size: 0.88em; max-width: 80%; box-shadow: 2px 2px 0 rgba(0,0,0,0.2); font-family: 'Bangers', 'Comic Sans MS', cursive; letter-spacing: 0.5px; line-height: 1.3; }}
+.caption-box {{ background: #fffacd; color: #222; border: 2px solid #b8860b; padding: 6px 12px; font-style: italic; font-size: 0.82em; font-family: Georgia, serif; border-radius: 3px; max-width: 95%; line-height: 1.4; box-shadow: 1px 1px 0 rgba(0,0,0,0.15); }}
+.sfx {{ font-size: 2em; font-weight: 900; color: #e63946; text-shadow: 2px 2px 0 #ffd166, -1px -1px 0 #111, 1px -1px 0 #111, -1px 1px 0 #111; font-style: italic; letter-spacing: 2px; }}
+.comic-footer {{ text-align: center; margin-top: 20px; padding-top: 14px; border-top: 4px solid #111; }}
+.teaser {{ font-weight: bold; color: #111; font-size: 1.15em; font-style: italic; letter-spacing: 0.5px; }}
+.comic-branding {{ color: #888; font-size: 0.75em; margin-top: 8px; font-family: sans-serif; }}
+@media (max-width: 600px) {{
+  .comic-page {{ padding: 10px; }}
+  .comic-title {{ font-size: 1.6em; letter-spacing: 1px; }}
+  .comic-panels {{ grid-template-columns: 1fr; grid-template-areas: none; }}
+  .panel {{ grid-area: auto !important; }}
+  .speech-bubble {{ max-width: 92%; font-size: 0.82em; }}
+  .caption-box {{ font-size: 0.78em; }}
+}}
+</style>
+<div class="comic-page">
+  <div class="comic-header">
+    <h1 class="comic-title">{safe_title}</h1>
+    <div class="comic-meta">Episode {episode_number} &bull; {_escape_html(date_str)}</div>
+  </div>
+  <div class="comic-recap">{safe_recap}</div>
+  <div class="comic-panels">
+    {panels_block}
+  </div>
+  <div class="comic-footer">
+    <div class="teaser">{safe_teaser}</div>
+    <div class="comic-branding">Generated by AI ComicBook</div>
+  </div>
+</div>"""
+
+
+# ---------------------------------------------------------------------------
+# Agent instructions
+# ---------------------------------------------------------------------------
+
+DIRECTOR_INSTRUCTIONS = """\
+You are the Director of an AI-generated daily comic strip series.
+
+YOUR CREATIVE MANDATE:
+- Every story arc must be ORIGINAL — new characters, new world, new genre, new tone each time.
+- Draw from the full spectrum of genres: sci-fi, fantasy, noir, slice-of-life, horror-comedy,
+  mythological, surreal, western, cyberpunk, fairy-tale-gone-wrong, steampunk, underwater
+  civilization, time-travel romance, philosophical comedy, post-apocalyptic wholesome, etc.
+- Characters must have distinct names, personalities, visual signatures (hair color, clothing,
+  distinguishing features), flaws, and motivations — never generic "the hero" or "the villain."
+- Stories must have real stakes, surprising twists, and genuine emotional beats.
+- Vary the tone: some arcs should be funny, some dark, some bittersweet, some wild and surreal.
+
+ARC LIFECYCLE:
+1. First, call get_arc_status to check if there's an active story arc.
+2. If NO active arc exists:
+   - Invent a completely fresh, creative story premise.
+   - Choose an unexpected genre/tone combination.
+   - Create 2-4 compelling main characters with names, detailed visual descriptions,
+     and personality traits.
+   - Pick a distinctive art style for this arc (e.g., "ink wash noir", "vibrant manga",
+     "watercolor whimsy", "retro pixel art", "charcoal sketch", "pop art bold").
+   - Decide how many episodes the story naturally needs (could be 3, could be 15 —
+     let the story dictate, not a fixed number).
+   - Call start_new_arc with your creative details.
+3. If an ACTIVE arc exists:
+   - Review the recent episode summaries for continuity.
+   - Decide if the story has reached its natural conclusion. If yes, call end_current_arc
+     with a conclusion note, then start a fresh arc as described above.
+   - If the story should continue, plan today's episode to advance the plot meaningfully.
+     No filler episodes.
+
+EPISODE PLANNING:
+- Decide the number of panels (4-8) based on what today's episode needs.
+- For each panel, decide the size:
+  "wide" for establishing shots, landscapes, or action sequences;
+  "tall" for dramatic reveals or full-body character moments;
+  "square" for dialogue scenes and close-ups.
+- Describe the overall tone, visual style, and key dramatic moments.
+- Identify which characters appear and any new characters introduced.
+- Decide on the cliffhanger or resolution beat for this episode.
+
+OUTPUT:
+End your response with the complete episode plan. Include ALL details the Storyteller \
+needs: arc title, art style, character descriptions, panel count, size per panel, tone, \
+key story beats, and the cliffhanger or resolution.\
+"""
+
+STORYTELLER_INSTRUCTIONS = """\
+You are the Storyteller — a master comic script writer.
+
+You will receive the Director's episode plan as input. Transform it into a vivid, \
+panel-by-panel script.
+
+FOR EACH PANEL, you must provide:
+- **Panel number** and **size** ("wide" for establishing shots/landscapes/action,
+  "tall" for dramatic reveals/full-body moments, "square" for dialogue/close-ups)
+- **Setting**: Location, time of day, lighting, weather, dominant colors, atmosphere
+- **Characters**: Who appears, their positions, poses, facial expressions, body language
+- **Dialogue**: Speech bubble text — each character's lines on separate lines,
+  prefixed with their name (e.g., "MAYA: We need to go now!")
+- **Caption**: Narrator text (if any) — for scene-setting, inner monologue, or time jumps
+- **Sound effects**: Onomatopoeia (CRASH!, *whoosh*, BZZT) if relevant
+- **Camera angle**: Close-up, medium shot, wide shot, bird's eye, worm's eye, dutch angle
+
+WRITING RULES:
+- Show, don't tell — let the art carry emotion where possible.
+- Every panel must advance the story or deepen a character. No wasted panels.
+- Dialogue must sound natural and DISTINCT per character — give each character a
+  recognizable voice. A gruff mechanic speaks differently from a shy academic.
+- Include a 2-line RECAP at the top for returning readers.
+- End with a 1-line TEASER that hooks the reader for the next episode.
+- Pacing matters: vary panel sizes to control rhythm. Wide panels slow time down,
+  small square panels speed it up.
+
+OUTPUT:
+Write the complete panel-by-panel script as your response. Include the RECAP at the top \
+and the TEASER at the end.\
+"""
+
+CARTOONIST_INSTRUCTIONS = """\
+You are the Cartoonist — you bring scripts to life through generated images \
+and assemble the final comic page.
+
+You will receive the Storyteller's panel-by-panel script as input.
+
+WORKFLOW (follow this exact order):
+
+STEP 1 — READ the complete script from your input. Note all characters, their visual \
+descriptions, the art style, and every panel's requirements.
+
+STEP 2 — GENERATE CHARACTER REFERENCE SHEET:
+Call generate_character_sheet with:
+- description: A detailed description of ALL main characters (appearance, clothing, \
+distinguishing features) AND the primary environment/setting for this episode.
+- style: The art style specified by the Director (e.g., "ink wash noir", "vibrant manga", \
+"watercolor whimsy", "pixel art retro").
+This reference image is your visual anchor. Every panel must be consistent with it.
+
+STEP 3 — GENERATE EACH PANEL:
+For every panel in the script, call generate_panel_image with:
+- prompt: A detailed image generation prompt. Include:
+  * Character names and their specific visual traits (hair color, clothing, etc.)
+  * Pose, expression, body language
+  * Background/environment details
+  * Lighting, mood, color palette
+  * Camera angle as specified in the script
+  * The art style (must be consistent across all panels)
+- reference_url: The URL returned from step 2 (the character reference sheet)
+- size: "wide", "tall", or "square" as specified in the script
+
+STEP 4 — ASSEMBLE LAYOUT:
+After ALL images are generated, call assemble_layout with:
+- arc_title: The story arc title
+- episode_number: The current episode number
+- date: Today's date
+- recap: The 2-line recap from the Storyteller's script
+- teaser: The 1-line teaser from the Storyteller's script
+- panels_json: A JSON string containing a list of panel objects:
+  [{{"number": 1, "image_url": "https://...", "size": "wide", "dialogue": "Character: Line", \
+"caption": "Narrator text", "sfx": "BOOM"}}, ...]
+
+IMPORTANT RULES:
+- ALWAYS use the reference URL from step 2 for every panel — this ensures character consistency.
+- Never fabricate or guess image URLs — only use URLs returned by the tools.
+- Include character-specific visual details in every prompt to maintain consistency.
+- Match the art style across ALL panels.
+- Your final response after calling assemble_layout should confirm the comic was assembled.\
+"""
+
+
+# ---------------------------------------------------------------------------
+# Pipeline runner
+# ---------------------------------------------------------------------------
+
+def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
+    """Run the Director -> Storyteller -> Cartoonist pipeline. Returns dict with html, narrative, etc."""
+    logger.info("=" * 70)
+    logger.info("COMIC PIPELINE START — target_date=%s", target_date.strftime("%Y-%m-%d"))
+    logger.info("=" * 70)
+
+    client = _build_openai_client()
+    model_name = os.environ.get("AZURE_OPENAI_MODEL", "gpt-4o")
+    logger.info("Using model: %s", model_name)
+    model = OpenAIResponsesModel(
+        model=model_name,
+        openai_client=client,
+    )
+
+    arc = get_active_arc()
+    episode_number = (int(arc.get("episodes_count", 0)) + 1) if arc else 1
+    recent = get_recent_episodes(arc["RowKey"], limit=5) if arc else []
+    last_image = ""
+    if recent:
+        last_html = recent[0].get("html_content", "")
+        last_image = _extract_first_image_url(last_html)
+
+    if arc:
+        logger.info("Active arc found: '%s' (%s), episode #%d", arc.get("title", ""), arc["RowKey"], episode_number)
+    else:
+        logger.info("No active arc — Director will create a new one")
+
+    state: Dict[str, Any] = {
+        "arc": arc,
+        "episode_number": episode_number,
+    }
+
+    # ------------------------------------------------------------------
+    # Tool definitions (closures over mutable state)
+    # ------------------------------------------------------------------
+
+    @function_tool
+    async def get_arc_status() -> Dict[str, Any]:
+        """Get the current story arc status including title, characters, episode count, and recent summaries."""
+        logger.info("TOOL get_arc_status called")
+        a = state["arc"]
+        if not a:
+            logger.info("  -> No active arc found")
+            return {
+                "status": "no_active_arc",
+                "message": "No active story arc. You must create a new one.",
+            }
+        recent_eps = get_recent_episodes(a["RowKey"], limit=5)
+        logger.info("  -> Active arc: '%s' (%s), %s episodes so far",
+                     a.get("title", ""), a["RowKey"], a.get("episodes_count", 0))
+        return {
+            "status": "active",
+            "arc_id": a["RowKey"],
+            "title": a.get("title", ""),
+            "logline": a.get("logline", ""),
+            "genre": a.get("genre", ""),
+            "planned_episodes": a.get("planned_episodes", "unset"),
+            "episodes_so_far": int(a.get("episodes_count", 0)),
+            "episode_number_today": state["episode_number"],
+            "start_date": a.get("start_date", ""),
+            "characters": a.get("characters", ""),
+            "art_style": a.get("art_style", ""),
+            "recent_episodes": _summarize_episodes(recent_eps),
+            "last_reference_image": last_image,
+        }
+
+    @function_tool
+    async def start_new_arc(
+        title: str,
+        logline: str,
+        genre: str,
+        planned_episodes: int,
+        characters: str,
+        art_style: str,
+    ) -> Dict[str, Any]:
+        """Create a brand new story arc with original characters, world, and art style."""
+        logger.info("TOOL start_new_arc called: title='%s', genre='%s', planned_episodes=%s, art_style='%s'",
+                     title, genre, planned_episodes, art_style)
+        new_arc = _storage_start_new_arc(
+            title=title,
+            logline=logline,
+            target_days=planned_episodes,
+            start_date=target_date,
+        )
+        update_arc_metadata(
+            new_arc["RowKey"],
+            genre=genre,
+            planned_episodes=planned_episodes,
+            characters=characters,
+            art_style=art_style,
+        )
+        new_arc.update(
+            genre=genre,
+            planned_episodes=planned_episodes,
+            characters=characters,
+            art_style=art_style,
+        )
+        state["arc"] = new_arc
+        state["episode_number"] = 1
+        logger.info("  -> New arc created: %s", new_arc["RowKey"])
+        return {
+            "status": "created",
+            "arc_id": new_arc["RowKey"],
+            "title": title,
+            "logline": logline,
+            "genre": genre,
+            "planned_episodes": planned_episodes,
+            "characters": characters,
+            "art_style": art_style,
+        }
+
+    @function_tool
+    async def end_current_arc(conclusion_note: str) -> Dict[str, Any]:
+        """Close the current story arc when the story has reached its natural conclusion."""
+        logger.info("TOOL end_current_arc called: %s", conclusion_note[:100])
+        a = state["arc"]
+        if not a:
+            logger.warning("  -> No active arc to close!")
+            return {"error": "No active arc to close"}
+        _storage_close_arc(a["RowKey"], end_date=target_date)
+        update_arc_metadata(a["RowKey"], conclusion=conclusion_note)
+        logger.info("  -> Arc '%s' closed", a.get("title", a["RowKey"]))
+        state["arc"] = None
+        state["episode_number"] = 1
+        return {
+            "status": "closed",
+            "arc_id": a["RowKey"],
+            "conclusion": conclusion_note,
+            "message": "Arc closed. Call start_new_arc to begin a fresh story.",
+        }
+
+    @function_tool
+    async def generate_character_sheet(description: str, style: str) -> Dict[str, Any]:
+        """Generate a character and environment reference sheet image for visual consistency across all panels."""
+        logger.info("TOOL generate_character_sheet called (style='%s', desc length=%d)", style, len(description))
+        prompt = (
+            f"Character and environment reference sheet, {style} art style. "
+            f"Show all characters clearly with distinct visual features, full body. "
+            f"Include the primary setting/environment in the background. "
+            f"Clean composition, labeled character positions. "
+            f"{description}"
+        )
+        try:
+            url = create_image(prompt, size="wide")
+            logger.info("  -> Character sheet generated: %s", url[:120])
+            return {"status": "success", "reference_url": url, "style": style}
+        except Exception as exc:
+            logger.error("  -> Character sheet generation FAILED: %s", exc)
+            return {"error": str(exc)}
+
+    @function_tool
+    async def generate_panel_image(
+        prompt: str,
+        reference_url: str,
+        size: str = "square",
+    ) -> Dict[str, Any]:
+        """Generate a single comic panel image. Use the character reference sheet URL for consistency."""
+        if size not in ("wide", "tall", "square"):
+            size = "square"
+        logger.info("TOOL generate_panel_image called (size='%s', has_ref=%s, prompt='%s')",
+                     size, bool(reference_url), prompt[:80])
+        try:
+            if reference_url:
+                url = create_image_with_reference(prompt, reference_url, size)
+            else:
+                url = create_image(prompt, size)
+            logger.info("  -> Panel image generated: %s", url[:120])
+            return {"status": "success", "image_url": url, "size": size}
+        except Exception as exc:
+            logger.error("  -> Panel image generation FAILED: %s", exc)
+            return {"error": str(exc)}
+
+    @function_tool
+    async def assemble_layout(
+        arc_title: str,
+        episode_number: int,
+        date: str,
+        recap: str,
+        teaser: str,
+        panels_json: str,
+    ) -> Dict[str, Any]:
+        """Assemble the final comic page HTML from generated panel images, dialogue, and captions."""
+        logger.info("TOOL assemble_layout called: arc='%s', ep=%s, date='%s'", arc_title, episode_number, date)
+        try:
+            panels = json.loads(panels_json)
+        except (json.JSONDecodeError, TypeError) as exc:
+            logger.error("  -> Invalid panels_json: %s", exc)
+            return {"error": f"Invalid panels_json: {exc}"}
+        if not panels:
+            logger.error("  -> No panels provided in panels_json")
+            return {"error": "No panels provided"}
+        logger.info("  -> Assembling HTML with %d panels", len(panels))
+        for i, p in enumerate(panels):
+            logger.info("    Panel %d: size=%s, has_img=%s, dialogue=%s",
+                         i + 1, p.get("size", "?"), bool(p.get("image_url")),
+                         p.get("dialogue", "")[:50])
+        html = _assemble_html(arc_title, episode_number, date, recap, teaser, panels)
+        logger.info("  -> Layout assembled, HTML length=%d", len(html))
+        return {"status": "success", "html": html, "panel_count": len(panels)}
+
+    # ------------------------------------------------------------------
+    # Agent definitions
+    # ------------------------------------------------------------------
+
+    cartoonist = Agent(
+        name="Cartoonist",
+        instructions=CARTOONIST_INSTRUCTIONS,
+        tools=[generate_character_sheet, generate_panel_image, assemble_layout],
+        model=model,
+    )
+
+    storyteller = Agent(
+        name="Storyteller",
+        instructions=STORYTELLER_INSTRUCTIONS,
+        tools=[],
+        model=model,
+    )
+
+    director = Agent(
+        name="Director",
+        instructions=DIRECTOR_INSTRUCTIONS,
+        tools=[get_arc_status, start_new_arc, end_current_arc],
+        model=model,
+    )
+
+    # ------------------------------------------------------------------
+    # Build input context
+    # ------------------------------------------------------------------
+
+    input_context: Dict[str, Any] = {
+        "date": target_date.strftime("%Y-%m-%d"),
+    }
+
+    if arc:
+        input_context["current_arc"] = {
+            "title": arc.get("title", ""),
+            "logline": arc.get("logline", ""),
+            "genre": arc.get("genre", ""),
+            "characters": arc.get("characters", ""),
+            "art_style": arc.get("art_style", ""),
+            "episode_number": episode_number,
+            "planned_episodes": arc.get("planned_episodes", ""),
+            "episodes_so_far": int(arc.get("episodes_count", 0)),
+        }
+        input_context["recent_episodes"] = _summarize_episodes(recent)
+        if last_image:
+            input_context["last_reference_image"] = last_image
+    else:
+        input_context["current_arc"] = None
+        input_context["message"] = (
+            "No active story arc. Start by calling get_arc_status, "
+            "then create a new arc with start_new_arc."
+        )
+
+    input_payload = json.dumps(input_context)
+    logger.info("Input payload: %s", input_payload[:500])
+
+    # ------------------------------------------------------------------
+    # Run the pipeline: Director → Storyteller → Cartoonist (sequential)
+    # ------------------------------------------------------------------
+
+    async def _run_sequential():
+        # Step 1: Director
+        logger.info("STEP 1/3 — Running Director (max_turns=10)...")
+        director_result = await Runner.run(director, input_payload, max_turns=10)
+        director_plan = str(director_result.final_output)
+        logger.info("Director finished. Plan length=%d, preview: %s",
+                     len(director_plan), director_plan[:200])
+
+        if not director_plan or len(director_plan) < 50:
+            raise RuntimeError(f"Director produced insufficient output: {director_plan!r}")
+
+        # Step 2: Storyteller
+        logger.info("STEP 2/3 — Running Storyteller (max_turns=5)...")
+        storyteller_result = await Runner.run(storyteller, director_plan, max_turns=5)
+        storyteller_script = str(storyteller_result.final_output)
+        logger.info("Storyteller finished. Script length=%d, preview: %s",
+                     len(storyteller_script), storyteller_script[:200])
+
+        if not storyteller_script or len(storyteller_script) < 100:
+            raise RuntimeError(f"Storyteller produced insufficient output: {storyteller_script[:200]!r}")
+
+        # Step 3: Cartoonist
+        logger.info("STEP 3/3 — Running Cartoonist (max_turns=30)...")
+        cartoonist_result = await Runner.run(cartoonist, storyteller_script, max_turns=30)
+        logger.info("Cartoonist finished.")
+
+        return cartoonist_result
+
+    result = asyncio.run(_run_sequential())
+
+    # ------------------------------------------------------------------
+    # Extract results from Cartoonist's tool outputs
+    # ------------------------------------------------------------------
+
+    narrative = str(result.final_output)
+    html = None
+    panel_notes_parts: List[str] = []
+
+    for item in result.new_items:
+        if not isinstance(item, ToolCallOutputItem):
+            continue
+        output = item.output
+        if not isinstance(output, dict):
+            continue
+        if "html" in output:
+            html = output["html"]
+        if "reference_url" in output:
+            panel_notes_parts.append(f"Character sheet: {output['reference_url']}")
+        if "image_url" in output:
+            panel_notes_parts.append(f"Panel: {output['image_url']}")
+
+    if html:
+        logger.info("HTML extracted from assemble_layout tool output (length=%d)", len(html))
+    else:
+        logger.error("Cartoonist never called assemble_layout!")
+        logger.error("Final output (first 500 chars): %s", narrative[:500])
+        html = (
+            "<div style='padding:40px;text-align:center;color:#888;font-family:sans-serif'>"
+            "<p>Comic generation completed but layout assembly was skipped.</p>"
+            f"<details><summary>Agent output</summary><pre>{_escape_html(narrative[:3000])}</pre></details>"
+            "</div>"
+        )
+
+    logger.info("Pipeline result: html_len=%d, panels_noted=%d, arc=%s, episode=%s",
+                 len(html), len(panel_notes_parts),
+                 state["arc"]["RowKey"] if state["arc"] else "None",
+                 state["episode_number"])
+    logger.info("=" * 70)
+    logger.info("COMIC PIPELINE END")
+    logger.info("=" * 70)
+
+    return {
+        "html": html,
+        "narrative": narrative,
+        "summary": narrative[:500],
+        "panel_notes": "\n".join(panel_notes_parts),
+        "arc": state["arc"],
+        "episode_number": state["episode_number"],
+    }

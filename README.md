@@ -103,13 +103,25 @@ I invite you to explore the very simple interface at https://SandBoxes.Live/genb
 
 ## ComicBook
 
-Multi-Agent AI Comics Pipeline  
-ComicBook is a daily AI-driven comic strip generator orchestrated with an OpenAI Agents-style workflow (Director → Storyteller → Cartoonist → Layout). It reuses the shared DALL·E image tool, stores every episode in Azure Table/Blob Storage, and keeps story arcs alive for 7–10 days before launching a fresh plot.
+Multi-Agent AI Comic Strip Generator  
+ComicBook produces a daily AI-generated comic strip using three collaborating agents built on the **OpenAI Agents SDK**. Each agent hands off to the next via the SDK's native handoff mechanism, forming a Director → Storyteller → Cartoonist pipeline that runs end-to-end without human intervention.
 
-#### Highlights
-- **Role Hand‑offs**: Director sets beats, Storyteller writes scripts, Cartoonist calls the shared image tool, Layout renders responsive HTML.
-- **Arc Memory**: Azure storage tracks arc metadata, daily summaries, and panel prompts so each strip honors continuity.
-- **Auto Rollover**: When an arc runs 7–10 days, the system closes it and opens a new one automatically.
-- **Frontend**: `/comicbook` fetches the latest (or a selected date) and streams the rendered comic page.
+#### Agent Pipeline
+- **Director** — Invents original story arcs (genre, characters, art style), decides when an arc starts and ends based on narrative progression (not a fixed day count), and plans each episode's panel layout and tone.
+- **Storyteller** — Transforms the Director's outline into a panel-by-panel script with dialogue, captions, sound effects, camera angles, and per-panel size directives (wide / tall / square).
+- **Cartoonist** — Generates a **character reference sheet** first for visual consistency, then produces each panel image using the reference via Azure OpenAI image editing. Assembles the final responsive HTML comic page.
+
+#### Key Features
+- **Dynamic Story Arcs**: The Director agent decides arc length organically — a story runs for as many episodes as it needs (3, 8, 15…), then closes and a completely fresh arc with new characters, world, and genre begins.
+- **Character Consistency**: The Cartoonist creates a single reference image of all characters and the environment before drawing any panels. Every panel is generated with that reference to maintain visual coherence.
+- **Configurable Panel Sizes**: Each panel can be wide (1536×1024 for landscapes/action), tall (1024×1536 for reveals), or square (1024×1024 for dialogue) — chosen by the Storyteller based on pacing needs.
+- **Arc Memory**: Azure Table Storage tracks arc metadata (title, logline, genre, characters, art style, episode count), daily episode summaries, and panel notes so each strip honors continuity.
+- **Responsive Comic Layout**: The final HTML uses comic-book styling (speech bubbles, caption boxes, sound effects) and adapts to mobile and desktop screens.
+- **Frontend**: `/comicbook` fetches the latest strip (or a selected date) and renders the comic page.
+
+#### Tech Stack
+- **OpenAI Agents SDK** (`openai-agents`) — Agent definitions, `@function_tool` tools, handoffs, `Runner.run()`
+- **Azure OpenAI** — GPT for agent reasoning, gpt-image for image generation
+- **Azure Table & Blob Storage** — Arc/episode persistence, image and HTML hosting
 
 gunicorn --bind=0.0.0.0 --timeout 600 main:app

@@ -158,6 +158,19 @@ def get_latest_arc() -> Optional[dict]:
     return arcs[0]
 
 
+def get_active_arc() -> Optional[dict]:
+    arc = get_latest_arc()
+    if arc and arc.get("status") == "active":
+        return arc
+    return None
+
+
+def update_arc_metadata(arc_id: str, **kwargs):
+    entity = {"PartitionKey": "arc", "RowKey": arc_id}
+    entity.update(kwargs)
+    arcs_table.upsert_entity(entity=entity, mode=UpdateMode.MERGE)
+
+
 def ensure_active_arc(target_date: Optional[datetime] = None, min_days: int = 7, max_days: int = 10) -> dict:
     target_date = target_date or datetime.utcnow()
     arc = get_latest_arc()
