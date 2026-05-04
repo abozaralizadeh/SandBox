@@ -18,7 +18,9 @@ from openai import AsyncAzureOpenAI
 from ComicBook.azurestorage import (
     close_arc as _storage_close_arc,
     get_active_arc,
+    get_arc_story_outline,
     get_recent_episodes,
+    save_arc_story_outline,
     save_episode,
     start_new_arc as _storage_start_new_arc,
     update_arc_metadata,
@@ -261,6 +263,21 @@ ARC LIFECYCLE:
    - If the story should continue, plan today's episode to advance the plot meaningfully.
      No filler episodes.
 
+STORY OUTLINE:
+- After creating a new arc, you MUST call save_story_outline with a comprehensive narrative plan.
+- If you find an existing arc whose story_outline is empty, write one and call save_story_outline \
+  before planning the episode.
+- The outline should include:
+  * Full plot synopsis from beginning to end (all major events)
+  * Character arcs for each main character (growth, conflicts, resolutions)
+  * Major themes and motifs
+  * Key twists, revelations, and turning points
+  * Episode-by-episode breakdown with the core dramatic beat for each episode
+  * How the story concludes
+- This outline is your contract — future episodes MUST follow this plan.
+- When planning each episode, ALWAYS reference the story_outline from your input context \
+  to maintain consistency. You may adapt small details but never contradict major plot points.
+
 EPISODE PLANNING:
 - Decide the number of panels (4-8) based on what today's episode needs.
 - For each panel, decide the size:
@@ -282,6 +299,10 @@ You are the Storyteller — a master comic script writer.
 
 You will receive the Director's episode plan as input. Transform it into a vivid, \
 panel-by-panel script.
+
+If a STORY OUTLINE section is provided before the episode plan, use it as your guide \
+for the overarching plot, character arcs, and thematic beats. Your script must align \
+with the outline — do not contradict its major plot points or character development.
 
 FOR EACH PANEL, you must provide:
 - **Panel number** and **size** ("wide" for establishing shots/landscapes/action,
@@ -428,6 +449,8 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
             "art_style": a.get("art_style", ""),
             "recent_episodes": _summarize_episodes(recent_eps),
             "last_reference_image": last_image,
+            "character_sheet_url": a.get("character_sheet_url", ""),
+            "story_outline": get_arc_story_outline(a) if a.get("story_outline") or a.get("story_outline_blob_name") else "",
         }
 
     @function_tool
@@ -496,9 +519,34 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
         }
 
     @function_tool
+    async def save_story_outline(story_outline: str) -> Dict[str, Any]:
+        """Save a comprehensive story outline for the current arc. This outline guides all future episodes for plot consistency."""
+        logger.info("TOOL save_story_outline called (outline length=%d)", len(story_outline))
+        a = state["arc"]
+        if not a:
+            logger.warning("  -> No active arc to save outline for!")
+            return {"error": "No active arc. Create one first with start_new_arc."}
+        save_arc_story_outline(a["RowKey"], story_outline)
+        a["story_outline"] = story_outline
+        logger.info("  -> Story outline saved for arc '%s' (%d chars)", a.get("title", ""), len(story_outline))
+        return {
+            "status": "saved",
+            "arc_id": a["RowKey"],
+            "outline_length": len(story_outline),
+        }
+
+    @function_tool
     async def generate_character_sheet(description: str, style: str) -> Dict[str, Any]:
         """Generate a character and environment reference sheet image for visual consistency across all panels."""
         logger.info("TOOL generate_character_sheet called (style='%s', desc length=%d)", style, len(description))
+
+        a = state["arc"]
+        if a:
+            cached_url = a.get("character_sheet_url", "")
+            if cached_url:
+                logger.info("  -> Returning cached character sheet: %s", cached_url[:120])
+                return {"status": "success", "reference_url": cached_url, "style": style, "cached": True}
+
         prompt = (
             f"Character and environment reference sheet, {style} art style. "
             f"Show all characters clearly with distinct visual features, full body. "
@@ -509,6 +557,10 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
         try:
             url = create_image(prompt, size="wide")
             logger.info("  -> Character sheet generated: %s", url[:120])
+            if a:
+                update_arc_metadata(a["RowKey"], character_sheet_url=url)
+                a["character_sheet_url"] = url
+                logger.info("  -> Character sheet URL saved to arc '%s'", a["RowKey"])
             return {"status": "success", "reference_url": url, "style": style}
         except Exception as exc:
             logger.error("  -> Character sheet generation FAILED: %s", exc)
@@ -585,7 +637,7 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
     director = Agent(
         name="Director",
         instructions=DIRECTOR_INSTRUCTIONS,
-        tools=[get_arc_status, start_new_arc, end_current_arc],
+        tools=[get_arc_status, start_new_arc, end_current_arc, save_story_outline],
         model=model,
     )
 
@@ -609,6 +661,9 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
             "episodes_so_far": int(arc.get("episodes_count", 0)),
         }
         input_context["recent_episodes"] = _summarize_episodes(recent)
+        story_outline = get_arc_story_outline(arc)
+        if story_outline:
+            input_context["story_outline"] = story_outline
         if last_image:
             input_context["last_reference_image"] = last_image
     else:
@@ -636,9 +691,25 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
         if not director_plan or len(director_plan) < 50:
             raise RuntimeError(f"Director produced insufficient output: {director_plan!r}")
 
+        # Re-fetch story outline (Director may have just created it via save_story_outline)
+        current_outline = ""
+        if state["arc"]:
+            current_outline = state["arc"].get("story_outline", "")
+            if not current_outline:
+                current_outline = get_arc_story_outline(state["arc"])
+
         # Step 2: Storyteller
         logger.info("STEP 2/3 — Running Storyteller (max_turns=5)...")
-        storyteller_result = await Runner.run(storyteller, director_plan, max_turns=5)
+        storyteller_input = director_plan
+        if current_outline:
+            storyteller_input = (
+                f"=== STORY OUTLINE (for reference — follow this plan) ===\n"
+                f"{current_outline}\n"
+                f"=== END STORY OUTLINE ===\n\n"
+                f"=== DIRECTOR'S EPISODE PLAN ===\n"
+                f"{director_plan}"
+            )
+        storyteller_result = await Runner.run(storyteller, storyteller_input, max_turns=5)
         storyteller_script = str(storyteller_result.final_output)
         logger.info("Storyteller finished. Script length=%d, preview: %s",
                      len(storyteller_script), storyteller_script[:200])

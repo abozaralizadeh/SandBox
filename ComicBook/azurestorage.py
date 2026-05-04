@@ -101,6 +101,14 @@ def upload_html_to_blob(html_content: str) -> str:
     return blob_name
 
 
+def upload_text_to_blob(content: str, extension: str = ".txt") -> str:
+    _ensure_container()
+    blob_name = f"{get_flat_date_full()}_{uuid.uuid4()}{extension}"
+    blob_client = container_client.get_blob_client(blob_name)
+    blob_client.upload_blob(content.encode("utf-8"), overwrite=True)
+    return blob_name
+
+
 def download_html_from_blob(identifier: str) -> str:
     blob_client = container_client.get_blob_client(identifier)
     downloader = blob_client.download_blob()
@@ -169,6 +177,29 @@ def update_arc_metadata(arc_id: str, **kwargs):
     entity = {"PartitionKey": "arc", "RowKey": arc_id}
     entity.update(kwargs)
     arcs_table.upsert_entity(entity=entity, mode=UpdateMode.MERGE)
+
+
+def save_arc_story_outline(arc_id: str, story_outline: str):
+    entity = {"PartitionKey": "arc", "RowKey": arc_id}
+    if len(story_outline) > MAX_TABLE_PROPERTY_CHARS:
+        blob_name = upload_text_to_blob(story_outline, extension=".txt")
+        entity["story_outline"] = ""
+        entity["story_outline_blob_name"] = blob_name
+    else:
+        entity["story_outline"] = story_outline
+        entity["story_outline_blob_name"] = ""
+    arcs_table.upsert_entity(entity=entity, mode=UpdateMode.MERGE)
+
+
+def get_arc_story_outline(arc: dict) -> str:
+    blob_name = arc.get("story_outline_blob_name", "")
+    if blob_name:
+        try:
+            return download_html_from_blob(blob_name)
+        except Exception as exc:
+            print(f"[ComicBook] Unable to fetch story outline blob '{blob_name}': {exc}")
+            return arc.get("story_outline", "")
+    return arc.get("story_outline", "")
 
 
 def ensure_active_arc(target_date: Optional[datetime] = None, min_days: int = 7, max_days: int = 10) -> dict:
