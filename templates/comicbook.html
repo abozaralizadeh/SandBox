@@ -57,7 +57,7 @@
         .controls {
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 8px;
             flex-wrap: wrap;
         }
         .controls input, .controls button {
@@ -76,6 +76,75 @@
             border: none;
         }
         .controls button:hover { filter: brightness(1.05); }
+        .controls button:disabled {
+            opacity: 0.35;
+            cursor: not-allowed;
+            filter: none;
+        }
+        .lang-select {
+            padding: 10px 12px;
+            border-radius: 10px;
+            border: 1px solid #25406a;
+            background: #0d1829;
+            color: var(--text);
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            appearance: none;
+            -webkit-appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%238fb3ff' stroke-width='2' fill='none'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 10px center;
+            padding-right: 30px;
+        }
+        .lang-select:hover { border-color: var(--accent); }
+        .lang-select:focus { outline: none; border-color: var(--accent); }
+        .lang-select option { background: #0d1829; color: var(--text); }
+        .nav-row {
+            padding: 10px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            flex-wrap: wrap;
+            border-bottom: 1px solid #1f3553;
+        }
+        .nav-btn {
+            padding: 7px 14px;
+            border-radius: 8px;
+            border: 1px solid #25406a;
+            background: #0d1829;
+            color: var(--muted);
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: background 0.15s, color 0.15s;
+        }
+        .nav-btn:hover:not(:disabled) { background: #162a45; color: var(--text); }
+        .nav-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+        .nav-label {
+            color: var(--muted);
+            font-size: 13px;
+            padding: 0 6px;
+            font-weight: 600;
+        }
+        .nav-sep {
+            width: 1px;
+            height: 22px;
+            background: #25406a;
+            margin: 0 4px;
+        }
+        .char-sheet-link {
+            color: var(--accent);
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: underline;
+            text-underline-offset: 2px;
+            white-space: nowrap;
+        }
+        .char-sheet-link:hover { color: #f8ba78; }
         .status {
             font-size: 13px;
             color: var(--muted);
@@ -96,33 +165,130 @@
             animation: spin 1s linear infinite;
         }
         @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Character sheet modal */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.8);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+        }
+        .modal-overlay.open { display: flex; }
+        .modal-content {
+            position: relative;
+            max-width: 90vw;
+            max-height: 90vh;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+        }
+        .modal-content img {
+            display: block;
+            max-width: 90vw;
+            max-height: 90vh;
+            object-fit: contain;
+        }
+        .modal-close {
+            position: absolute;
+            top: 10px;
+            right: 14px;
+            font-size: 28px;
+            color: #fff;
+            background: rgba(0,0,0,0.5);
+            border: none;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal-close:hover { background: rgba(0,0,0,0.8); }
+
         @media (max-width: 720px) {
             .header { flex-direction: column; align-items: flex-start; }
             .title { font-size: 22px; }
+            .nav-row { gap: 4px; padding: 8px 12px; }
+            .nav-btn { padding: 6px 10px; font-size: 12px; }
         }
     </style>
 </head>
 <body>
-    <a class="home-link" href="/">← Back</a>
+    <a class="home-link" href="/">&#8592; Back</a>
     <div class="shell">
         <div class="header">
-            <div class="title">ComicBook — Daily AI Comics</div>
+            <div class="title">ComicBook &mdash; Daily AI Comics</div>
             <div class="controls">
+                <select class="lang-select" id="langSelect" aria-label="Language">
+                    <option value="en">English</option>
+                    <option value="it">Italiano</option>
+                    <option value="fa">فارسی</option>
+                </select>
                 <input type="date" id="datePicker" aria-label="Pick a date">
                 <button id="loadBtn">Load Comic</button>
             </div>
-            <div class="status" id="statusText">Live arc loading…</div>
+            <div class="status" id="statusText">Live arc loading&hellip;</div>
+        </div>
+        <div class="nav-row" id="navRow">
+            <button class="nav-btn" id="btnFirstArc" title="First episode of previous arc">&laquo; Prev Arc</button>
+            <button class="nav-btn" id="btnArcStart" title="First episode of this arc">Arc Start</button>
+            <div class="nav-sep"></div>
+            <button class="nav-btn" id="btnPrev" title="Previous episode">&lsaquo; Prev</button>
+            <span class="nav-label" id="navLabel">-</span>
+            <button class="nav-btn" id="btnNext" title="Next episode">Next &rsaquo;</button>
+            <div class="nav-sep"></div>
+            <button class="nav-btn" id="btnArcEnd" title="Latest episode of this arc">Arc End</button>
+            <button class="nav-btn" id="btnNextArc" title="First episode of next arc">Next Arc &raquo;</button>
+            <div class="nav-sep"></div>
+            <span class="char-sheet-link" id="charSheetLink" style="display:none" title="View character reference sheet">Characters</span>
         </div>
         <div id="comicContainer">
             <div class="loader" id="loader"></div>
         </div>
     </div>
+
+    <!-- Image modal (shared by character sheet + panel zoom) -->
+    <div class="modal-overlay" id="imgModal">
+        <div class="modal-content">
+            <button class="modal-close" id="modalClose">&times;</button>
+            <img id="modalImg" src="" alt="">
+        </div>
+    </div>
+
     <script>
         const container = document.getElementById("comicContainer");
         const loader = document.getElementById("loader");
         const statusText = document.getElementById("statusText");
         const datePicker = document.getElementById("datePicker");
         const loadBtn = document.getElementById("loadBtn");
+        const navLabel = document.getElementById("navLabel");
+
+        const btnPrev = document.getElementById("btnPrev");
+        const btnNext = document.getElementById("btnNext");
+        const btnArcStart = document.getElementById("btnArcStart");
+        const btnArcEnd = document.getElementById("btnArcEnd");
+        const btnFirstArc = document.getElementById("btnFirstArc");
+        const btnNextArc = document.getElementById("btnNextArc");
+
+        const charSheetLink = document.getElementById("charSheetLink");
+        const imgModal = document.getElementById("imgModal");
+        const modalImg = document.getElementById("modalImg");
+        const modalClose = document.getElementById("modalClose");
+
+        let episodeIndex = [];
+        let arcList = [];
+        let currentDate = "";
+        let currentArcId = "";
+        let currentLang = "en";
+
+        function dateToIso(yyyymmdd) {
+            return yyyymmdd.slice(0,4) + "-" + yyyymmdd.slice(4,6) + "-" + yyyymmdd.slice(6,8);
+        }
 
         function isoFromDateInput(value) {
             if (!value) return "";
@@ -131,19 +297,108 @@
             return date.toISOString();
         }
 
+        function flatDateFromInput(value) {
+            if (!value) return "";
+            return value.replace(/-/g, "");
+        }
+
+        async function fetchIndex() {
+            try {
+                const res = await fetch("/comicbookindex");
+                const data = await res.json();
+                episodeIndex = data.episodes || [];
+                arcList = data.arcs || [];
+            } catch (e) {
+                console.error("Failed to fetch episode index", e);
+            }
+        }
+
+        function findEpisodeIdx(date) {
+            return episodeIndex.findIndex(ep => ep.date === date);
+        }
+
+        function getCharSheetUrl() {
+            if (!currentArcId) return "";
+            const arc = arcList.find(a => a.arc_id === currentArcId);
+            return arc ? (arc.character_sheet_url || "") : "";
+        }
+
+        function updateNav() {
+            const idx = findEpisodeIdx(currentDate);
+            const arcEpisodes = episodeIndex.filter(ep => ep.arc_id === currentArcId);
+            const arcIdx = arcList.findIndex(a => a.arc_id === currentArcId);
+
+            if (idx >= 0 && episodeIndex.length > 0) {
+                const ep = episodeIndex[idx];
+                navLabel.textContent = "Ep " + ep.episode_number + " / " + dateToIso(ep.date);
+            } else {
+                navLabel.textContent = currentDate ? dateToIso(currentDate) : "-";
+            }
+
+            btnPrev.disabled = idx <= 0;
+            btnNext.disabled = idx < 0 || idx >= episodeIndex.length - 1;
+
+            if (arcEpisodes.length > 0) {
+                btnArcStart.disabled = currentDate === arcEpisodes[0].date;
+                btnArcEnd.disabled = currentDate === arcEpisodes[arcEpisodes.length - 1].date;
+            } else {
+                btnArcStart.disabled = true;
+                btnArcEnd.disabled = true;
+            }
+
+            btnFirstArc.disabled = arcIdx <= 0;
+            btnNextArc.disabled = arcIdx < 0 || arcIdx >= arcList.length - 1;
+
+            // Character sheet link
+            const sheetUrl = getCharSheetUrl();
+            charSheetLink.style.display = sheetUrl ? "" : "none";
+            charSheetLink.dataset.src = sheetUrl;
+        }
+
+        function navigateTo(date) {
+            const ep = episodeIndex.find(e => e.date === date);
+            if (ep) {
+                currentDate = ep.date;
+                currentArcId = ep.arc_id;
+            } else {
+                currentDate = date;
+            }
+            datePicker.value = dateToIso(date);
+            loadComic();
+        }
+
         async function loadComic() {
             const dt = isoFromDateInput(datePicker.value);
-            const url = dt ? `/comicbookcontent?dt=${encodeURIComponent(dt)}` : "/comicbookcontent";
+            let url = dt ? `/comicbookcontent?dt=${encodeURIComponent(dt)}` : "/comicbookcontent";
+            if (currentLang !== "en") {
+                url += (url.includes("?") ? "&" : "?") + `lang=${currentLang}`;
+            }
             loader.style.display = "block";
             container.innerHTML = "";
-            statusText.textContent = "Fetching today's strip…";
+            statusText.textContent = "Fetching strip…";
             try {
                 const res = await fetch(url);
                 const text = await res.text();
                 const arcId = res.headers.get("Arc-Id") || "";
                 const timestamp = res.headers.get("Timestamp") || "";
                 container.innerHTML = text;
+
+                if (arcId) currentArcId = arcId;
+                if (datePicker.value) {
+                    currentDate = flatDateFromInput(datePicker.value);
+                } else if (timestamp) {
+                    const d = new Date(timestamp);
+                    if (!isNaN(d.getTime())) {
+                        const y = d.getUTCFullYear();
+                        const m = String(d.getUTCMonth()+1).padStart(2,"0");
+                        const dd = String(d.getUTCDate()).padStart(2,"0");
+                        currentDate = y + m + dd;
+                        datePicker.value = y + "-" + m + "-" + dd;
+                    }
+                }
+
                 statusText.textContent = arcId ? `Arc: ${arcId} — ${timestamp}` : `Updated: ${timestamp}`;
+                updateNav();
             } catch (err) {
                 container.innerHTML = "<p style='color:#ff6f4c'>Failed to load comic.</p>";
                 statusText.textContent = "Error loading comic.";
@@ -153,8 +408,82 @@
             }
         }
 
+        // Language dropdown
+        const langSelect = document.getElementById("langSelect");
+        langSelect.addEventListener("change", () => {
+            currentLang = langSelect.value;
+            loadComic();
+        });
+
+        // Shared image modal helpers
+        function openModal(src) {
+            modalImg.src = src;
+            imgModal.classList.add("open");
+        }
+        function closeModal() {
+            imgModal.classList.remove("open");
+            modalImg.src = "";
+        }
+        modalClose.addEventListener("click", (e) => { e.stopPropagation(); closeModal(); });
+        imgModal.addEventListener("click", closeModal);
+        imgModal.querySelector(".modal-content").addEventListener("click", (e) => e.stopPropagation());
+
+        // Character sheet popup
+        charSheetLink.addEventListener("click", () => {
+            const src = charSheetLink.dataset.src;
+            if (src) openModal(src);
+        });
+
+        // Panel image zoom — delegated click on comic container
+        container.addEventListener("click", (e) => {
+            const img = e.target.closest(".panel img");
+            if (img && img.src) openModal(img.src);
+        });
+
+        // Navigation buttons
+        btnPrev.addEventListener("click", () => {
+            const idx = findEpisodeIdx(currentDate);
+            if (idx > 0) navigateTo(episodeIndex[idx - 1].date);
+        });
+
+        btnNext.addEventListener("click", () => {
+            const idx = findEpisodeIdx(currentDate);
+            if (idx >= 0 && idx < episodeIndex.length - 1) navigateTo(episodeIndex[idx + 1].date);
+        });
+
+        btnArcStart.addEventListener("click", () => {
+            const first = episodeIndex.find(ep => ep.arc_id === currentArcId);
+            if (first) navigateTo(first.date);
+        });
+
+        btnArcEnd.addEventListener("click", () => {
+            const arcEps = episodeIndex.filter(ep => ep.arc_id === currentArcId);
+            if (arcEps.length) navigateTo(arcEps[arcEps.length - 1].date);
+        });
+
+        btnFirstArc.addEventListener("click", () => {
+            const arcIdx = arcList.findIndex(a => a.arc_id === currentArcId);
+            if (arcIdx > 0) {
+                const prevArcId = arcList[arcIdx - 1].arc_id;
+                const first = episodeIndex.find(ep => ep.arc_id === prevArcId);
+                if (first) navigateTo(first.date);
+            }
+        });
+
+        btnNextArc.addEventListener("click", () => {
+            const arcIdx = arcList.findIndex(a => a.arc_id === currentArcId);
+            if (arcIdx >= 0 && arcIdx < arcList.length - 1) {
+                const nextArcId = arcList[arcIdx + 1].arc_id;
+                const first = episodeIndex.find(ep => ep.arc_id === nextArcId);
+                if (first) navigateTo(first.date);
+            }
+        });
+
         loadBtn.addEventListener("click", loadComic);
-        document.addEventListener("DOMContentLoaded", loadComic);
+        document.addEventListener("DOMContentLoaded", async () => {
+            await fetchIndex();
+            await loadComic();
+        });
     </script>
 </body>
 </html>

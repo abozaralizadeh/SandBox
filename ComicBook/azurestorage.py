@@ -75,21 +75,23 @@ def _should_offload_to_blob(html_content: str) -> bool:
     return bool(html_content) and len(html_content) > MAX_TABLE_PROPERTY_CHARS
 
 
-def _attach_html_payload(entity: dict, html_content: str) -> dict:
+def _attach_html_payload(entity: dict, html_content: str, suffix: str = "") -> dict:
     if html_content is None:
         html_content = ""
+    content_key = f"html_content{suffix}"
+    blob_key = f"html_blob_name{suffix}"
     try:
         if _should_offload_to_blob(html_content):
             blob_name = upload_html_to_blob(html_content)
-            entity["html_content"] = ""
-            entity["html_blob_name"] = blob_name
+            entity[content_key] = ""
+            entity[blob_key] = blob_name
         else:
-            entity["html_content"] = html_content
-            entity["html_blob_name"] = ""
+            entity[content_key] = html_content
+            entity[blob_key] = ""
     except Exception as blob_error:
-        print(f"[ComicBook] Failed to upload HTML to blob, trimming payload: {blob_error}")
-        entity["html_content"] = html_content[:MAX_TABLE_PROPERTY_CHARS]
-        entity["html_blob_name"] = ""
+        print(f"[ComicBook] Failed to upload HTML to blob ({suffix or 'en'}), trimming: {blob_error}")
+        entity[content_key] = html_content[:MAX_TABLE_PROPERTY_CHARS]
+        entity[blob_key] = ""
     return entity
 
 
@@ -120,6 +122,19 @@ def _hydrate_html_content(entity: dict) -> dict:
     if blob_name:
         try:
             entity["html_content"] = download_html_from_blob(blob_name)
+        except Exception as exc:
+            print(f"[ComicBook] Unable to fetch blob '{blob_name}': {exc}")
+    return entity
+
+
+def _hydrate_html_for_lang(entity: dict, lang: str = "en") -> dict:
+    suffix = "" if lang == "en" else f"_{lang}"
+    blob_key = f"html_blob_name{suffix}"
+    content_key = f"html_content{suffix}"
+    blob_name = entity.get(blob_key)
+    if blob_name:
+        try:
+            entity[content_key] = download_html_from_blob(blob_name)
         except Exception as exc:
             print(f"[ComicBook] Unable to fetch blob '{blob_name}': {exc}")
     return entity
@@ -226,22 +241,65 @@ def _count_episodes(arc_id: str) -> int:
     return len(entities)
 
 
-def get_recent_episodes(arc_id: str, limit: int = 3) -> List[dict]:
+def get_recent_episodes(arc_id: str, limit: int = 3, hydrate_html: bool = True) -> List[dict]:
     episodes = list(episodes_table.query_entities(f"PartitionKey eq '{arc_id}'", results_per_page=200))
     episodes = _sort_by_rowkey(episodes)
-    hydrated = [_hydrate_html_content(e) for e in episodes[:limit]]
-    return hydrated
+    result = episodes[:limit]
+    if hydrate_html:
+        result = [_hydrate_html_content(e) for e in result]
+    return result
 
 
-def get_episode_by_date(date_key: str) -> Optional[dict]:
+def get_episode_by_date(date_key: str, lang: str = "en") -> Optional[dict]:
     try:
         entities = list(episodes_table.query_entities(f"RowKey eq '{date_key}'", results_per_page=5))
         if not entities:
             return None
-        entity = _hydrate_html_content(_sort_by_rowkey(entities)[0])
+        entity = _sort_by_rowkey(entities)[0]
+        entity = _hydrate_html_for_lang(entity, lang)
         return entity
     except Exception:
         return None
+
+
+def get_episode_index() -> List[dict]:
+    """Return a lightweight index of all episodes across all arcs, sorted by date."""
+    all_eps = list(episodes_table.query_entities(
+        "PartitionKey ne ''",
+        select=["PartitionKey", "RowKey", "arc_title", "episode_number"],
+        results_per_page=500,
+    ))
+    all_eps.sort(key=lambda x: x.get("RowKey", ""))
+    return [
+        {
+            "date": e["RowKey"],
+            "arc_id": e["PartitionKey"],
+            "arc_title": e.get("arc_title", ""),
+            "episode_number": int(e.get("episode_number", 0)),
+        }
+        for e in all_eps
+    ]
+
+
+def get_arc_list() -> List[dict]:
+    """Return all arcs sorted by start_date."""
+    arcs = list(arcs_table.query_entities(
+        "PartitionKey eq 'arc'",
+        select=["RowKey", "title", "status", "start_date", "episodes_count", "character_sheet_url"],
+        results_per_page=100,
+    ))
+    arcs.sort(key=lambda x: x.get("start_date", ""))
+    return [
+        {
+            "arc_id": a["RowKey"],
+            "title": a.get("title", ""),
+            "status": a.get("status", ""),
+            "start_date": a.get("start_date", ""),
+            "episodes_count": int(a.get("episodes_count", 0)),
+            "character_sheet_url": a.get("character_sheet_url", ""),
+        }
+        for a in arcs
+    ]
 
 
 def save_episode(
@@ -250,6 +308,8 @@ def save_episode(
     html_content: str,
     storyboard_summary: str,
     panel_notes: str,
+    html_content_it: str = "",
+    html_content_fa: str = "",
 ) -> dict:
     arc_id = arc["RowKey"]
     episode_number = _count_episodes(arc_id) + 1
@@ -263,6 +323,8 @@ def save_episode(
         "panel_notes": panel_notes,
     }
     entity = _attach_html_payload(entity, html_content)
+    entity = _attach_html_payload(entity, html_content_it, "_it")
+    entity = _attach_html_payload(entity, html_content_fa, "_fa")
     episodes_table.upsert_entity(entity=entity, mode=UpdateMode.REPLACE)
     arcs_table.upsert_entity(
         entity={

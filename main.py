@@ -10,6 +10,7 @@ from flask import Flask, jsonify, make_response, request, render_template
 from AIBlog.prompt import *
 from TomorrowNews.prompt import *
 from ComicBook.prompt import get_comicbook
+from ComicBook.azurestorage import get_episode_index, get_arc_list
 from GenBox.prompt import get_llm_response
 from AIOpenProblemSolver.prompt import get_problem_history
 from AIOpenProblemSolver.azurestorage import (
@@ -84,19 +85,26 @@ def comicbookcontent():
     if referer:
         parsed_date = None
         date_param = request.args.get('dt')
+        lang = request.args.get('lang', 'en')
+        if lang not in ('en', 'it', 'fa'):
+            lang = 'en'
         if date_param:
             try:
                 from datetime import datetime
                 parsed_date = datetime.fromisoformat(date_param)
             except Exception:
                 parsed_date = None
-        comic_html, dt, arc_id = get_comicbook(parsed_date)
+        comic_html, dt, arc_id = get_comicbook(parsed_date, lang=lang)
         response = make_response(comic_html)
         response.headers['Timestamp'] = dt
         response.headers['Arc-Id'] = arc_id or ""
         return response
     else:
         return "404 Not Found", 404
+
+@app.route('/comicbookindex', methods=['GET'])
+def comicbookindex():
+    return jsonify({"episodes": get_episode_index(), "arcs": get_arc_list()})
     
 # @app.route('/tomorrownewsreact', methods=['GET'])
 # def tomorrownewsreact():
