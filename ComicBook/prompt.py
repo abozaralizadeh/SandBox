@@ -1,7 +1,6 @@
 from datetime import datetime, timezone
 from typing import Optional
 
-from ComicBook.agents import run_comic_pipeline
 from ComicBook.azurestorage import get_episode_by_date, save_episode
 from utils import get_flat_date
 
@@ -15,6 +14,7 @@ def get_comicbook(parsed_date: Optional[datetime] = None, lang: str = "en"):
         html = cached.get(content_key, "") or cached.get("html_content", "")
         return html, target_date, cached.get("PartitionKey")
 
+    from ComicBook.agents import run_comic_pipeline
     result = run_comic_pipeline(target_date)
 
     html = result["html"]
