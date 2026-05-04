@@ -10,6 +10,8 @@ from typing import Any, Dict, List
 from agents import Agent, Runner, OpenAIResponsesModel, set_tracing_disabled
 from agents.items import ToolCallOutputItem
 from agents.tool import function_tool
+from langsmith import traceable, trace
+from langsmith.wrappers import wrap_openai
 
 set_tracing_disabled(True)
 from openai import AsyncAzureOpenAI
@@ -35,12 +37,13 @@ logger = logging.getLogger("ComicBook")
 # ---------------------------------------------------------------------------
 
 def _build_openai_client() -> AsyncAzureOpenAI:
-    return AsyncAzureOpenAI(
+    client = AsyncAzureOpenAI(
         api_key=os.environ["AZURE_OPENAI_API_KEY"],
         api_version=os.environ.get("AZURE_OPENAI_API_VERSION", "2025-04-01-preview"),
         azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
         azure_deployment=os.environ.get("AZURE_OPENAI_MODEL", "gpt-4o"),
     )
+    return wrap_openai(client)
 
 
 # ---------------------------------------------------------------------------
@@ -448,6 +451,7 @@ IMPORTANT RULES:
 # Pipeline runner
 # ---------------------------------------------------------------------------
 
+@traceable(name="ComicBook Pipeline", run_type="chain")
 def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
     """Run the Director -> Storyteller -> Cartoonist pipeline. Returns dict with html, narrative, etc."""
     logger.info("=" * 70)
@@ -748,9 +752,10 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
 
     async def _run_sequential():
         # Step 1: Director
-        logger.info("STEP 1/3 — Running Director (max_turns=10)...")
-        director_result = await Runner.run(director, input_payload, max_turns=10)
-        director_plan = str(director_result.final_output)
+        logger.info("STEP 1/4 — Running Director (max_turns=10)...")
+        with trace(name="Director", run_type="chain", inputs={"payload_preview": input_payload[:500]}):
+            director_result = await Runner.run(director, input_payload, max_turns=10)
+            director_plan = str(director_result.final_output)
         logger.info("Director finished. Plan length=%d, preview: %s",
                      len(director_plan), director_plan[:200])
 
@@ -765,7 +770,7 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
                 current_outline = get_arc_story_outline(state["arc"])
 
         # Step 2: Storyteller
-        logger.info("STEP 2/3 — Running Storyteller (max_turns=5)...")
+        logger.info("STEP 2/4 — Running Storyteller (max_turns=5)...")
         storyteller_input = director_plan
         if current_outline:
             storyteller_input = (
@@ -775,8 +780,9 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
                 f"=== DIRECTOR'S EPISODE PLAN ===\n"
                 f"{director_plan}"
             )
-        storyteller_result = await Runner.run(storyteller, storyteller_input, max_turns=5)
-        storyteller_script = str(storyteller_result.final_output)
+        with trace(name="Storyteller", run_type="chain"):
+            storyteller_result = await Runner.run(storyteller, storyteller_input, max_turns=5)
+            storyteller_script = str(storyteller_result.final_output)
         logger.info("Storyteller finished. Script length=%d, preview: %s",
                      len(storyteller_script), storyteller_script[:200])
 
@@ -784,8 +790,9 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
             raise RuntimeError(f"Storyteller produced insufficient output: {storyteller_script[:200]!r}")
 
         # Step 3: Cartoonist
-        logger.info("STEP 3/3 — Running Cartoonist (max_turns=30)...")
-        cartoonist_result = await Runner.run(cartoonist, storyteller_script, max_turns=30)
+        logger.info("STEP 3/4 — Running Cartoonist (max_turns=30)...")
+        with trace(name="Cartoonist", run_type="chain"):
+            cartoonist_result = await Runner.run(cartoonist, storyteller_script, max_turns=30)
         logger.info("Cartoonist finished.")
 
         # Step 4: Translations (Italian + Persian) — run in parallel via Translator agent
@@ -803,10 +810,11 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
                 logger.info("STEP 4/4 — Translating to Italian and Persian via Translator agent...")
                 it_input = json.dumps({"target_language": "Italian", "texts": texts}, ensure_ascii=False)
                 fa_input = json.dumps({"target_language": "Persian (Farsi)", "texts": texts}, ensure_ascii=False)
-                it_result, fa_result = await asyncio.gather(
-                    Runner.run(translator, it_input, max_turns=3),
-                    Runner.run(translator, fa_input, max_turns=3),
-                )
+                with trace(name="Translation", run_type="chain", inputs={"languages": ["it", "fa"]}):
+                    it_result, fa_result = await asyncio.gather(
+                        Runner.run(translator, it_input, max_turns=3),
+                        Runner.run(translator, fa_input, max_turns=3),
+                    )
                 it_translated = json.loads(str(it_result.final_output))
                 fa_translated = json.loads(str(fa_result.final_output))
                 it_panels, it_recap, it_teaser = _apply_translation(panels, recap_text, teaser_text, it_translated)
