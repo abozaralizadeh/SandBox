@@ -19,6 +19,8 @@ async def create_async_playwright_browser(
 ) -> Browser:
     playwright = await async_playwright().start()
     browser = await playwright.chromium.launch(headless=headless, args=args)
+    context = await browser.new_context(accept_downloads=True)
+    await context.new_page()
     return browser
 
 async def get_browsewebtools():
