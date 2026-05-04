@@ -12,6 +12,9 @@ langchain-openai==1.1.0
 langchain-deepseek==1.0.1
 langchain-community==0.4.1
 langgraph==1.0.4
+langgraph-prebuilt==1.0.5
+langgraph-checkpoint==3.0.1
+langgraph-sdk==0.2.14
 langsmith==0.4.49
 xmltodict==1.0.2
 pydantic==2.12.5
