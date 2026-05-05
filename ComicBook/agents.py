@@ -11,6 +11,7 @@ from agents import Agent, Runner, OpenAIResponsesModel, set_tracing_disabled
 from agents.items import ToolCallOutputItem
 from agents.tool import function_tool
 from langsmith import traceable, trace
+from langsmith.wrappers import wrap_openai
 
 set_tracing_disabled(True)
 from openai import AsyncAzureOpenAI
@@ -42,7 +43,7 @@ def _build_openai_client() -> AsyncAzureOpenAI:
         azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
         azure_deployment=os.environ.get("AZURE_OPENAI_MODEL", "gpt-4o"),
     )
-    return client
+    return wrap_openai(client)
 
 
 # ---------------------------------------------------------------------------
