@@ -277,6 +277,21 @@
         let currentArcId = "";
         let currentLang = "en";
 
+        function getQueryParams() {
+            const params = new URLSearchParams(window.location.search);
+            return { date: params.get("date") || "", lang: params.get("lang") || "" };
+        }
+
+        function updateQueryString() {
+            const params = new URLSearchParams();
+            const isoDate = datePicker.value || (currentDate ? dateToIso(currentDate) : "");
+            if (isoDate) params.set("date", isoDate);
+            if (currentLang && currentLang !== "en") params.set("lang", currentLang);
+            const qs = params.toString();
+            const newUrl = window.location.pathname + (qs ? "?" + qs : "");
+            window.history.replaceState(null, "", newUrl);
+        }
+
         function dateToIso(yyyymmdd) {
             return yyyymmdd.slice(0,4) + "-" + yyyymmdd.slice(4,6) + "-" + yyyymmdd.slice(6,8);
         }
@@ -406,6 +421,7 @@
 
                 statusText.textContent = arcId ? `Arc: ${arcId} — ${timestamp}` : `Updated: ${timestamp}`;
                 updateNav();
+                updateQueryString();
             } catch (err) {
                 content.innerHTML = "<p style='color:#ff6f4c'>Failed to load comic.</p>";
                 statusText.textContent = "Error loading comic.";
@@ -420,6 +436,7 @@
         const langSelect = document.getElementById("langSelect");
         langSelect.addEventListener("change", () => {
             currentLang = langSelect.value;
+            updateQueryString();
             loadComic();
         });
 
@@ -499,6 +516,14 @@
             loadComic();
         });
         document.addEventListener("DOMContentLoaded", async () => {
+            const qp = getQueryParams();
+            if (qp.lang && ["en", "it", "fa"].includes(qp.lang)) {
+                currentLang = qp.lang;
+                langSelect.value = qp.lang;
+            }
+            if (qp.date) {
+                datePicker.value = qp.date;
+            }
             await fetchIndex();
             await loadComic();
         });
