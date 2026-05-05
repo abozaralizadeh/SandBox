@@ -302,6 +302,24 @@ def get_arc_list() -> List[dict]:
     ]
 
 
+def get_recent_arc_summaries(limit: int = 10) -> List[dict]:
+    """Return the most recent arcs with title, logline, and genre (newest first)."""
+    arcs = list(arcs_table.query_entities(
+        "PartitionKey eq 'arc'",
+        select=["RowKey", "title", "logline", "genre", "start_date", "status"],
+        results_per_page=100,
+    ))
+    arcs.sort(key=lambda x: x.get("start_date", ""), reverse=True)
+    return [
+        {
+            "title": a.get("title", ""),
+            "logline": a.get("logline", ""),
+            "genre": a.get("genre", ""),
+        }
+        for a in arcs[:limit]
+    ]
+
+
 def save_episode(
     arc: dict,
     episode_date: datetime,

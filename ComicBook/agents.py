@@ -7,7 +7,7 @@ import os
 from datetime import datetime, timezone
 from typing import Any, Dict, List
 
-from agents import Agent, Runner, OpenAIResponsesModel, set_tracing_disabled
+from agents import Agent, ModelSettings, Runner, OpenAIResponsesModel, WebSearchTool, set_tracing_disabled
 from agents.items import ToolCallOutputItem
 from agents.tool import function_tool
 from langsmith import traceable, trace
@@ -20,6 +20,7 @@ from ComicBook.azurestorage import (
     close_arc as _storage_close_arc,
     get_active_arc,
     get_arc_story_outline,
+    get_recent_arc_summaries,
     get_recent_episodes,
     save_arc_story_outline,
     save_episode,
@@ -313,6 +314,9 @@ YOUR CREATIVE MANDATE:
 ARC LIFECYCLE:
 1. First, call get_arc_status to check if there's an active story arc.
 2. If NO active arc exists:
+   - Review the "past_arcs" list returned by get_arc_status — it contains the title, logline,
+     and genre of the last 10 arcs. You MUST NOT repeat or closely resemble any of them.
+     Pick a different genre, different setting, different character archetypes.
    - Invent a completely fresh, creative story premise.
    - Choose an unexpected genre/tone combination.
    - Create 2-4 compelling main characters with names, detailed visual descriptions,
@@ -343,6 +347,16 @@ STORY OUTLINE:
 - This outline is your contract — future episodes MUST follow this plan.
 - When planning each episode, ALWAYS reference the story_outline from your input context \
   to maintain consistency. You may adapt small details but never contradict major plot points.
+
+WEB SEARCH:
+- You have a web search tool available. Use it whenever you need inspiration or research:
+  * When creating a new arc — search for trending topics, cultural events, interesting scientific
+    discoveries, mythology, folklore, or anything that could spark a unique story idea.
+  * When writing about a specific setting, culture, or technical subject — search for accuracy.
+  * When you want to ensure your idea is genuinely original and not accidentally copying an
+    existing well-known comic or show.
+- You are NOT required to search every time — use your judgment. But when you feel stuck or
+  want to ground your story in something real and fresh, search freely.
 
 EPISODE PLANNING:
 - Decide the number of panels (4-8) based on what today's episode needs.
@@ -491,9 +505,11 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
         a = state["arc"]
         if not a:
             logger.info("  -> No active arc found")
+            past_arcs = get_recent_arc_summaries(limit=10)
             return {
                 "status": "no_active_arc",
                 "message": "No active story arc. You must create a new one.",
+                "past_arcs": past_arcs,
             }
         recent_eps = get_recent_episodes(a["RowKey"], limit=5, hydrate_html=False)
         logger.info("  -> Active arc: '%s' (%s), %s episodes so far",
@@ -702,8 +718,9 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
     director = Agent(
         name="Director",
         instructions=DIRECTOR_INSTRUCTIONS,
-        tools=[get_arc_status, start_new_arc, end_current_arc, save_story_outline],
+        tools=[WebSearchTool(search_context_size="high"), get_arc_status, start_new_arc, end_current_arc, save_story_outline],
         model=model,
+        model_settings=ModelSettings(temperature=1.2),
     )
 
     translator = Agent(
@@ -810,10 +827,12 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
             for lang_code, lang_name in [("it", "Italian"), ("fa", "Persian (Farsi)")]:
                 try:
                     logger.info("STEP 4 — Translating to %s...", lang_name)
-                    t_input = json.dumps({"target_language": lang_name, "texts": texts}, ensure_ascii=False)
+                    t_input = json.dumps({"target_language": lang_name, **texts}, ensure_ascii=False)
                     with trace(name=f"Translate-{lang_code}", run_type="chain"):
                         t_result = await Runner.run(translator, t_input, max_turns=3)
                     translated = json.loads(str(t_result.final_output))
+                    if "texts" in translated:
+                        translated = translated["texts"]
                     t_panels, t_recap, t_teaser = _apply_translation(panels, recap_text, teaser_text, translated)
                     t_html = _assemble_html(arc_title_val, ep_num, date_str_val, t_recap, t_teaser, t_panels, lang=lang_code)
                     if lang_code == "it":
