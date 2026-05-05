@@ -617,7 +617,7 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
             f"{description}"
         )
         try:
-            url = create_image(prompt, size="wide")
+            url = await create_image(prompt, size="wide")
             logger.info("  -> Character sheet generated: %s", url[:120])
             if a:
                 update_arc_metadata(a["RowKey"], character_sheet_url=url)
@@ -641,9 +641,9 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
                      size, bool(reference_url), prompt[:80])
         try:
             if reference_url:
-                url = create_image_with_reference(prompt, reference_url, size)
+                url = await create_image_with_reference(prompt, reference_url, size)
             else:
-                url = create_image(prompt, size)
+                url = await create_image(prompt, size)
             logger.info("  -> Panel image generated: %s", url[:120])
             return {"status": "success", "image_url": url, "size": size}
         except Exception as exc:

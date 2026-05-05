@@ -1,21 +1,29 @@
+import asyncio
 import base64
 import os
 from io import BytesIO
 from typing import Optional
 
-import requests
-from openai import AzureOpenAI
+import httpx
+from openai import AsyncAzureOpenAI
 
 from ComicBook.azurestorage import upload_image_bytes_to_blob, save_photo_to_blob
 
-client = AzureOpenAI(
-    api_version=os.environ.get("AZURE_OPENAI_API_VERSION", "2025-04-01-preview"),
-    azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT_DALLE"],
-    api_key=os.environ["AZURE_OPENAI_API_KEY_DALLE"],
-)
+_client: Optional[AsyncAzureOpenAI] = None
 
 _DALLE3_SIZES = {"wide": "1792x1024", "tall": "1024x1792", "square": "1024x1024"}
 _GPT_IMAGE_SIZES = {"wide": "1536x1024", "tall": "1024x1536", "square": "1024x1024"}
+
+
+def _get_client() -> AsyncAzureOpenAI:
+    global _client
+    if _client is None:
+        _client = AsyncAzureOpenAI(
+            api_version=os.environ.get("AZURE_OPENAI_API_VERSION", "2025-04-01-preview"),
+            azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT_DALLE"],
+            api_key=os.environ["AZURE_OPENAI_API_KEY_DALLE"],
+        )
+    return _client
 
 
 def _get_model() -> str:
@@ -28,13 +36,14 @@ def _resolve_size(size: str) -> str:
     return size_map.get(size, "1024x1024")
 
 
-def _download_image_bytes(url: str) -> Optional[bytes]:
+async def _download_image_bytes(url: str) -> Optional[bytes]:
     if not url:
         return None
     try:
-        resp = requests.get(url, timeout=30)
-        resp.raise_for_status()
-        return resp.content
+        async with httpx.AsyncClient() as http:
+            resp = await http.get(url, timeout=30)
+            resp.raise_for_status()
+            return resp.content
     except Exception as exc:
         print(f"[ComicBook:getimage] Download failed: {exc}")
         return None
@@ -50,21 +59,21 @@ def _upload_result(result) -> str:
     return save_photo_to_blob(image_url)
 
 
-def create_image(prompt: str, size: str = "square") -> str:
+async def create_image(prompt: str, size: str = "square") -> str:
     """Generate an image from a text prompt. Returns the blob URL."""
     model = _get_model()
-    result = client.images.generate(
+    result = await _get_client().images.generate(
         model=model,
         prompt=prompt,
         size=_resolve_size(size),
     )
-    return _upload_result(result)
+    return await asyncio.to_thread(_upload_result, result)
 
 
-def create_image_with_reference(prompt: str, reference_url: str, size: str = "square") -> str:
+async def create_image_with_reference(prompt: str, reference_url: str, size: str = "square") -> str:
     """Generate an image using a text prompt and a reference image for style/character consistency."""
     model = _get_model()
-    reference_bytes = _download_image_bytes(reference_url)
+    reference_bytes = await _download_image_bytes(reference_url)
 
     kwargs = {
         "model": model,
@@ -76,5 +85,5 @@ def create_image_with_reference(prompt: str, reference_url: str, size: str = "sq
         reference_file.name = "reference.png"
         kwargs["image"] = reference_file
 
-    result = client.images.edit(**kwargs)
-    return _upload_result(result)
+    result = await _get_client().images.edit(**kwargs)
+    return await asyncio.to_thread(_upload_result, result)
