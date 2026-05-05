@@ -11,7 +11,6 @@ from agents import Agent, Runner, OpenAIResponsesModel, set_tracing_disabled
 from agents.items import ToolCallOutputItem
 from agents.tool import function_tool
 from langsmith import traceable, trace
-from langsmith.wrappers import wrap_openai
 
 set_tracing_disabled(True)
 from openai import AsyncAzureOpenAI
@@ -43,7 +42,7 @@ def _build_openai_client() -> AsyncAzureOpenAI:
         azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
         azure_deployment=os.environ.get("AZURE_OPENAI_MODEL", "gpt-4o"),
     )
-    return wrap_openai(client)
+    return client
 
 
 # ---------------------------------------------------------------------------
@@ -795,7 +794,7 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
             cartoonist_result = await Runner.run(cartoonist, storyteller_script, max_turns=30)
         logger.info("Cartoonist finished.")
 
-        # Step 4: Translations (Italian + Persian) — run in parallel via Translator agent
+        # Step 4: Translations (Italian + Persian) — run sequentially
         html_it = ""
         html_fa = ""
         panels = state.get("assembled_panels", [])
@@ -806,24 +805,23 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
             ep_num = state["episode_number"]
             date_str_val = target_date.strftime("%Y-%m-%d")
             texts = _build_translation_payload(panels, recap_text, teaser_text)
-            try:
-                logger.info("STEP 4/4 — Translating to Italian and Persian via Translator agent...")
-                it_input = json.dumps({"target_language": "Italian", "texts": texts}, ensure_ascii=False)
-                fa_input = json.dumps({"target_language": "Persian (Farsi)", "texts": texts}, ensure_ascii=False)
-                with trace(name="Translation", run_type="chain", inputs={"languages": ["it", "fa"]}):
-                    it_result, fa_result = await asyncio.gather(
-                        Runner.run(translator, it_input, max_turns=3),
-                        Runner.run(translator, fa_input, max_turns=3),
-                    )
-                it_translated = json.loads(str(it_result.final_output))
-                fa_translated = json.loads(str(fa_result.final_output))
-                it_panels, it_recap, it_teaser = _apply_translation(panels, recap_text, teaser_text, it_translated)
-                fa_panels, fa_recap, fa_teaser = _apply_translation(panels, recap_text, teaser_text, fa_translated)
-                html_it = _assemble_html(arc_title_val, ep_num, date_str_val, it_recap, it_teaser, it_panels, lang="it")
-                html_fa = _assemble_html(arc_title_val, ep_num, date_str_val, fa_recap, fa_teaser, fa_panels, lang="fa")
-                logger.info("Translations complete: IT=%d chars, FA=%d chars", len(html_it), len(html_fa))
-            except Exception as exc:
-                logger.error("Translation step failed (English will still be saved): %s", exc)
+
+            for lang_code, lang_name in [("it", "Italian"), ("fa", "Persian (Farsi)")]:
+                try:
+                    logger.info("STEP 4 — Translating to %s...", lang_name)
+                    t_input = json.dumps({"target_language": lang_name, "texts": texts}, ensure_ascii=False)
+                    with trace(name=f"Translate-{lang_code}", run_type="chain"):
+                        t_result = await Runner.run(translator, t_input, max_turns=3)
+                    translated = json.loads(str(t_result.final_output))
+                    t_panels, t_recap, t_teaser = _apply_translation(panels, recap_text, teaser_text, translated)
+                    t_html = _assemble_html(arc_title_val, ep_num, date_str_val, t_recap, t_teaser, t_panels, lang=lang_code)
+                    if lang_code == "it":
+                        html_it = t_html
+                    else:
+                        html_fa = t_html
+                    logger.info("  %s translation complete: %d chars", lang_name, len(t_html))
+                except Exception as exc:
+                    logger.error("Translation to %s failed (English still saved): %s", lang_name, exc)
 
         return cartoonist_result, director_plan, storyteller_script, html_it, html_fa
 
