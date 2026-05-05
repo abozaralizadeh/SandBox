@@ -293,6 +293,17 @@
             return value.replace(/-/g, "");
         }
 
+        function todayIso() {
+            const d = new Date();
+            return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
+        }
+
+        function availableDatesSet() {
+            const s = new Set(episodeIndex.map(ep => dateToIso(ep.date)));
+            s.add(todayIso());
+            return s;
+        }
+
         async function fetchIndex() {
             try {
                 const res = await fetch("/comicbookindex");
@@ -301,6 +312,10 @@
                 arcList = data.arcs || [];
             } catch (e) {
                 console.error("Failed to fetch episode index", e);
+            }
+            datePicker.max = todayIso();
+            if (episodeIndex.length > 0) {
+                datePicker.min = dateToIso(episodeIndex[0].date);
             }
         }
 
@@ -472,7 +487,17 @@
             }
         });
 
-        datePicker.addEventListener("change", loadComic);
+        datePicker.addEventListener("change", () => {
+            const val = datePicker.value;
+            if (!val) return;
+            const allowed = availableDatesSet();
+            if (!allowed.has(val)) {
+                content.innerHTML = "<p style='color:var(--muted)'>No episode available for this date.</p>";
+                statusText.textContent = "No episode for " + val;
+                return;
+            }
+            loadComic();
+        });
         document.addEventListener("DOMContentLoaded", async () => {
             await fetchIndex();
             await loadComic();

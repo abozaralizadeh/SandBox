@@ -19,9 +19,11 @@ from openai import AsyncAzureOpenAI
 from ComicBook.azurestorage import (
     close_arc as _storage_close_arc,
     get_active_arc,
+    get_arc_glossary,
     get_arc_story_outline,
     get_recent_arc_summaries,
     get_recent_episodes,
+    save_arc_glossary,
     save_arc_story_outline,
     save_episode,
     start_new_arc as _storage_start_new_arc,
@@ -284,9 +286,28 @@ def _apply_translation(panels: list, recap: str, teaser: str, translated: dict, 
 TRANSLATOR_INSTRUCTIONS = """\
 You are a world-class literary translator specializing in comic books and graphic novels.
 
-You will receive a JSON object with a "target_language" field and several text fields \
-(title, recap, teaser, dialogue, captions, sound effects). Your job is to produce a \
-translation that reads as if the comic were ORIGINALLY WRITTEN in the target language.
+You will receive a JSON object with:
+- "target_language": the language to translate into
+- "story_context": the Director's episode plan and the Storyteller's full script — this \
+  tells you what is happening in every panel, each character's mood, the scene's tone, \
+  and the narrative arc. READ THIS CAREFULLY before translating. It is your key to \
+  producing translations that actually make sense as a story.
+- Text fields to translate: title, recap, teaser, dialogue_N, caption_N, sfx_N
+- Optionally a "glossary" with established translations for this arc
+
+Your job is to produce a translation that reads as if the comic were ORIGINALLY WRITTEN \
+in the target language — not translated, but conceived and written by a native author.
+
+STORY CONTEXT:
+- Use the story_context to understand the FULL SCENE behind each text fragment. A caption \
+  like "The wind changed" means very different things in a romantic scene vs. a battle. \
+  Your translation should reflect the actual emotional context.
+- Know each character's personality from the script — a brave explorer speaks differently \
+  than a nervous child. Let their personality come through in how you translate their lines.
+- Understand the pacing: tense moments need short, sharp translations. Quiet moments can \
+  breathe. Match the rhythm of what's happening on screen.
+- Do NOT translate the story_context itself — it is reference only. Only translate the \
+  text fields (title, recap, teaser, dialogue_N, caption_N, sfx_N).
 
 TRANSLATION PHILOSOPHY:
 - FLUENCY IS EVERYTHING. Never translate word-for-word. Restructure sentences so they \
@@ -310,6 +331,19 @@ TRANSLATION PHILOSOPHY:
 - Comic energy: keep it punchy, dramatic, alive. Exclamations should hit hard. Whispers \
   should feel intimate. Action should crackle.
 
+GLOSSARY:
+- You may receive a "glossary" field — a JSON object mapping English terms/concepts to \
+  their established translations for this story arc. You MUST use these translations \
+  consistently. This ensures characters, places, and key concepts are translated the same \
+  way across all episodes.
+- After translating, you MUST include an "updated_glossary" field in your output — a JSON \
+  object containing ALL glossary entries (existing ones + any new terms you translated for \
+  the first time). Include: character descriptive labels, place names, world-specific \
+  concepts, recurring phrases, titles, and any coined terms. This will be saved and fed \
+  back to you in future episodes.
+- Example glossary entry: {"Cloud Harbor": "بندر ابرها", "wind roads": "جاده‌های بادی", \
+  "MERCHANT": "بازرگان", "storm diver": "غواص طوفان"}
+
 STRUCTURAL RULES:
 - Translate ALL text values including the "title" field.
 - Keep proper character names UNCHANGED (e.g., "IRIA: Let's go!" → "IRIA: بریم!" in Persian).
@@ -320,11 +354,12 @@ STRUCTURAL RULES:
 - For sound effects (sfx): adapt to feel natural and impactful in the target language. \
   Don't just transliterate — find the equivalent onomatopoeia that a native comic reader \
   would expect.
-- Do NOT add or remove any JSON keys — return exactly the same keys you received.
+- Do NOT add or remove any text keys — return exactly the same text keys you received, \
+  plus the "updated_glossary" key.
 
 OUTPUT:
-Respond with ONLY a valid JSON object containing the translated values. \
-No explanation, no markdown, no wrapping — just the raw JSON.\
+Respond with ONLY a valid JSON object containing the translated values and the \
+"updated_glossary" field. No explanation, no markdown, no wrapping — just the raw JSON.\
 """
 
 DIRECTOR_INSTRUCTIONS = """\
@@ -500,6 +535,11 @@ IMPORTANT RULES:
 - Never fabricate or guess image URLs — only use URLs returned by the tools.
 - Include character-specific visual details in every prompt to maintain consistency.
 - Match the art style across ALL panels.
+- NEVER include any text, dialogue, speech bubbles, captions, letters, words, or written \
+  language in image prompts. The images should be PURELY VISUAL — characters, environments, \
+  actions, expressions only. Text overlays are added separately by the layout system. \
+  Explicitly add "no text, no speech bubbles, no captions, no letters, no words" to every \
+  image prompt.
 - Your final response after calling assemble_layout should confirm the comic was assembled.\
 """
 
@@ -696,6 +736,9 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
         """Generate a single comic panel image. Use the character reference sheet URL for consistency."""
         if size not in ("wide", "tall", "square"):
             size = "square"
+        no_text_suffix = ". No text, no speech bubbles, no captions, no letters, no words, no writing."
+        if "no text" not in prompt.lower():
+            prompt = prompt.rstrip(".") + no_text_suffix
         logger.info("TOOL generate_panel_image called (size='%s', has_ref=%s, prompt='%s')",
                      size, bool(reference_url), prompt[:80])
         try:
@@ -868,15 +911,32 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
             date_str_val = target_date.strftime("%Y-%m-%d")
             texts = _build_translation_payload(panels, recap_text, teaser_text, title=arc_title_val)
 
+            arc_id = state["arc"]["RowKey"] if state["arc"] else ""
+
+            story_context = (
+                f"=== DIRECTOR'S EPISODE PLAN ===\n{director_plan}\n\n"
+                f"=== STORYTELLER'S SCRIPT ===\n{storyteller_script}"
+            )
+
             for lang_code, lang_name in [("it", "Italian"), ("fa", "Persian (Farsi)")]:
                 try:
                     logger.info("STEP 4 — Translating to %s...", lang_name)
-                    t_input = json.dumps({"target_language": lang_name, **texts}, ensure_ascii=False)
+                    glossary = get_arc_glossary(state["arc"], lang_code) if state["arc"] else {}
+                    t_payload = {"target_language": lang_name, "story_context": story_context, **texts}
+                    if glossary:
+                        t_payload["glossary"] = glossary
+                    t_input = json.dumps(t_payload, ensure_ascii=False)
                     with trace(name=f"Translate-{lang_code}", run_type="chain"):
                         t_result = await Runner.run(translator, t_input, max_turns=3)
                     translated = json.loads(str(t_result.final_output))
                     if "texts" in translated:
                         translated = translated["texts"]
+                    updated_glossary = translated.pop("updated_glossary", None)
+                    if updated_glossary and arc_id:
+                        save_arc_glossary(arc_id, lang_code, updated_glossary)
+                        if state["arc"]:
+                            state["arc"][f"glossary_{lang_code}"] = json.dumps(updated_glossary, ensure_ascii=False)
+                        logger.info("  Glossary for %s updated: %d entries", lang_code, len(updated_glossary))
                     t_panels, t_recap, t_teaser, t_title = _apply_translation(panels, recap_text, teaser_text, translated, title=arc_title_val)
                     t_html = _assemble_html(t_title, ep_num, date_str_val, t_recap, t_teaser, t_panels, lang=lang_code)
                     if lang_code == "it":

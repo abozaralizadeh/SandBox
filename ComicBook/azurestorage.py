@@ -217,6 +217,39 @@ def get_arc_story_outline(arc: dict) -> str:
     return arc.get("story_outline", "")
 
 
+def save_arc_glossary(arc_id: str, lang: str, glossary: dict):
+    import json
+    key = f"glossary_{lang}"
+    content = json.dumps(glossary, ensure_ascii=False)
+    entity = {"PartitionKey": "arc", "RowKey": arc_id}
+    if len(content) > MAX_TABLE_PROPERTY_CHARS:
+        blob_name = upload_text_to_blob(content, extension=".json")
+        entity[key] = ""
+        entity[f"{key}_blob_name"] = blob_name
+    else:
+        entity[key] = content
+        entity[f"{key}_blob_name"] = ""
+    arcs_table.upsert_entity(entity=entity, mode=UpdateMode.MERGE)
+
+
+def get_arc_glossary(arc: dict, lang: str) -> dict:
+    import json
+    key = f"glossary_{lang}"
+    blob_name = arc.get(f"{key}_blob_name", "")
+    if blob_name:
+        try:
+            return json.loads(download_html_from_blob(blob_name))
+        except Exception:
+            pass
+    raw = arc.get(key, "")
+    if raw:
+        try:
+            return json.loads(raw)
+        except Exception:
+            pass
+    return {}
+
+
 def ensure_active_arc(target_date: Optional[datetime] = None, min_days: int = 7, max_days: int = 10) -> dict:
     target_date = target_date or datetime.utcnow()
     arc = get_latest_arc()
