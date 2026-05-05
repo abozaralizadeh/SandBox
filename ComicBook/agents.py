@@ -158,11 +158,11 @@ def _assemble_html(
         if is_rtl else ""
     )
     rtl_css = (
-        "\n.comic-page[dir=rtl] {{ direction: rtl; font-family: 'Vazirmatn', sans-serif; }}"
-        "\n.comic-page[dir=rtl] .comic-recap {{ border-left: none; border-right: 5px solid #b8860b; }}"
-        "\n.comic-page[dir=rtl] .speech-bubble {{ font-family: 'Vazirmatn', sans-serif; }}"
-        "\n.comic-page[dir=rtl] .caption-box {{ font-family: 'Vazirmatn', sans-serif; }}"
-        "\n.comic-page[dir=rtl] .panel-overlay {{ align-items: flex-end; }}"
+        "\n.comic-page[dir=rtl] { direction: rtl; font-family: 'Vazirmatn', sans-serif; }"
+        "\n.comic-page[dir=rtl] .comic-recap { border-left: none; border-right: 5px solid #b8860b; }"
+        "\n.comic-page[dir=rtl] .speech-bubble { font-family: 'Vazirmatn', sans-serif; }"
+        "\n.comic-page[dir=rtl] .caption-box { font-family: 'Vazirmatn', sans-serif; }"
+        "\n.comic-page[dir=rtl] .panel-overlay { align-items: flex-end; }"
         if is_rtl else ""
     )
     dir_attr = ' dir="rtl"' if is_rtl else ''
@@ -248,8 +248,10 @@ def _assemble_html(
 </div>"""
 
 
-def _build_translation_payload(panels: list, recap: str, teaser: str) -> dict:
+def _build_translation_payload(panels: list, recap: str, teaser: str, title: str = "") -> dict:
     texts = {"recap": recap, "teaser": teaser}
+    if title:
+        texts["title"] = title
     for i, p in enumerate(panels):
         if p.get("dialogue"):
             texts[f"dialogue_{i}"] = p["dialogue"]
@@ -260,7 +262,7 @@ def _build_translation_payload(panels: list, recap: str, teaser: str) -> dict:
     return texts
 
 
-def _apply_translation(panels: list, recap: str, teaser: str, translated: dict) -> tuple:
+def _apply_translation(panels: list, recap: str, teaser: str, translated: dict, title: str = "") -> tuple:
     new_panels = []
     for i, p in enumerate(panels):
         tp = dict(p)
@@ -271,7 +273,8 @@ def _apply_translation(panels: list, recap: str, teaser: str, translated: dict) 
         if f"sfx_{i}" in translated:
             tp["sfx"] = translated[f"sfx_{i}"]
         new_panels.append(tp)
-    return new_panels, translated.get("recap", recap), translated.get("teaser", teaser)
+    t_title = translated.get("title", title)
+    return new_panels, translated.get("recap", recap), translated.get("teaser", teaser), t_title
 
 
 # ---------------------------------------------------------------------------
@@ -279,19 +282,45 @@ def _apply_translation(panels: list, recap: str, teaser: str, translated: dict) 
 # ---------------------------------------------------------------------------
 
 TRANSLATOR_INSTRUCTIONS = """\
-You are a professional comic book translator.
+You are a world-class literary translator specializing in comic books and graphic novels.
 
-You will receive a JSON object containing comic strip text elements (dialogue, captions, \
-sound effects, recap, and teaser) plus a target language.
+You will receive a JSON object with a "target_language" field and several text fields \
+(title, recap, teaser, dialogue, captions, sound effects). Your job is to produce a \
+translation that reads as if the comic were ORIGINALLY WRITTEN in the target language.
 
-RULES:
-- Translate every value to the specified target language.
-- Keep character names UNCHANGED (e.g., "MAYA: Let's go!" → "MAYA: Andiamo!").
-- Preserve the "CHARACTER_NAME: " prefix format in dialogue lines.
-- Match the tone and energy of comic book writing — punchy, expressive, dramatic.
-- For sound effects (sfx), adapt them to feel natural in the target language \
-  (e.g., "CRASH!" might become "SBAM!" in Italian or "!بوم" in Persian).
-- Do NOT add or remove any keys — return exactly the same keys you received.
+TRANSLATION PHILOSOPHY:
+- FLUENCY IS EVERYTHING. Never translate word-for-word. Restructure sentences so they \
+  flow naturally in the target language. A Persian reader should feel they are reading \
+  Persian literature, not decoded English.
+- For Persian (Farsi): Write in elegant, modern Farsi. Use natural sentence order \
+  (SOV), colloquial warmth in dialogue, and poetic rhythm in narration. Avoid clunky \
+  compound constructions — break long English sentences into shorter, punchier Farsi ones. \
+  Use spoken Farsi patterns in dialogue (how real people talk on the street, not formal \
+  written prose). Narration can be more literary but must still flow beautifully.
+- For Italian: Write with the musicality and expressiveness Italian is known for. Use \
+  idiomatic expressions, natural exclamations (Accidenti!, Dai!, Madonna!), and the rich \
+  emotional register of spoken Italian. Let dialogue breathe with Italian rhythm.
+- Adapt idioms and metaphors to ones that resonate in the target culture. If an English \
+  idiom has no equivalent, convey the same FEELING with a natural expression.
+- Dialogue must sound like REAL PEOPLE SPEAKING that language — with contractions, \
+  interruptions, emotion, and personality. A gruff sailor sounds different from a nervous \
+  scholar in every language.
+- Captions and narration should read like beautiful prose — evocative, atmospheric, with \
+  sensory detail and rhythm. Short sentences for tension. Flowing ones for wonder.
+- Comic energy: keep it punchy, dramatic, alive. Exclamations should hit hard. Whispers \
+  should feel intimate. Action should crackle.
+
+STRUCTURAL RULES:
+- Translate ALL text values including the "title" field.
+- Keep proper character names UNCHANGED (e.g., "IRIA: Let's go!" → "IRIA: بریم!" in Persian).
+- Translate descriptive speaker labels: "MERCHANT 1" → "بازرگان ۱" / "MERCANTE 1", \
+  "CROWD VOICES" → "صداهای جمعیت" / "VOCI DALLA FOLLA", etc. Only actual character \
+  names (IRIA, NILO, BRAM, MAYA...) stay unchanged.
+- Preserve the "SPEAKER: " prefix format in dialogue lines.
+- For sound effects (sfx): adapt to feel natural and impactful in the target language. \
+  Don't just transliterate — find the equivalent onomatopoeia that a native comic reader \
+  would expect.
+- Do NOT add or remove any JSON keys — return exactly the same keys you received.
 
 OUTPUT:
 Respond with ONLY a valid JSON object containing the translated values. \
@@ -404,6 +433,20 @@ WRITING RULES:
 - End with a 1-line TEASER that hooks the reader for the next episode.
 - Pacing matters: vary panel sizes to control rhythm. Wide panels slow time down,
   small square panels speed it up.
+
+PROSE QUALITY:
+- Write dialogue that BREATHES — use contractions, interrupted speech ("I didn't—"), \
+  trailing off ("Maybe we could..."), emotional outbursts, and hesitation. Real people \
+  don't speak in complete, polished sentences.
+- Captions should be evocative and concise — use sensory detail (sounds, smells, light, \
+  temperature) and rhythm. Short sentences build tension. Longer ones create wonder. \
+  Avoid exposition dumps — if you can say it in 5 words instead of 15, do it.
+- Vary sentence length and structure. Monotonous rhythm kills drama. A staccato line \
+  after a flowing one creates impact.
+- The writing should be ENJOYABLE to read — not just functional. Aim for the quality \
+  of a published graphic novel, not a plot summary.
+- Avoid overly complex compound sentences. If a sentence has more than two clauses, \
+  break it up. Clarity and punch over complexity.
 
 OUTPUT:
 Write the complete panel-by-panel script as your response. Include the RECAP at the top \
@@ -728,6 +771,7 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
         instructions=TRANSLATOR_INSTRUCTIONS,
         tools=[],
         model=model,
+        model_settings=ModelSettings(temperature=0.9),
     )
 
     # ------------------------------------------------------------------
@@ -822,7 +866,7 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
             arc_title_val = state["arc"].get("title", "") if state["arc"] else ""
             ep_num = state["episode_number"]
             date_str_val = target_date.strftime("%Y-%m-%d")
-            texts = _build_translation_payload(panels, recap_text, teaser_text)
+            texts = _build_translation_payload(panels, recap_text, teaser_text, title=arc_title_val)
 
             for lang_code, lang_name in [("it", "Italian"), ("fa", "Persian (Farsi)")]:
                 try:
@@ -833,8 +877,8 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
                     translated = json.loads(str(t_result.final_output))
                     if "texts" in translated:
                         translated = translated["texts"]
-                    t_panels, t_recap, t_teaser = _apply_translation(panels, recap_text, teaser_text, translated)
-                    t_html = _assemble_html(arc_title_val, ep_num, date_str_val, t_recap, t_teaser, t_panels, lang=lang_code)
+                    t_panels, t_recap, t_teaser, t_title = _apply_translation(panels, recap_text, teaser_text, translated, title=arc_title_val)
+                    t_html = _assemble_html(t_title, ep_num, date_str_val, t_recap, t_teaser, t_panels, lang=lang_code)
                     if lang_code == "it":
                         html_it = t_html
                     else:
