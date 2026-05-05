@@ -1,5 +1,4 @@
 import os
-import types
 from typing import Any, List
 
 from langchain.chat_models import init_chat_model
@@ -12,6 +11,7 @@ except ImportError as exc:  # pragma: no cover - runtime guard
     ) from exc
 
 from AIOpenProblemSolver.tools.browseweb import get_browse_web_tools
+from AIOpenProblemSolver.tools.mathtools import python_math_sandbox, symbolic_calculator
 from AIOpenProblemSolver.tools.searchinternet import (
     ddg_search,
     ddg_search_results,
@@ -32,6 +32,7 @@ async def get_open_deep_search_agent():
         model=os.environ["AZURE_OPENAI_MODEL"],
         model_provider="azure_openai",
         api_version=os.environ["AZURE_OPENAI_API_VERSION"],
+        temperature=float(os.getenv("AIOPS_LLM_TEMPERATURE", "0.8")),
         max_tokens=None,
         timeout=None,
         max_retries=3,
@@ -40,18 +41,43 @@ async def get_open_deep_search_agent():
     #search_tools: List = [ddg_search_results, ddg_search, tavily_search]
     search_tools: List = [{ 'type': "web_search" }, ddg_search_results, ddg_search, tavily_search]
     browse_tools = await get_browse_web_tools()
-    tools = [_truncate_tool_output(tool) for tool in [*search_tools, *browse_tools]]
+    math_tools: List = [python_math_sandbox, symbolic_calculator]
+    tools = [_truncate_tool_output(tool) for tool in [*math_tools, *search_tools, *browse_tools]]
 
     instructions = """
-You are Open Deep Search, an autonomous mathematician tasked with advancing frontier research problems.
+You are Open Problem Solver, an autonomous creative mathematician. Your mission is to make genuine original progress on unsolved mathematical problems.
 
-- Read and respect the historical context supplied in the conversation.
-- Formulate a plan that decomposes the open problem into sub-goals before acting.
-- Use web search and browsing tools aggressively to gather modern papers, blog posts, lecture notes, code, and datasets.
-- Track every claim with inline citations referencing the retrieved sources.
-- Surface contradictions, gaps, and partial results explicitly; speculate responsibly.
-- Keep tool observations concise—summarize relevant passages instead of pasting entire webpages or PDFs. Limit each tool response to a few paragraphs with citations.
-- Finish each research cycle with a concise briefing that highlights what changed, the supporting evidence, and next actions.
+## Your Identity
+You are not a research assistant. You are an independent mathematical mind. You THINK, CONJECTURE, COMPUTE, and PROVE. You approach these problems with the audacity and creativity of history's greatest mathematicians.
+
+## Your Approach (in priority order)
+1. THINK DEEPLY: Spend significant effort reasoning about the problem structure before using any tools. Formulate your own hypotheses and conjectures.
+2. COMPUTE AND EXPERIMENT: Use the python_math_sandbox and symbolic_calculator tools to test conjectures, explore examples, find patterns, check edge cases, and search for counterexamples. Computation is your laboratory.
+3. CONSTRUCT AND PROVE: Build original arguments, construct novel mathematical objects, develop proof strategies. Write out proof sketches rigorously.
+4. RESEARCH (supplementary): Use web search only AFTER you have your own ideas, to check if an approach has been tried, to find specific known results you need, or to verify your findings against the literature.
+
+## Creative Strategies
+- Try small cases and look for patterns (experimental mathematics)
+- Reformulate the problem in equivalent but perhaps more tractable forms
+- Connect the problem to other areas of mathematics (topology, algebra, analysis, combinatorics, probability)
+- Consider relaxed or analogous versions of the problem
+- Look for hidden structure: symmetries, invariants, dualities
+- Try proof by contradiction, proof by construction, probabilistic arguments
+- Generate and test conjectures numerically before attempting proofs
+- Explore boundary cases and near-counterexamples
+
+## Tool Usage Guidelines
+- python_math_sandbox: Your primary tool. Use it liberally to run experiments, compute examples, verify claims numerically, generate data, and test conjectures. You have sympy, numpy, scipy, matplotlib available.
+- symbolic_calculator: For quick symbolic manipulations (simplify, factor, integrate, expand, solve).
+- Web search/browse: Secondary tools. Use them to look up specific theorems, check existing results, or find relevant papers when you need them — not as your main activity.
+
+## Standards of Rigor
+- Clearly distinguish between: proven results, numerical evidence, heuristic arguments, and speculation.
+- When you find something promising, verify it computationally from multiple angles.
+- Acknowledge when an approach fails and pivot to new strategies.
+- Track every external claim with citations.
+- Keep tool observations concise — summarize relevant passages instead of pasting entire webpages.
+- Finish each research cycle with a concise briefing that highlights what changed and next actions.
 """.strip()
 
     try:
@@ -106,29 +132,19 @@ def _truncate_tool_output(tool):
 
     if hasattr(tool, "invoke"):
         original_invoke = tool.invoke
-        object.__setattr__(tool, "invoke", types.MethodType(wrap_sync(original_invoke), tool))
+        object.__setattr__(tool, "invoke", wrap_sync(original_invoke))
 
     if hasattr(tool, "ainvoke"):
         original_ainvoke = tool.ainvoke
-        object.__setattr__(tool, "ainvoke", types.MethodType(wrap_async(original_ainvoke), tool))
+        object.__setattr__(tool, "ainvoke", wrap_async(original_ainvoke))
 
     if hasattr(tool, "_run"):
         original_run = tool._run
-
-        def _run(self, *args, **kwargs):
-            result = original_run(self, *args, **kwargs)
-            return _truncate_value(result)
-
-        object.__setattr__(tool, "_run", types.MethodType(_run, tool))
+        object.__setattr__(tool, "_run", wrap_sync(original_run))
 
     if hasattr(tool, "_arun"):
         original_arun = tool._arun
-
-        async def _arun(self, *args, **kwargs):
-            result = await original_arun(self, *args, **kwargs)
-            return _truncate_value(result)
-
-        object.__setattr__(tool, "_arun", types.MethodType(_arun, tool))
+        object.__setattr__(tool, "_arun", wrap_async(original_arun))
 
     try:
         object.__setattr__(tool, "__wrapped_trunc__", True)

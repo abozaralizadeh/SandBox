@@ -25,3 +25,6 @@ lxml==6.0.2
 beautifulsoup4==4.14.2
 deepagents==0.2.8
 openai-agents>=0.0.14
+sympy>=1.13
+scipy>=1.14
+matplotlib>=3.9

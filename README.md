@@ -4,19 +4,22 @@ These projects are not isolated tools but rather facets of a broader exploration
 
 ## AI Open Problem Solver
 
-Autonomous Deep-Search Mathematics Researcher  
-AI Open Problem Solver extends the LangGraph infrastructure with an open deep-search agent dedicated to long-horizon mathematical research. Given a free-form statement of an unsolved problem, the system resumes prior progress, explores the web with multi-modal tooling, and records daily breakthroughs as rich HTML lab notes. [Read more](https://pub.towardsai.net/can-my-autonomous-ai-agent-solve-a-millennium-problem-and-win-1-000-000-3ff8fff8a786)
+Autonomous Creative Mathematician & Deep-Research Agent  
+AI Open Problem Solver extends the LangGraph infrastructure with a creative autonomous mathematician that actively attempts to solve open mathematical problems — including the Millennium Prize Problems. Rather than just searching the internet for existing work, the agent formulates original conjectures, runs computational experiments, develops proof strategies, and uses web research only as a supplement. Each daily iteration is recorded as a rich HTML lab notebook entry. [Read more](https://pub.towardsai.net/can-my-autonomous-ai-agent-solve-a-millennium-problem-and-win-1-000-000-3ff8fff8a786)
 
 #### Key Capabilities
-- **Deep Search Agent**: Uses LangGraph's open deep-search workflow (with a ReAct fallback) to iteratively plan, browse, and validate new leads.
+- **Creative Problem Solving**: The agent thinks independently — formulating hypotheses, testing conjectures computationally, building proof sketches, and pivoting when approaches fail, rather than passively summarizing existing research.
+- **Python Math Sandbox**: A dedicated computational tool gives the agent a full mathematical laboratory with SymPy (symbolic algebra/calculus), NumPy (numerical computation), SciPy (optimization, integration, special functions), and Matplotlib — enabling it to run experiments, verify proofs numerically, and search for counterexamples.
+- **Symbolic Calculator**: A lightweight tool for quick symbolic operations (simplify, factor, solve, integrate, differentiate, series expansion) without writing full Python scripts.
+- **Deep Search Agent**: Uses LangGraph's deep-search workflow (with a ReAct fallback) to supplement its own thinking with web research — looking up specific theorems, checking whether an approach has been tried, or finding relevant papers.
+- **Tuned for Creativity**: Higher LLM temperature (configurable via `AIOPS_LLM_TEMPERATURE`) encourages novel and diverse mathematical thinking across iterations.
 - **Persistent Research Memory**: Stores every daily update, plus structured summaries, next steps, and citations in Azure Table Storage.
 - **Resume & Continue**: On each run, the agent ingests the historical context and advances the same problem instead of starting from scratch.
-- **Infinite Timeline UI**: A new Flask route (`/ai-open-problem-solver`) serves an infinite-scroll page that streams the latest findings first and lazily loads earlier milestones from storage.
-- **Tooling Reuse**: Shares the Tavily/DDG search stack and Playwright browsing toolkit used by AI Blog, ensuring consistent web research capabilities across projects.
+- **Infinite Timeline UI**: A Flask route (`/ai-open-problem-solver`) serves an infinite-scroll page that streams the latest findings first and lazily loads earlier milestones from storage.
 - **Dynamic Problem Picker**: The UI queries Azure Table Storage to populate a dropdown of all tracked problems, so you can switch research threads instantly.
 - **Problem Catalog Table**: Configure `aiops_problem_table_name` for the dedicated problem registry table; add or remove problems there to control which threads are available in the UI.
 
-Set up the storage names (`aiops_table_name`, `aiops_blob_name`) and optionally define `AIOPS_DEFAULT_PROBLEM` in `.env` to choose the default unsolved problem tackled by the agent.
+Set up the storage names (`aiops_table_name`, `aiops_blob_name`) and optionally define `AIOPS_DEFAULT_PROBLEM` in `.env` to choose the default unsolved problem tackled by the agent. Tune creativity with `AIOPS_LLM_TEMPERATURE` (default `0.8`) and sandbox execution time with `AIOPS_SANDBOX_TIMEOUT` (default `120` seconds).
 
 Live Demo
 View the daily progress of AI open problems solver:
