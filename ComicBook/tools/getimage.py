@@ -87,3 +87,46 @@ async def create_image_with_reference(prompt: str, reference_url: str, size: str
 
     result = await _get_client().images.edit(**kwargs)
     return await asyncio.to_thread(_upload_result, result)
+
+
+async def create_image_with_references(
+    prompt: str,
+    image_urls: list[str],
+    size: str = "square",
+) -> str:
+    """Generate an image using a text prompt and multiple reference images (up to 16).
+
+    The first image should be the character sheet; subsequent ones can be previous
+    panels, key frames from earlier episodes, etc.  Falls back to single-reference
+    or prompt-only generation when only 0-1 images download successfully.
+    """
+    model = _get_model()
+
+    if model == "dall-e-3":
+        first = image_urls[0] if image_urls else ""
+        return await create_image_with_reference(prompt, first, size)
+
+    downloads = await asyncio.gather(
+        *[_download_image_bytes(u) for u in image_urls[:16]]
+    )
+    files = []
+    for idx, data in enumerate(downloads):
+        if data:
+            f = BytesIO(data)
+            f.name = f"ref_{idx}.png"
+            files.append(f)
+
+    if not files:
+        result = await _get_client().images.generate(
+            model=model, prompt=prompt, size=_resolve_size(size),
+        )
+        return await asyncio.to_thread(_upload_result, result)
+
+    kwargs = {
+        "model": model,
+        "prompt": prompt,
+        "size": _resolve_size(size),
+        "image": files if len(files) > 1 else files[0],
+    }
+    result = await _get_client().images.edit(**kwargs)
+    return await asyncio.to_thread(_upload_result, result)

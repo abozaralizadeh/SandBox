@@ -29,7 +29,7 @@ from ComicBook.azurestorage import (
     start_new_arc as _storage_start_new_arc,
     update_arc_metadata,
 )
-from ComicBook.tools.getimage import create_image, create_image_with_reference
+from ComicBook.tools.getimage import create_image, create_image_with_reference, create_image_with_references
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
 logger = logging.getLogger("ComicBook")
@@ -65,6 +65,12 @@ def _summarize_episodes(episodes: list) -> str:
             summary = summary[:800] + "…"
         lines.append(f"Episode {day} ({date}): {summary}")
     return "\n".join(lines)
+
+
+def _extract_panel_images(html: str) -> list[str]:
+    """Extract panel image URLs from episode HTML content."""
+    import re
+    return re.findall(r'<img\s+src="([^"]+)"', html or "")
 
 
 def _escape_html(text: str) -> str:
@@ -643,9 +649,16 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
     else:
         logger.info("No active arc — Director will create a new one")
 
+    prev_episode_images: list[str] = []
+    if recent:
+        last_ep_html = recent[0].get("html_content", "")
+        prev_episode_images = _extract_panel_images(last_ep_html)[:4]
+
     state: Dict[str, Any] = {
         "arc": arc,
         "episode_number": episode_number,
+        "prev_episode_images": prev_episode_images,
+        "generated_panel_urls": [],
     }
 
     # ------------------------------------------------------------------
@@ -820,11 +833,22 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
         logger.info("TOOL generate_panel_image called (size='%s', has_ref=%s, prompt='%s')",
                      size, bool(reference_url), prompt[:80])
         try:
+            image_urls = []
             if reference_url:
-                url = await create_image_with_reference(prompt, reference_url, size)
+                image_urls.append(reference_url)
+            image_urls.extend(state["generated_panel_urls"][-2:])
+            image_urls.extend(state["prev_episode_images"][-2:])
+            image_urls = [u for u in image_urls if u]
+
+            if len(image_urls) > 1:
+                url = await create_image_with_references(prompt, image_urls, size)
+            elif image_urls:
+                url = await create_image_with_reference(prompt, image_urls[0], size)
             else:
                 url = await create_image(prompt, size)
-            logger.info("  -> Panel image generated: %s", url[:120])
+
+            state["generated_panel_urls"].append(url)
+            logger.info("  -> Panel image generated (%d refs): %s", len(image_urls), url[:120])
             return {"status": "success", "image_url": url, "size": size}
         except Exception as exc:
             logger.error("  -> Panel image generation FAILED: %s", exc)
@@ -927,6 +951,22 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
         )
 
     input_payload = json.dumps(input_context)
+
+    if target_date.day % 2 == 0:
+        input_payload += (
+            "\n\n=== CULTURAL DIVERSITY GUIDANCE ===\n"
+            "For this arc, explore a NON-WESTERN cultural setting. Draw from: Persian mythology, "
+            "West African folklore, Japanese rural life, Brazilian favelas, Polynesian ocean voyages, "
+            "Central Asian steppe nomads, Mediterranean fishing villages, Korean historical drama, "
+            "Nordic ice towns, Indian temple cities, Mesoamerican civilizations, Balkan mountain "
+            "communities, or anywhere else your imagination takes you.\n\n"
+            "Character names should reflect their world — use naming conventions from the culture "
+            "you're drawing from. A story set in a Persian-inspired world should have Persian names "
+            "(Dariush, Soraya, Kaveh), not English ones. A West African setting might use Yoruba "
+            "or Akan names (Kofi, Amara, Kweku). Let the names feel authentic.\n"
+            "=== END GUIDANCE ==="
+        )
+
     logger.info("Input payload: %s", input_payload[:500])
 
     # ------------------------------------------------------------------
