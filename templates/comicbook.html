@@ -60,7 +60,7 @@
             gap: 8px;
             flex-wrap: wrap;
         }
-        .controls input, .controls button {
+        .controls input {
             padding: 10px 12px;
             border-radius: 10px;
             border: 1px solid #25406a;
@@ -68,18 +68,9 @@
             color: var(--text);
             font-size: 14px;
         }
-        .controls button {
-            background: linear-gradient(135deg, var(--accent), #f8ba78);
-            color: #0d0d0f;
-            font-weight: 700;
-            cursor: pointer;
-            border: none;
-        }
-        .controls button:hover { filter: brightness(1.05); }
-        .controls button:disabled {
+        .controls input:disabled {
             opacity: 0.35;
             cursor: not-allowed;
-            filter: none;
         }
         .lang-select {
             padding: 10px 12px;
@@ -230,7 +221,6 @@
                     <option value="fa">فارسی</option>
                 </select>
                 <input type="date" id="datePicker" aria-label="Pick a date">
-                <button id="loadBtn">Load Comic</button>
             </div>
             <div class="status" id="statusText">Live arc loading&hellip;</div>
         </div>
@@ -248,7 +238,8 @@
             <span class="char-sheet-link" id="charSheetLink" style="display:none" title="View character reference sheet">Characters</span>
         </div>
         <div id="comicContainer">
-            <div class="loader" id="loader"></div>
+            <div class="loader" id="loader" style="display:none"></div>
+            <div id="comicContent"></div>
         </div>
     </div>
 
@@ -262,10 +253,10 @@
 
     <script>
         const container = document.getElementById("comicContainer");
+        const content = document.getElementById("comicContent");
         const loader = document.getElementById("loader");
         const statusText = document.getElementById("statusText");
         const datePicker = document.getElementById("datePicker");
-        const loadBtn = document.getElementById("loadBtn");
         const navLabel = document.getElementById("navLabel");
 
         const btnPrev = document.getElementById("btnPrev");
@@ -374,14 +365,15 @@
                 url += (url.includes("?") ? "&" : "?") + `lang=${currentLang}`;
             }
             loader.style.display = "block";
-            container.innerHTML = "";
-            statusText.textContent = "Fetching strip…";
+            content.innerHTML = "";
+            statusText.textContent = "Generating strip… this may take several minutes";
+            datePicker.disabled = true;
             try {
                 const res = await fetch(url);
                 const text = await res.text();
                 const arcId = res.headers.get("Arc-Id") || "";
                 const timestamp = res.headers.get("Timestamp") || "";
-                container.innerHTML = text;
+                content.innerHTML = text;
 
                 if (arcId) currentArcId = arcId;
                 if (datePicker.value) {
@@ -400,11 +392,12 @@
                 statusText.textContent = arcId ? `Arc: ${arcId} — ${timestamp}` : `Updated: ${timestamp}`;
                 updateNav();
             } catch (err) {
-                container.innerHTML = "<p style='color:#ff6f4c'>Failed to load comic.</p>";
+                content.innerHTML = "<p style='color:#ff6f4c'>Failed to load comic.</p>";
                 statusText.textContent = "Error loading comic.";
                 console.error(err);
             } finally {
                 loader.style.display = "none";
+                datePicker.disabled = false;
             }
         }
 
@@ -434,8 +427,8 @@
             if (src) openModal(src);
         });
 
-        // Panel image zoom — delegated click on comic container
-        container.addEventListener("click", (e) => {
+        // Panel image zoom — delegated click on comic content
+        content.addEventListener("click", (e) => {
             const img = e.target.closest(".panel img");
             if (img && img.src) openModal(img.src);
         });
@@ -479,7 +472,7 @@
             }
         });
 
-        loadBtn.addEventListener("click", loadComic);
+        datePicker.addEventListener("change", loadComic);
         document.addEventListener("DOMContentLoaded", async () => {
             await fetchIndex();
             await loadComic();
