@@ -341,21 +341,31 @@ GLOSSARY:
   the first time). Include: character descriptive labels, place names, world-specific \
   concepts, recurring phrases, titles, and any coined terms. This will be saved and fed \
   back to you in future episodes.
-- Example glossary entry: {"Cloud Harbor": "بندر ابرها", "wind roads": "جاده‌های بادی", \
-  "MERCHANT": "بازرگان", "storm diver": "غواص طوفان"}
+- Example glossary entries for Persian: {"Cloud Harbor": "بندر ابرها", \
+  "wind roads": "جاده‌های بادی", "MERCHANT": "بازرگان", "storm diver": "غواص طوفان", \
+  "Juniper Reed": "جونیپر رید", "JUNIPER": "جونیپر", "Brother Wren": "برادر رِن"}
+- Example glossary entries for Italian: {"Cloud Harbor": "Porto delle Nuvole", \
+  "wind roads": "strade del vento", "MERCHANT": "MERCANTE", "storm diver": "tuffatore di tempeste"}
 
 STRUCTURAL RULES:
 - Translate ALL text values including the "title" field.
-- Keep proper character names UNCHANGED (e.g., "IRIA: Let's go!" → "IRIA: بریم!" in Persian).
+- Character names, place names, and all proper nouns MUST be written in the target \
+  language script. For Persian, transliterate them into Persian script \
+  (e.g., "Juniper Reed" → "جونیپر رید", "Bracken Hollow" → "براکن هالو", \
+  "Edda Vale" → "ادا ویل", "Brother Wren" → "برادر رِن"). \
+  For Italian, names can stay in Latin script but adapt spelling if natural \
+  (e.g., "Moss Fen" stays as-is in Italian).
+- The "SPEAKER: " prefix in dialogue lines must also use the target script \
+  (e.g., "JUNIPER: Let's go!" → "جونیپر: بریم!" in Persian).
 - Translate descriptive speaker labels: "MERCHANT 1" → "بازرگان ۱" / "MERCANTE 1", \
-  "CROWD VOICES" → "صداهای جمعیت" / "VOCI DALLA FOLLA", etc. Only actual character \
-  names (IRIA, NILO, BRAM, MAYA...) stay unchanged.
-- Preserve the "SPEAKER: " prefix format in dialogue lines.
+  "CROWD VOICES" → "صداهای جمعیت" / "VOCI DALLA FOLLA", etc.
 - For sound effects (sfx): adapt to feel natural and impactful in the target language. \
   Don't just transliterate — find the equivalent onomatopoeia that a native comic reader \
   would expect.
 - Do NOT add or remove any text keys — return exactly the same text keys you received, \
   plus the "updated_glossary" key.
+- The "updated_glossary" values MUST also be in the target language script \
+  (all Persian glossary values in Persian script, all Italian values in Italian).
 
 OUTPUT:
 Respond with ONLY a valid JSON object containing the translated values and the \
