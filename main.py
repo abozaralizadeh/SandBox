@@ -24,7 +24,7 @@ app = Flask(__name__)
 cache = {}
 
 @app.route('/get-string', methods=['GET'])
-def get_string():
+async def get_string():
     # Retrieve the 'date' query parameter from the request
     date_param = request.args.get('date')
 
@@ -42,20 +42,19 @@ def get_string():
         parsed_date = None
 
     # Pass the parsed date to the get_llm_response function (if applicable)
-    response = get_llm_response(date=parsed_date)
+    response = await get_llm_response(date=parsed_date)
 
     if len(response) > 20 and parsed_date:
         cache[str(parsed_date)] = response
 
     return response
-    #return jsonify({"output": "Hello, this is a string from the backend!"})
 
 @app.route('/tomorrownews', methods=['GET'])
 def tomorrownews():
     return render_template('tomorrownews.html')
 
 @app.route('/tomorrownewscontent', methods=['GET'])
-def tomorrownewscontent():
+async def tomorrownewscontent():
     referer = request.headers.get('Referer', '')
     if referer:
         parsed_date = None
@@ -67,10 +66,10 @@ def tomorrownewscontent():
                 parsed_date = datetime.fromisoformat(date_param)
             except:
                 parsed_date = None
-        tomorrownews, datetime = gettomorrownews(parsed_date)
+        tomorrownews, datetime = await gettomorrownews(parsed_date)
         # Create a response object and add a custom header
         response = make_response(tomorrownews)
-        response.headers['Timestamp'] = datetime  # Replace 'Custom-Header' and 'CustomValue' with your desired values
+        response.headers['Timestamp'] = datetime
         return response
     else:
         return "404 Not Found", 404
@@ -80,7 +79,7 @@ def comicbook():
     return render_template('comicbook.html')
 
 @app.route('/comicbookcontent', methods=['GET'])
-def comicbookcontent():
+async def comicbookcontent():
     referer = request.headers.get('Referer', '')
     if referer:
         parsed_date = None
@@ -94,7 +93,7 @@ def comicbookcontent():
                 parsed_date = datetime.fromisoformat(date_param)
             except Exception:
                 parsed_date = None
-        comic_html, dt, arc_id = get_comicbook(parsed_date, lang=lang)
+        comic_html, dt, arc_id = await get_comicbook(parsed_date, lang=lang)
         response = make_response(comic_html)
         response.headers['Timestamp'] = dt
         response.headers['Arc-Id'] = arc_id or ""

@@ -6,7 +6,7 @@ from ComicBook.azurestorage import get_episode_by_date, save_episode
 from utils import get_flat_date
 
 
-def get_comicbook(parsed_date: Optional[datetime] = None, lang: str = "en"):
+async def get_comicbook(parsed_date: Optional[datetime] = None, lang: str = "en"):
     target_date = parsed_date or datetime.now(timezone.utc)
     flat_date = get_flat_date(target_date)
 
@@ -15,7 +15,12 @@ def get_comicbook(parsed_date: Optional[datetime] = None, lang: str = "en"):
         html = cached.get(content_key, "") or cached.get("html_content", "")
         return html, target_date, cached.get("PartitionKey")
 
+<<<<<<< Updated upstream
     result = run_comic_pipeline(target_date)
+=======
+    from ComicBook.agents import run_comic_pipeline
+    result = await run_comic_pipeline(target_date)
+>>>>>>> Stashed changes
 
     html = result["html"]
     html_it = result.get("html_it", "")

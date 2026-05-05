@@ -448,7 +448,12 @@ IMPORTANT RULES:
 # Pipeline runner
 # ---------------------------------------------------------------------------
 
+<<<<<<< Updated upstream
 def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
+=======
+@traceable(name="ComicBook Pipeline", run_type="chain")
+async def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
+>>>>>>> Stashed changes
     """Run the Director -> Storyteller -> Cartoonist pipeline. Returns dict with html, narrative, etc."""
     logger.info("=" * 70)
     logger.info("COMIC PIPELINE START — target_date=%s", target_date.strftime("%Y-%m-%d"))
@@ -613,7 +618,7 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
             f"{description}"
         )
         try:
-            url = create_image(prompt, size="wide")
+            url = await create_image(prompt, size="wide")
             logger.info("  -> Character sheet generated: %s", url[:120])
             if a:
                 update_arc_metadata(a["RowKey"], character_sheet_url=url)
@@ -637,9 +642,9 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
                      size, bool(reference_url), prompt[:80])
         try:
             if reference_url:
-                url = create_image_with_reference(prompt, reference_url, size)
+                url = await create_image_with_reference(prompt, reference_url, size)
             else:
-                url = create_image(prompt, size)
+                url = await create_image(prompt, size)
             logger.info("  -> Panel image generated: %s", url[:120])
             return {"status": "success", "image_url": url, "size": size}
         except Exception as exc:
@@ -819,7 +824,7 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
 
         return cartoonist_result, director_plan, storyteller_script, html_it, html_fa
 
-    result, director_plan, storyteller_script, html_it, html_fa = asyncio.run(_run_sequential())
+    result, director_plan, storyteller_script, html_it, html_fa = await _run_sequential()
 
     # ------------------------------------------------------------------
     # Extract results from Cartoonist's tool outputs

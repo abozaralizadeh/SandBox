@@ -6,10 +6,10 @@ from TomorrowNews.ReAct import supervisor
 from TomorrowNews.supervisor import ma_graph
 from utils import get_flat_date, get_flat_date_hour, parse_flat_date_hour, strtobool
 
-def gettomorrownews(parsed_date):
+async def gettomorrownews(parsed_date):
     timestamp = datetime.utcnow()
     next_day = timestamp + timedelta(days=1)
-    
+
     if parsed_date and parsed_date.date() >= datetime(2025, 1, 25).date():
         flat_date_hour = get_flat_date(parsed_date) + "_00"
     elif parsed_date:
@@ -23,18 +23,18 @@ def gettomorrownews(parsed_date):
         flat_date_hour = get_flat_date() + "_00"
         if parsed_date is not None and (lasthournews := get_row(flat_date_hour)):
             return lasthournews["html_content"], parse_flat_date_hour(flat_date_hour)
-        
-    for event in news_graph.stream({"messages": [("system", f"""
-                                                Using today’s ({timestamp.strftime('%Y-%m-%d')}) actual newspaper as a foundation, \
+
+    async for event in news_graph.astream({"messages": [("system", f"""
+                                                Using today's ({timestamp.strftime('%Y-%m-%d')}) actual newspaper as a foundation, \
                                                 apply reasoning and analysis to predict future events. \
-                                                Create the next day’s ({next_day.strftime('%Y-%m-%d')}) edition of 'Tomorrow News,' \
+                                                Create the next day's ({next_day.strftime('%Y-%m-%d')}) edition of 'Tomorrow News,' \
                                                 complete with imaginative yet plausible headlines and stories. \
-                                                Avoid simply continuing or expanding on today’s news—instead, \
+                                                Avoid simply continuing or expanding on today's news—instead, \
                                                 focus on predicting the next events and news that could arise as consequences of current happenings or emerge unexpectedly. \
                                                 Make it feel like a genuine glimpse into the future of politics, geopolitics, economy, events, Culture, \
                                                 Environment, Technology, Health, Security, Education, Science, Energy, Trade, Human Rights, Diplomacy, Military, \
                                                 Infrastructure, Agriculture, Transportation, Media, Religion, Demographics, Finance, Law, Tourism, Sports, Migration and what come next!\
-                                                    
+
                                                 Next, design an HTML page for the newspaper. The layout should resemble a professional newspaper, optimized for both desktop and mobile screens. Ensure that the design includes:
 
                                                 A clear newspaper header with the title Tomorrow News.
@@ -65,7 +65,7 @@ next_day = timestamp + timedelta(days=1)
 system_prompt = f"""
 You are the Editor, the central figure in producing the next day's edition of "Tomorrow News" (dated {next_day.strftime('%Y-%m-%d')}), starting from today's newspaper ({timestamp.strftime('%Y-%m-%d')}). 
 Your role involves analyzing current news, predicting future events, and orchestrating the creation of content and design. You will:
-Analyze today’s news (using tool) to forecast future events.
+Analyze today's news (using tool) to forecast future events.
 Delegate tasks to the appropriate agents—Journalist, Photographer, and HTML Developer—ensuring a smooth workflow.
 Review the outputs at each stage to maintain quality and coherence.
 After your analysis:

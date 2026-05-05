@@ -53,8 +53,8 @@ llm = AzureChatOpenAI(
 
 llm_with_tools = llm.bind_tools(tools)
 
-def agent(state: State):
-    return {"messages": [llm_with_tools.invoke(state["messages"])]}
+async def agent(state: State):
+    return {"messages": [await llm_with_tools.ainvoke(state["messages"])]}
 
 graph_builder.add_node("agent", agent)
 

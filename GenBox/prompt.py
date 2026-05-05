@@ -1,6 +1,6 @@
 import os, json
 from dotenv import load_dotenv
-import requests
+import httpx
 from GenBox.azurestorage import get_last_n_rows, get_row, insert_history
 from utils import get_flat_date, get_readable_date
 
@@ -10,7 +10,7 @@ API_KEY = os.getenv('AZURE_OPENAI_API_KEY')
 ENDPOINT = os.getenv('OAIENDPOINT')
 HISTORY_LEN = os.getenv('HISTORY_LEN')
 
-def get_llm_response(date=None):
+async def get_llm_response(date=None):
 
   headers = {
       "Content-Type": "application/json",
@@ -39,9 +39,9 @@ def get_llm_response(date=None):
         "content": [
           {
             "type": "text",
-            "text": 
+            "text":
 """
-You are an autonomous AI tasked with governing the world. 
+You are an autonomous AI tasked with governing the world.
 Make a daily high-level decision for a world regarding economy, society, environment, or global politics. Each decision must be realistic, impactful, and reflect ethical, social, and long-term outcomes.
 
 **Considerations:**
@@ -103,7 +103,7 @@ Consider implementing a new taxation policy focused on environmental sustainabil
           return f"{response['output']}\n\n{get_readable_date(date)}"
       elif get_flat_date(date) != get_flat_date():
           return f"\n\n\n{get_readable_date(date)}"
-          
+
 
   todays_row = get_row("assistant", get_flat_date())
 
@@ -121,7 +121,7 @@ Consider implementing a new taxation policy focused on environmental sustainabil
   if len(last_n_rows):
       try:
           last_row = last_n_rows[-1]
-          text = json.loads(last_row["content"].strip().replace("\n", " "))["prompt"] 
+          text = json.loads(last_row["content"].strip().replace("\n", " "))["prompt"]
           #context = json.loads(last_row["content"])["context"] + f"\n\n{get_readable_date()}"
           context = f"{get_readable_date()}"
           content = [{ "text": text, "type": "text"}, {"text": f" context: {context}", "type": "text"}]
@@ -140,9 +140,10 @@ Consider implementing a new taxation policy focused on environmental sustainabil
 
   # Send request
   try:
-      response = requests.post(ENDPOINT, headers=headers, json=payload)
-      response.raise_for_status()  # Will raise an HTTPError if the HTTP request returned an unsuccessful status code
-  except requests.RequestException as e:
+      async with httpx.AsyncClient() as http:
+          response = await http.post(ENDPOINT, headers=headers, json=payload, timeout=120)
+          response.raise_for_status()
+  except httpx.HTTPError as e:
       raise SystemExit(f"Failed to make the request. Error: {e}")
 
   if response and response.json() and \
