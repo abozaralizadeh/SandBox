@@ -138,14 +138,6 @@ def _truncate_tool_output(tool):
         original_ainvoke = tool.ainvoke
         object.__setattr__(tool, "ainvoke", wrap_async(original_ainvoke))
 
-    if hasattr(tool, "_run"):
-        original_run = tool._run
-        object.__setattr__(tool, "_run", wrap_sync(original_run))
-
-    if hasattr(tool, "_arun"):
-        original_arun = tool._arun
-        object.__setattr__(tool, "_arun", wrap_async(original_arun))
-
     try:
         object.__setattr__(tool, "__wrapped_trunc__", True)
     except Exception:
