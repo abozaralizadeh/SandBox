@@ -1,14 +1,42 @@
-import threading
-import time
 from datetime import datetime, timezone
 from typing import Optional
 
-from ComicBook.azurestorage import get_episode_by_date, save_episode
+from azure.core.exceptions import ResourceExistsError
+
+from ComicBook.azurestorage import episodes_table, get_episode_by_date, save_episode
 from utils import get_flat_date
 
-_generation_lock = threading.Lock()
-_dates_in_progress: dict[str, float] = {}
 _LOCK_TTL_SECONDS = 3600
+
+
+def _try_acquire_lock(flat_date: str) -> bool:
+    entity = {
+        "PartitionKey": "generation_lock",
+        "RowKey": flat_date,
+        "started_at": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        episodes_table.create_entity(entity=entity)
+        return True
+    except ResourceExistsError:
+        existing = episodes_table.get_entity("generation_lock", flat_date)
+        started = datetime.fromisoformat(existing["started_at"])
+        age = (datetime.now(timezone.utc) - started).total_seconds()
+        if age > _LOCK_TTL_SECONDS:
+            episodes_table.delete_entity("generation_lock", flat_date)
+            try:
+                episodes_table.create_entity(entity=entity)
+                return True
+            except ResourceExistsError:
+                return False
+        return False
+
+
+def _release_lock(flat_date: str):
+    try:
+        episodes_table.delete_entity("generation_lock", flat_date)
+    except Exception:
+        pass
 
 
 def get_comicbook(parsed_date: Optional[datetime] = None, lang: str = "en"):
@@ -20,22 +48,17 @@ def get_comicbook(parsed_date: Optional[datetime] = None, lang: str = "en"):
         html = cached.get(content_key, "") or cached.get("html_content", "")
         return html, target_date, cached.get("PartitionKey")
 
-    with _generation_lock:
-        started_at = _dates_in_progress.get(flat_date)
-        if started_at is not None and (time.monotonic() - started_at) < _LOCK_TTL_SECONDS:
-            return "<p>This episode is already being generated. Please try again shortly.</p>", target_date, ""
-        _dates_in_progress[flat_date] = time.monotonic()
+    if not _try_acquire_lock(flat_date):
+        return "<p>This episode is already being generated. Please try again shortly.</p>", target_date, ""
 
     try:
         from ComicBook.agents import run_comic_pipeline
         result = run_comic_pipeline(target_date)
     except Exception:
-        with _generation_lock:
-            _dates_in_progress.pop(flat_date, None)
+        _release_lock(flat_date)
         raise
 
-    with _generation_lock:
-        _dates_in_progress.pop(flat_date, None)
+    _release_lock(flat_date)
 
     html = result["html"]
     html_it = result.get("html_it", "")
