@@ -419,7 +419,9 @@
                     }
                 }
 
-                statusText.textContent = arcId ? `Arc: ${arcId} — ${timestamp}` : `Updated: ${timestamp}`;
+                const arcObj = arcList.find(a => a.arc_id === arcId);
+                const arcLabel = arcObj ? arcObj.title : arcId;
+                statusText.textContent = arcLabel || `Updated: ${timestamp}`;
                 updateNav();
                 updateQueryString();
             } catch (err) {
