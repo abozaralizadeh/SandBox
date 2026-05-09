@@ -202,7 +202,7 @@ def _assemble_html(
     rtl_css = (
         "\n.comic-page[dir=rtl] { direction: rtl; font-family: 'Vazirmatn', sans-serif; }"
         "\n.comic-page[dir=rtl] .comic-recap { border-left: none; border-right: 5px solid " + t["recap_border"] + "; }"
-        "\n.comic-page[dir=rtl] .speech-bubble { font-family: 'Vazirmatn', sans-serif; }"
+        "\n.comic-page[dir=rtl] .speech-bubble { font-family: 'Vazirmatn', sans-serif; transform-origin: bottom right; }"
         "\n.comic-page[dir=rtl] .caption-box { font-family: 'Vazirmatn', sans-serif; }"
         "\n.comic-page[dir=rtl] .panel-overlay { align-items: flex-end; }"
         if is_rtl else ""
@@ -263,8 +263,9 @@ def _assemble_html(
 .panel img {{ width: 100%; height: 100%; object-fit: cover; display: block; cursor: pointer; }}
 .caption-overlay {{ position: absolute; top: 0; left: 0; right: 0; display: flex; justify-content: center; padding: 8px 12px; pointer-events: none; }}
 .caption-box {{ background: {t["caption_bg"]}; color: {t["caption_text"]}; border: 2px solid {t["caption_border"]}; padding: 6px 14px; font-style: italic; font-size: 0.82em; font-family: {t["body_font"]}; border-radius: 3px; max-width: 90%; text-align: center; line-height: 1.4; box-shadow: 1px 1px 0 rgba(0,0,0,0.15); }}
-.panel-overlay {{ position: absolute; bottom: 0; left: 0; right: 0; padding: 10px 12px; display: flex; flex-direction: column; gap: 5px; align-items: flex-start; pointer-events: none; background: linear-gradient(transparent 0%, rgba(0,0,0,0.45) 100%); }}
-.speech-bubble {{ background: {t["speech_bg"]}; color: #111; border: 2px solid {t["speech_border"]}; border-radius: 18px; padding: 7px 14px; font-size: 0.88em; max-width: 80%; box-shadow: 2px 2px 0 rgba(0,0,0,0.2); font-family: {t["heading_font"]}; letter-spacing: 0.5px; line-height: 1.3; }}
+.panel-overlay {{ position: absolute; bottom: 0; left: 0; right: 0; padding: 6px 8px; display: flex; flex-direction: column; gap: 2px; align-items: flex-start; pointer-events: auto; background: linear-gradient(transparent 0%, rgba(0,0,0,0.35) 100%); }}
+.speech-bubble {{ background: {t["speech_bg"]}; color: #111; border: 1px solid {t["speech_border"]}; border-radius: 14px; padding: 3px 8px; font-size: 0.54em; max-width: 80%; box-shadow: 1px 1px 0 rgba(0,0,0,0.15); font-family: {t["heading_font"]}; letter-spacing: 0.3px; line-height: 1.25; transform-origin: bottom left; transition: transform 0.2s ease, padding 0.2s ease, font-size 0.2s ease, border-width 0.2s ease, border-radius 0.2s ease, box-shadow 0.2s ease; cursor: pointer; }}
+.speech-bubble:hover, .speech-bubble:active {{ font-size: 1em; padding: 8px 16px; border-width: 2px; border-radius: 18px; box-shadow: 2px 2px 0 rgba(0,0,0,0.2); z-index: 10; position: relative; }}
 .sfx {{ font-size: 2em; font-weight: 900; color: {t["sfx_color"]}; text-shadow: 2px 2px 0 #ffd166, -1px -1px 0 #111, 1px -1px 0 #111, -1px 1px 0 #111; font-style: italic; letter-spacing: 2px; }}
 .comic-footer {{ text-align: center; margin-top: 20px; padding-top: 14px; border-top: 4px solid {t["header_border"]}; }}
 .teaser {{ font-weight: bold; color: {t["teaser_color"]}; font-size: 1.15em; font-style: italic; letter-spacing: 0.5px; }}
@@ -274,7 +275,8 @@ def _assemble_html(
   .comic-title {{ font-size: 1.6em; letter-spacing: 1px; }}
   .comic-panels {{ grid-template-columns: 1fr; grid-template-areas: none; }}
   .panel {{ grid-area: auto !important; }}
-  .speech-bubble {{ max-width: 92%; font-size: 0.82em; }}
+  .speech-bubble {{ max-width: 92%; }}
+  .speech-bubble:hover, .speech-bubble:active {{ font-size: 0.92em; }}
   .caption-box {{ font-size: 0.78em; }}
 }}
 </style>
