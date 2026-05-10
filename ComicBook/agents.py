@@ -531,36 +531,55 @@ FOR EACH PANEL, you must provide:
 - **Characters**: Who appears, their positions, poses, facial expressions, body language
 - **Dialogue**: Speech bubble text — each character's lines on separate lines,
   prefixed with their name (e.g., "MAYA: We need to go now!")
-- **Caption**: Narrator text (if any) — for scene-setting, inner monologue, or time jumps
+- **Caption**: Narrator text — see NARRATIVE CLARITY below
 - **Sound effects**: Onomatopoeia (CRASH!, *whoosh*, BZZT) — USE SPARINGLY. Only include \
   sound effects when they genuinely enhance the panel — a door slamming, an explosion, a \
   dramatic impact. Most dialogue scenes, quiet moments, and emotional beats need NO sfx. \
   If a panel doesn't have a strong audible event, leave sfx empty.
 - **Camera angle**: Close-up, medium shot, wide shot, bird's eye, worm's eye, dutch angle
 
+NARRATIVE CLARITY (CRITICAL):
+- The reader has ONLY the comic panels to understand the story. They cannot see the \
+  story outline or Director's plan. Every plot beat, motivation, and revelation must be \
+  conveyed through captions and dialogue — never assume the art will show it.
+- The FIRST panel's caption MUST establish: where we are, what the situation is, and \
+  what's at stake right now. Ground the reader before anything else.
+- Captions are your narrator voice. Use them to explain context, transitions between \
+  scenes, what characters are doing and WHY, and what just changed. A caption that only \
+  sets mood ("The wind carried old promises") wastes the reader's only window into the story.
+- When a character discovers something, makes a key decision, or does something important, \
+  it MUST be stated explicitly in dialogue or caption. Do not rely on the image.
+- Each caption should answer at least one of: What is happening? Why does it matter? \
+  What changed? If it answers none, rewrite it.
+- Dialogue must serve double duty: reveal character personality AND advance the plot. \
+  Witty lines are great, but pair them with lines that explain the situation. A reader \
+  should understand the story even if they skip the images entirely.
+- BAD caption: "The city held its breath." (mood only, says nothing)
+- GOOD caption: "After the Guild's archive revealed their plan to seal Larkspar forever, \
+  the group scattered — and the city, sensing intruders, reshuffled its streets to \
+  separate them." (explains what happened, why, and the consequence)
+
 WRITING RULES:
-- Show, don't tell — let the art carry emotion where possible.
 - Every panel must advance the story or deepen a character. No wasted panels.
 - Dialogue must sound natural and DISTINCT per character — give each character a
-  recognizable voice. A gruff mechanic speaks differently from a shy academic.
-- Include a 2-line RECAP at the top for returning readers.
+  recognizable voice.
+- Include a 3-4 line RECAP at the top that catches up ANY reader — summarize the \
+  core situation and recent events, not just the last episode's cliffhanger.
 - End with a 1-line TEASER that hooks the reader for the next episode.
 - Pacing matters: vary panel sizes to control rhythm. Wide panels slow time down,
   small square panels speed it up.
 
 PROSE QUALITY:
+- Clarity first, then artistry. The best captions are both clear AND beautiful. \
+  A poetic line that doesn't tell the reader anything is worse than a plain one that does.
 - Write dialogue that BREATHES — use contractions, interrupted speech ("I didn't—"), \
-  trailing off ("Maybe we could..."), emotional outbursts, and hesitation. Real people \
-  don't speak in complete, polished sentences.
-- Captions should be evocative and concise — use sensory detail (sounds, smells, light, \
-  temperature) and rhythm. Short sentences build tension. Longer ones create wonder. \
-  Avoid exposition dumps — if you can say it in 5 words instead of 15, do it.
-- Vary sentence length and structure. Monotonous rhythm kills drama. A staccato line \
-  after a flowing one creates impact.
-- The writing should be ENJOYABLE to read — not just functional. Aim for the quality \
-  of a published graphic novel, not a plot summary.
-- Avoid overly complex compound sentences. If a sentence has more than two clauses, \
-  break it up. Clarity and punch over complexity.
+  trailing off ("Maybe we could..."), emotional outbursts, and hesitation.
+- Vary sentence length and structure. Short sentences build tension. Longer ones \
+  create wonder.
+- Avoid exposition dumps — but do not avoid exposition. The reader needs information \
+  to follow the story. Weave it naturally into captions and dialogue.
+- The writing should be ENJOYABLE to read — aim for the quality of a published \
+  graphic novel, not a plot summary. But never sacrifice clarity for style.
 
 OUTPUT:
 Write the complete panel-by-panel script as your response. Include the RECAP at the top \
