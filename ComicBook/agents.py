@@ -345,6 +345,9 @@ Your job is to produce a translation that reads as if the comic were ORIGINALLY 
 in the target language — not translated, but conceived and written by a native author.
 
 STORY CONTEXT:
+- The story_context may include a STORY OUTLINE adapted for your target language — this is \
+  the full arc narrative written specifically for readers of that language. Use it as your \
+  primary reference for tone, character voice, and how the story should feel in this language.
 - Use the story_context to understand the FULL SCENE behind each text fragment. A caption \
   like "The wind changed" means very different things in a romantic scene vs. a battle. \
   Your translation should reflect the actual emotional context.
@@ -418,6 +421,38 @@ Respond with ONLY a valid JSON object containing the translated values and the \
 "updated_glossary" field. No explanation, no markdown, no wrapping — just the raw JSON.\
 """
 
+OUTLINE_ADAPTER_INSTRUCTIONS = """\
+You are a literary adaptation specialist. You receive a story outline for a comic book \
+arc and a target language. Your job is to ADAPT (not just translate) the outline so that \
+the story reads naturally and compellingly in the target language.
+
+You will receive a JSON with:
+- "task": "adapt_story_outline"
+- "target_language": the language to adapt into
+- "story_outline": the full English story outline
+
+ADAPTATION RULES:
+- This is NOT a word-for-word translation. Rewrite the outline as if you were a native \
+  author planning this story for readers of that language.
+- Character names: transliterate into the target script (Persian script for Farsi, \
+  Latin script for Italian). Ensure names are easy to read and pronounce for native readers.
+- Dialogue examples in the outline should feel natural in the target language — use \
+  idioms, sentence structures, and cultural references that resonate.
+- Narration style should match the literary tradition of the target language: \
+  Persian prose can be more lyrical and poetic; Italian can be more expressive and dramatic.
+- Cultural references and metaphors: adapt to equivalents that a native reader would \
+  connect with. If an English metaphor doesn't work, find one that carries the same meaning.
+- Keep ALL plot points, character arcs, episode breakdowns, themes, and twists intact. \
+  The STORY stays the same — the TELLING adapts.
+- The episode-by-episode breakdown must be fully adapted, with each episode's description \
+  written in compelling target-language prose.
+
+OUTPUT:
+Respond with ONLY the adapted story outline text in the target language. No JSON wrapping, \
+no explanation — just the outline content, ready to be stored and used as a reference \
+for translators working on each episode.\
+"""
+
 DIRECTOR_INSTRUCTIONS = """\
 You are the Director of an AI-generated daily comic strip series.
 
@@ -467,11 +502,14 @@ ARC LIFECYCLE:
      let the story dictate, not a fixed number).
    - Call start_new_arc with your creative details including the color_theme.
 3. If an ACTIVE arc exists:
-   - Review the recent episode summaries for continuity.
-   - Decide if the story has reached its natural conclusion. If yes, call end_current_arc
-     with a conclusion note, then start a fresh arc as described above.
-   - If the story should continue, plan today's episode to advance the plot meaningfully.
-     No filler episodes.
+   - Review the recent episode summaries and the story_outline for continuity.
+   - The arc length was decided when you wrote the story_outline — it contains an \
+     episode-by-episode breakdown. Follow that plan. Use episodes_so_far and \
+     planned_episodes to know which episode you are writing today.
+   - Only call end_current_arc AFTER you have written the final episode described \
+     in the story_outline (i.e., episodes_so_far >= planned_episodes).
+   - Plan today's episode according to the story_outline's breakdown for this \
+     episode number. No filler, no skipping, no ending early.
 
 STORY OUTLINE:
 - After creating a new arc, you MUST call save_story_outline with a comprehensive narrative plan.
@@ -482,8 +520,27 @@ STORY OUTLINE:
   * Character arcs for each main character (growth, conflicts, resolutions)
   * Major themes and motifs
   * Key twists, revelations, and turning points
-  * Episode-by-episode breakdown with the core dramatic beat for each episode
-  * How the story concludes
+  * Episode-by-episode breakdown (see below)
+  * How the story concludes — the ending must feel earned and satisfying
+
+EPISODE DESIGN (inside the outline):
+- Choose the number of episodes carefully. Let the story dictate the length — a tight mystery \
+  might need 4 episodes, an epic saga might need 12. Never pad with filler, never rush the ending.
+- Each episode must work as a STANDALONE piece that is satisfying and attractive on its own: \
+  it should have its own mini-arc (setup, escalation, payoff or cliffhanger), its own emotional \
+  beat, and its own visual highlight moment.
+- Apply storytelling best practices:
+  * Episode 1: strong hook — introduce the world, protagonist, and central mystery/conflict \
+    within the first few panels. The reader must be hooked immediately.
+  * Middle episodes: each one must raise stakes, introduce complications, deepen characters, \
+    or reveal new information. Every episode should change the situation meaningfully.
+  * Penultimate episode: the darkest moment or biggest twist — maximum tension before the finale.
+  * Final episode: satisfying resolution that pays off all setups. Bittersweet is fine, \
+    unresolved is not.
+- For each episode in the breakdown, write: the core dramatic beat, which characters appear, \
+  the key revelation or turning point, and the cliffhanger or resolution.
+- A reader who picks up ANY single episode should find it engaging, even without context.
+
 - This outline is your contract — future episodes MUST follow this plan.
 - When planning each episode, ALWAYS reference the story_outline from your input context \
   to maintain consistency. You may adapt small details but never contradict major plot points.
@@ -708,7 +765,7 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
             "title": a.get("title", ""),
             "logline": a.get("logline", ""),
             "genre": a.get("genre", ""),
-            "planned_episodes": a.get("planned_episodes", "unset"),
+            "planned_episodes": int(a.get("planned_episodes", 0) or a.get("target_days", 0) or 8),
             "episodes_so_far": int(a.get("episodes_count", 0)),
             "episode_number_today": state["episode_number"],
             "start_date": a.get("start_date", ""),
@@ -941,6 +998,14 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
         model_settings=ModelSettings(temperature=0.9),
     )
 
+    outline_translator = Agent(
+        name="OutlineAdapter",
+        instructions=OUTLINE_ADAPTER_INSTRUCTIONS,
+        tools=[],
+        model=model,
+        model_settings=ModelSettings(temperature=0.7),
+    )
+
     # ------------------------------------------------------------------
     # Build input context
     # ------------------------------------------------------------------
@@ -1013,6 +1078,26 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
             if not current_outline:
                 current_outline = get_arc_story_outline(state["arc"])
 
+        # Translate story outline for each language (only on first episode)
+        if current_outline and state["arc"] and state["episode_number"] == 1:
+            arc_id = state["arc"]["RowKey"]
+            for lang_code, lang_name in [("it", "Italian"), ("fa", "Persian (Farsi)")]:
+                try:
+                    logger.info("Translating story outline to %s...", lang_name)
+                    outline_prompt = json.dumps({
+                        "task": "adapt_story_outline",
+                        "target_language": lang_name,
+                        "story_outline": current_outline,
+                    }, ensure_ascii=False)
+                    with trace(name=f"OutlineAdapt-{lang_code}", run_type="chain"):
+                        outline_result = await Runner.run(outline_translator, outline_prompt, max_turns=3)
+                    adapted = str(outline_result.final_output)
+                    save_arc_story_outline(arc_id, adapted, lang=lang_code)
+                    state["arc"][f"story_outline_{lang_code}"] = adapted
+                    logger.info("  Story outline for %s saved (%d chars)", lang_name, len(adapted))
+                except Exception as exc:
+                    logger.error("  Story outline adaptation to %s failed: %s", lang_name, exc)
+
         # Step 2: Storyteller
         logger.info("STEP 2/4 — Running Storyteller (max_turns=5)...")
         storyteller_input = director_plan
@@ -1053,7 +1138,7 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
 
             arc_id = state["arc"]["RowKey"] if state["arc"] else ""
 
-            story_context = (
+            story_context_base = (
                 f"=== DIRECTOR'S EPISODE PLAN ===\n{director_plan}\n\n"
                 f"=== STORYTELLER'S SCRIPT ===\n{storyteller_script}"
             )
@@ -1062,6 +1147,17 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
                 try:
                     logger.info("STEP 4 — Translating to %s...", lang_name)
                     glossary = get_arc_glossary(state["arc"], lang_code) if state["arc"] else {}
+                    lang_outline = ""
+                    if state["arc"]:
+                        lang_outline = state["arc"].get(f"story_outline_{lang_code}", "")
+                        if not lang_outline:
+                            lang_outline = get_arc_story_outline(state["arc"], lang=lang_code)
+                    story_context = story_context_base
+                    if lang_outline:
+                        story_context = (
+                            f"=== STORY OUTLINE ({lang_name}) ===\n{lang_outline}\n"
+                            f"=== END STORY OUTLINE ===\n\n" + story_context_base
+                        )
                     t_payload = {"target_language": lang_name, "story_context": story_context, **texts}
                     if glossary:
                         t_payload["glossary"] = glossary

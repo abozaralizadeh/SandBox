@@ -194,27 +194,33 @@ def update_arc_metadata(arc_id: str, **kwargs):
     arcs_table.upsert_entity(entity=entity, mode=UpdateMode.MERGE)
 
 
-def save_arc_story_outline(arc_id: str, story_outline: str):
+def save_arc_story_outline(arc_id: str, story_outline: str, lang: str = "en"):
+    suffix = "" if lang == "en" else f"_{lang}"
+    key = f"story_outline{suffix}"
+    blob_key = f"story_outline_blob_name{suffix}"
     entity = {"PartitionKey": "arc", "RowKey": arc_id}
     if len(story_outline) > MAX_TABLE_PROPERTY_CHARS:
         blob_name = upload_text_to_blob(story_outline, extension=".txt")
-        entity["story_outline"] = ""
-        entity["story_outline_blob_name"] = blob_name
+        entity[key] = ""
+        entity[blob_key] = blob_name
     else:
-        entity["story_outline"] = story_outline
-        entity["story_outline_blob_name"] = ""
+        entity[key] = story_outline
+        entity[blob_key] = ""
     arcs_table.upsert_entity(entity=entity, mode=UpdateMode.MERGE)
 
 
-def get_arc_story_outline(arc: dict) -> str:
-    blob_name = arc.get("story_outline_blob_name", "")
+def get_arc_story_outline(arc: dict, lang: str = "en") -> str:
+    suffix = "" if lang == "en" else f"_{lang}"
+    key = f"story_outline{suffix}"
+    blob_key = f"story_outline_blob_name{suffix}"
+    blob_name = arc.get(blob_key, "")
     if blob_name:
         try:
             return download_html_from_blob(blob_name)
         except Exception as exc:
             print(f"[ComicBook] Unable to fetch story outline blob '{blob_name}': {exc}")
-            return arc.get("story_outline", "")
-    return arc.get("story_outline", "")
+            return arc.get(key, "")
+    return arc.get(key, "")
 
 
 def save_arc_glossary(arc_id: str, lang: str, glossary: dict):
