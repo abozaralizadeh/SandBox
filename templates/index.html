@@ -7,150 +7,363 @@
         t=l.createElement(r);t.async=1;t.src="https://www.clarity.ms/tag/"+i;
         y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y);
     })(window, document, "clarity", "script", "t77h1h8sb7");
-</script>
+  </script>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>SandBoxes.live</title>
   <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
     body {
-      margin: 0;
-      padding: 0;
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      background: linear-gradient(135deg, #1e1e2f, #2e2e4f);
-      color: white;
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      background: #08090d;
+      color: #e8eaed;
+      min-height: 100vh;
       overflow-x: hidden;
     }
 
-    h1.title {
-      text-align: center;
-      font-size: 3rem;
-      margin: 30px 0 10px;
-      background: -webkit-linear-gradient(#ffffff, #d1d1d1);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
+    .bg-grid {
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+      background-size: 60px 60px;
+      z-index: 0;
     }
 
-    .container {
-      display: flex;
-      flex-wrap: wrap;
-      justify-content: center;
+    .bg-glow {
+      position: fixed;
+      width: 600px;
+      height: 600px;
+      border-radius: 50%;
+      filter: blur(120px);
+      opacity: 0.15;
+      z-index: 0;
+      pointer-events: none;
+    }
+    .bg-glow.g1 { top: -200px; left: -100px; background: #6366f1; }
+    .bg-glow.g2 { bottom: -200px; right: -100px; background: #ec4899; }
+    .bg-glow.g3 { top: 40%; left: 50%; transform: translateX(-50%); background: #06b6d4; opacity: 0.08; }
+
+    .page { position: relative; z-index: 1; }
+
+    header {
+      padding: 48px 24px 0;
+      text-align: center;
+    }
+
+    .logo {
+      font-size: 1.5rem;
+      font-weight: 800;
+      letter-spacing: 1px;
+      margin-bottom: 20px;
+      display: inline-flex;
       align-items: center;
-      height: 70vh;
-      perspective: 1000px;
-      overflow: hidden;
-      gap: 2rem;
-      padding: 2rem;
+      gap: 3px;
+    }
+
+    .logo-sand {
+      background: linear-gradient(135deg, #e0e7ff, #a5b4fc);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .logo-boxes {
+      background: linear-gradient(135deg, #818cf8, #6366f1);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .logo-dot {
+      background: linear-gradient(135deg, #f472b6, #ec4899);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      font-size: 1.8rem;
+      line-height: 1;
+    }
+
+    .logo-live {
+      background: linear-gradient(135deg, #ec4899, #f43f5e);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      position: relative;
+    }
+
+    .logo-live::after {
+      content: '';
+      position: absolute;
+      top: 4px;
+      right: -14px;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #f43f5e;
+      animation: pulse-live 2s ease-in-out infinite;
+      box-shadow: 0 0 8px #f43f5e;
+    }
+
+    @keyframes pulse-live {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.4; transform: scale(0.7); }
+    }
+
+    h1 {
+      font-size: clamp(2.8rem, 6vw, 4.5rem);
+      font-weight: 800;
+      letter-spacing: -1px;
+      line-height: 1.1;
+      background: linear-gradient(135deg, #fff 0%, #a5b4fc 50%, #818cf8 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .subtitle {
+      margin-top: 16px;
+      font-size: 1.1rem;
+      color: rgba(255,255,255,0.45);
+      font-weight: 400;
+      max-width: 480px;
+      margin-left: auto;
+      margin-right: auto;
+      line-height: 1.6;
+    }
+
+    .projects {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 20px;
+      max-width: 1100px;
+      margin: 56px auto 0;
+      padding: 0 24px 80px;
     }
 
     .card {
-      width: 200px;
-      height: 200px;
-      background: rgba(255, 255, 255, 0.1);
-      backdrop-filter: blur(10px);
-      border-radius: 20px;
-      box-shadow: 0 0 20px rgba(255, 255, 255, 0.1);
+      position: relative;
       display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
+      align-items: flex-start;
+      gap: 18px;
+      padding: 28px 24px;
+      border-radius: 16px;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.06);
       cursor: pointer;
-      transition: transform 0.3s, box-shadow 0.3s;
-      transform-style: preserve-3d;
+      text-decoration: none;
+      color: inherit;
+      transition: transform 0.25s, background 0.25s, border-color 0.25s, box-shadow 0.25s;
+      overflow: hidden;
+    }
+
+    .card::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: 16px;
+      opacity: 0;
+      transition: opacity 0.3s;
+      z-index: 0;
     }
 
     .card:hover {
-      transform: scale(1.05) rotateY(10deg);
-      box-shadow: 0 0 40px rgba(255, 255, 255, 0.2);
+      transform: translateY(-4px);
+      background: rgba(255,255,255,0.07);
+      border-color: rgba(255,255,255,0.12);
+      box-shadow: 0 20px 40px rgba(0,0,0,0.3);
     }
 
-    .card img {
-      width: 60px;
-      height: 60px;
-      margin-bottom: 1rem;
+    .card:hover::before { opacity: 1; }
+
+    .card:nth-child(1)::before { background: linear-gradient(135deg, rgba(99,102,241,0.1), transparent 60%); }
+    .card:nth-child(2)::before { background: linear-gradient(135deg, rgba(236,72,153,0.1), transparent 60%); }
+    .card:nth-child(3)::before { background: linear-gradient(135deg, rgba(6,182,212,0.1), transparent 60%); }
+    .card:nth-child(4)::before { background: linear-gradient(135deg, rgba(245,158,11,0.1), transparent 60%); }
+    .card:nth-child(5)::before { background: linear-gradient(135deg, rgba(16,185,129,0.1), transparent 60%); }
+
+    .card-icon {
+      flex-shrink: 0;
+      width: 52px;
+      height: 52px;
+      border-radius: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      z-index: 1;
     }
 
-    .card p {
-      font-size: 1.1rem;
-      text-align: center;
+    .card-icon img {
+      width: 40px;
+      height: 40px;
+      border-radius: 8px;
     }
+
+    .card:nth-child(1) .card-icon { background: rgba(99,102,241,0.15); }
+    .card:nth-child(2) .card-icon { background: rgba(236,72,153,0.15); }
+    .card:nth-child(3) .card-icon { background: rgba(6,182,212,0.15); }
+    .card:nth-child(4) .card-icon { background: rgba(245,158,11,0.15); }
+    .card:nth-child(5) .card-icon { background: rgba(16,185,129,0.15); }
+
+    .card-body { position: relative; z-index: 1; }
+
+    .card-title {
+      font-size: 1.15rem;
+      font-weight: 700;
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .card-arrow {
+      opacity: 0;
+      transform: translateX(-6px);
+      transition: opacity 0.25s, transform 0.25s;
+      font-size: 0.9em;
+      color: rgba(255,255,255,0.5);
+    }
+    .card:hover .card-arrow {
+      opacity: 1;
+      transform: translateX(0);
+    }
+
+    .card-desc {
+      font-size: 0.88rem;
+      color: rgba(255,255,255,0.4);
+      line-height: 1.5;
+    }
+
+    .card-tag {
+      display: inline-block;
+      margin-top: 10px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      padding: 3px 10px;
+      border-radius: 20px;
+      background: rgba(255,255,255,0.06);
+      color: rgba(255,255,255,0.35);
+    }
+
+    .card:nth-child(1) .card-tag { color: #a5b4fc; background: rgba(99,102,241,0.12); }
+    .card:nth-child(2) .card-tag { color: #f9a8d4; background: rgba(236,72,153,0.12); }
+    .card:nth-child(3) .card-tag { color: #67e8f9; background: rgba(6,182,212,0.12); }
+    .card:nth-child(4) .card-tag { color: #fcd34d; background: rgba(245,158,11,0.12); }
+    .card:nth-child(5) .card-tag { color: #6ee7b7; background: rgba(16,185,129,0.12); }
 
     footer {
-      position: fixed;
-      bottom: 10px;
-      left: 0;
-      right: 0;
-      color: #ffffff4c;
-      padding: 10px;
       text-align: center;
-      font-size: 0.9rem;
+      padding: 32px 24px 40px;
+      color: rgba(255,255,255,0.2);
+      font-size: 0.82rem;
     }
 
-    .github-link {
-      text-align: center;
-      margin-top: 20px;
-      font-size: 1rem;
-    }
-
-    .github-link a {
-      color: #ffdd00;
+    footer a {
+      color: rgba(255,255,255,0.35);
       text-decoration: none;
+      transition: color 0.2s;
+    }
+    footer a:hover { color: rgba(255,255,255,0.6); }
+
+    .footer-links {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 20px;
+      margin-bottom: 12px;
     }
 
-    @media (max-width: 600px) {
-      h1.title {
-        font-size: 2rem;
+    .footer-sep {
+      width: 4px;
+      height: 4px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.15);
+    }
+
+    @media (max-width: 640px) {
+      .projects {
+        grid-template-columns: 1fr;
+        padding: 0 16px 60px;
       }
-      .container {
-        flex-direction: column;
-        height: auto;
-      }
-      .card {
-        width: 80%;
-      }
+      header { padding-top: 36px; }
     }
   </style>
 </head>
 <body>
-  <h1 class="title">SandBoxes</h1>
-  <div class="container" id="cardContainer">
-    <div class="card" onclick="location.href='/tomorrownews'">
-      <img src="/static/faviconTN.png" alt="Tomorrownews Icon">
-      <p>Tomorrow News</p>
+  <div class="bg-grid"></div>
+  <div class="bg-glow g1"></div>
+  <div class="bg-glow g2"></div>
+  <div class="bg-glow g3"></div>
+
+  <div class="page">
+    <header>
+      <div class="logo"><span class="logo-sand">Sand</span><span class="logo-boxes">Boxes</span><span class="logo-dot">.</span><span class="logo-live">live</span></div>
+      <h1>AI Experiments,<br>Shipped Daily</h1>
+      <p class="subtitle">A collection of AI-powered projects exploring what's possible with generative models, agents, and creative automation.</p>
+    </header>
+
+    <div class="projects">
+      <a class="card" href="/tomorrownews">
+        <div class="card-icon"><img src="/static/faviconTN.png" alt=""></div>
+        <div class="card-body">
+          <div class="card-title">Tomorrow News <span class="card-arrow">&rarr;</span></div>
+          <div class="card-desc">AI-generated news from tomorrow. Speculative journalism powered by predictive models.</div>
+          <span class="card-tag">Generative Content</span>
+        </div>
+      </a>
+
+      <a class="card" href="/genbox">
+        <div class="card-icon"><img src="/static/faviconGB.png" alt=""></div>
+        <div class="card-body">
+          <div class="card-title">GenBox <span class="card-arrow">&rarr;</span></div>
+          <div class="card-desc">Multi-model AI playground. Compare outputs, test prompts, and explore capabilities side by side.</div>
+          <span class="card-tag">Playground</span>
+        </div>
+      </a>
+
+      <a class="card" href="/aiblog">
+        <div class="card-icon"><img src="/static/faviconAB.png" alt=""></div>
+        <div class="card-body">
+          <div class="card-title">AI Blog <span class="card-arrow">&rarr;</span></div>
+          <div class="card-desc">A daily blog written entirely by AI agents. Fresh perspectives generated every day.</div>
+          <span class="card-tag">Daily Content</span>
+        </div>
+      </a>
+
+      <a class="card" href="/comicbook">
+        <div class="card-icon"><img src="/static/faviconCB.png" alt=""></div>
+        <div class="card-body">
+          <div class="card-title">ComicBook <span class="card-arrow">&rarr;</span></div>
+          <div class="card-desc">AI-generated daily comic strips with original stories, characters, and art across multi-episode arcs.</div>
+          <span class="card-tag">Visual Storytelling</span>
+        </div>
+      </a>
+
+      <a class="card" href="/ai-open-problem-solver">
+        <div class="card-icon"><img src="/static/faviconPS.png" alt=""></div>
+        <div class="card-body">
+          <div class="card-title">Open Problem Solver <span class="card-arrow">&rarr;</span></div>
+          <div class="card-desc">Tackle unsolved problems in mathematics and computer science with AI-assisted reasoning.</div>
+          <span class="card-tag">Research</span>
+        </div>
+      </a>
     </div>
-    <div class="card" onclick="location.href='/genbox'">
-      <img src="/static/faviconGB.png" alt="GenBox Icon">
-      <p>GenBox</p>
-    </div>
-    <div class="card" onclick="location.href='/aiblog'">
-      <img src="/static/faviconAB.png" alt="AI Blog Icon">
-      <p>AI Blog</p>
-    </div>
-    <div class="card" onclick="location.href='/comicbook'">
-      <img src="/static/faviconCB.png" alt="ComicBook Icon">
-      <p>ComicBook</p>
-    </div>
-    <div class="card" onclick="location.href='/ai-open-problem-solver'">
-      <img src="/static/faviconPS.png" alt="Open Problem Solver Icon">
-      <p>Open Problem Solver</p>
-    </div>
+
+    <footer>
+      <div class="footer-links">
+        <a href="https://github.com/abozaralizadeh/SandBox" target="_blank">GitHub</a>
+        <div class="footer-sep"></div>
+        <span>&copy; 2026 Abozar Alizadeh</span>
+      </div>
+    </footer>
   </div>
-
-  <script>
-    const container = document.getElementById('cardContainer');
-    document.addEventListener('mousemove', e => {
-      const x = e.clientX / window.innerWidth - 0.5;
-      const y = e.clientY / window.innerHeight - 0.5;
-      container.style.transform = `rotateX(${y * 10}deg) rotateY(${x * 10}deg)`;
-    });
-  </script>
-
-  <!--footer -->
-    <div class="github-link">
-        <a href="https://github.com/abozaralizadeh/SandBox" target="_blank">View this project on GitHub</a>
-        <p>Copyright (c) 2025 Abozar Alizadeh</p>
-    </div>
-    
-  <!-- /footer -->
 </body>
 </html>
