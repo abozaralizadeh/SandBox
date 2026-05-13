@@ -44,10 +44,34 @@
       opacity: 0.15;
       z-index: 0;
       pointer-events: none;
+      transition: transform 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94), opacity 0.6s ease;
+      will-change: transform;
     }
     .bg-glow.g1 { top: -200px; left: -100px; background: #6366f1; }
     .bg-glow.g2 { bottom: -200px; right: -100px; background: #ec4899; }
     .bg-glow.g3 { top: 40%; left: 50%; transform: translateX(-50%); background: #06b6d4; opacity: 0.08; }
+
+    .bg-particles {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      pointer-events: none;
+      overflow: hidden;
+    }
+    .bg-particle {
+      position: absolute;
+      width: 2px;
+      height: 2px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.15);
+      animation: float-particle linear infinite;
+    }
+    @keyframes float-particle {
+      0% { transform: translateY(0) translateX(0); opacity: 0; }
+      10% { opacity: 1; }
+      90% { opacity: 1; }
+      100% { transform: translateY(-100vh) translateX(40px); opacity: 0; }
+    }
 
     .page { position: relative; z-index: 1; }
 
@@ -138,15 +162,19 @@
     }
 
     .projects {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
       gap: 20px;
-      max-width: 1100px;
+      max-width: 1080px;
       margin: 56px auto 0;
       padding: 0 24px 80px;
     }
 
     .card {
+      width: calc((100% - 40px) / 3);
+      min-width: 280px;
+      max-width: 340px;
       position: relative;
       display: flex;
       align-items: flex-start;
@@ -290,7 +318,6 @@
 
     @media (max-width: 640px) {
       .projects {
-        grid-template-columns: 1fr;
         padding: 0 16px 60px;
       }
       header { padding-top: 36px; }
@@ -302,6 +329,7 @@
   <div class="bg-glow g1"></div>
   <div class="bg-glow g2"></div>
   <div class="bg-glow g3"></div>
+  <div class="bg-particles" id="particles"></div>
 
   <div class="page">
     <header>
@@ -365,5 +393,65 @@
       </div>
     </footer>
   </div>
+  <script>
+    (function() {
+      var g1 = document.querySelector('.bg-glow.g1');
+      var g2 = document.querySelector('.bg-glow.g2');
+      var g3 = document.querySelector('.bg-glow.g3');
+      var mx = 0, my = 0, scrollY = 0;
+      var ticking = false;
+
+      function update() {
+        var sx = (mx / window.innerWidth - 0.5) * 2;
+        var sy = (my / window.innerHeight - 0.5) * 2;
+        var sp = scrollY * 0.3;
+
+        g1.style.transform = 'translate(' + (sx * 60 + 20) + 'px, ' + (sy * 40 + sp) + 'px)';
+        g2.style.transform = 'translate(' + (sx * -50 - 15) + 'px, ' + (sy * -35 - sp * 0.8) + 'px)';
+        g3.style.transform = 'translate(-50%, 0) translate(' + (sx * 30) + 'px, ' + (sy * 25 + sp * 0.5) + 'px)';
+
+        var maxOpacity = 0.22;
+        var minOpacity = 0.1;
+        var opacityRange = maxOpacity - minOpacity;
+        var docHeight = document.documentElement.scrollHeight - window.innerHeight || 1;
+        var scrollFrac = Math.min(scrollY / docHeight, 1);
+        g1.style.opacity = minOpacity + opacityRange * (1 - scrollFrac);
+        g2.style.opacity = minOpacity + opacityRange * scrollFrac;
+
+        ticking = false;
+      }
+
+      function requestUpdate() {
+        if (!ticking) { ticking = true; requestAnimationFrame(update); }
+      }
+
+      document.addEventListener('mousemove', function(e) {
+        mx = e.clientX; my = e.clientY; requestUpdate();
+      });
+
+      window.addEventListener('scroll', function() {
+        scrollY = window.pageYOffset || document.documentElement.scrollTop;
+        requestUpdate();
+      }, { passive: true });
+
+      window.addEventListener('touchmove', function(e) {
+        if (e.touches.length) { mx = e.touches[0].clientX; my = e.touches[0].clientY; requestUpdate(); }
+      }, { passive: true });
+
+      var container = document.getElementById('particles');
+      var count = window.innerWidth < 640 ? 15 : 30;
+      for (var i = 0; i < count; i++) {
+        var p = document.createElement('div');
+        p.className = 'bg-particle';
+        p.style.left = Math.random() * 100 + '%';
+        p.style.top = (100 + Math.random() * 20) + '%';
+        p.style.animationDuration = (8 + Math.random() * 14) + 's';
+        p.style.animationDelay = (Math.random() * 12) + 's';
+        p.style.width = p.style.height = (1 + Math.random() * 2) + 'px';
+        p.style.opacity = 0.1 + Math.random() * 0.2;
+        container.appendChild(p);
+      }
+    })();
+  </script>
 </body>
 </html>
