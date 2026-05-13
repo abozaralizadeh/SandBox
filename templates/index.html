@@ -73,6 +73,40 @@
       100% { transform: translateY(-100vh) translateX(50px); opacity: 0; }
     }
 
+    .effect-canvas {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 0;
+      pointer-events: none;
+      display: none;
+      opacity: 0;
+      transition: opacity 2.5s ease;
+    }
+
+    .scanlines {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      pointer-events: none;
+      display: none;
+      opacity: 0;
+      transition: opacity 2.5s ease;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(0,0,0,0.12) 2px,
+        rgba(0,0,0,0.12) 4px
+      );
+      mix-blend-mode: multiply;
+    }
+
+    .bg-particles {
+      transition: opacity 2.5s ease;
+    }
+
     .page { position: relative; z-index: 1; }
 
     header {
@@ -330,6 +364,8 @@
   <div class="bg-glow g2"></div>
   <div class="bg-glow g3"></div>
   <div class="bg-particles" id="particles"></div>
+  <canvas id="effectCanvas" class="effect-canvas"></canvas>
+  <div id="scanlines" class="scanlines"></div>
 
   <div class="page">
     <header>
@@ -352,8 +388,8 @@
         <div class="card-icon"><img src="/static/faviconGB.png" alt=""></div>
         <div class="card-body">
           <div class="card-title">GenBox <span class="card-arrow">&rarr;</span></div>
-          <div class="card-desc">Multi-model AI playground. Compare outputs, test prompts, and explore capabilities side by side.</div>
-          <span class="card-tag">Playground</span>
+          <div class="card-desc">AI as an autonomous decision-maker for a virtual world — daily decisions on economy, society, environment, and politics.</div>
+          <span class="card-tag">AI Governance</span>
         </div>
       </a>
 
@@ -395,63 +431,348 @@
   </div>
   <script>
     (function() {
+      var FADE = 2500;
+      var GAP  = 12000;
+
+      /* ── GLOW PARALLAX (always active) ── */
       var g1 = document.querySelector('.bg-glow.g1');
       var g2 = document.querySelector('.bg-glow.g2');
       var g3 = document.querySelector('.bg-glow.g3');
-      var mx = 0, my = 0, scrollY = 0;
-      var ticking = false;
-
-      function update() {
+      var mx = window.innerWidth / 2, my = window.innerHeight / 2, scrollPos = 0;
+      var glowTick = false;
+      function updateGlow() {
         var sx = (mx / window.innerWidth - 0.5) * 2;
         var sy = (my / window.innerHeight - 0.5) * 2;
-        var sp = scrollY * 0.3;
-
+        var sp = scrollPos * 0.3;
         g1.style.transform = 'translate(' + (sx * 60 + 20) + 'px, ' + (sy * 40 + sp) + 'px)';
         g2.style.transform = 'translate(' + (sx * -50 - 15) + 'px, ' + (sy * -35 - sp * 0.8) + 'px)';
         g3.style.transform = 'translate(-50%, 0) translate(' + (sx * 30) + 'px, ' + (sy * 25 + sp * 0.5) + 'px)';
+        var dh = document.documentElement.scrollHeight - window.innerHeight || 1;
+        var sf = Math.min(scrollPos / dh, 1);
+        g1.style.opacity = 0.1 + 0.12 * (1 - sf);
+        g2.style.opacity = 0.1 + 0.12 * sf;
+        glowTick = false;
+      }
+      function reqGlow() { if (!glowTick) { glowTick = true; requestAnimationFrame(updateGlow); } }
+      document.addEventListener('mousemove', function(e) { mx = e.clientX; my = e.clientY; reqGlow(); });
+      window.addEventListener('scroll', function() { scrollPos = window.pageYOffset || 0; reqGlow(); }, { passive: true });
+      window.addEventListener('touchmove', function(e) { if (e.touches.length) { mx = e.touches[0].clientX; my = e.touches[0].clientY; reqGlow(); } }, { passive: true });
 
-        var maxOpacity = 0.22;
-        var minOpacity = 0.1;
-        var opacityRange = maxOpacity - minOpacity;
-        var docHeight = document.documentElement.scrollHeight - window.innerHeight || 1;
-        var scrollFrac = Math.min(scrollY / docHeight, 1);
-        g1.style.opacity = minOpacity + opacityRange * (1 - scrollFrac);
-        g2.style.opacity = minOpacity + opacityRange * scrollFrac;
+      /* ── SHARED REFS ── */
+      var canvas = document.getElementById('effectCanvas');
+      var ctx = canvas.getContext('2d');
+      var particlesEl = document.getElementById('particles');
+      var scanlinesEl = document.getElementById('scanlines');
+      var titleEl = document.querySelector('h1');
 
-        ticking = false;
+      function sizeCanvas() { canvas.width = window.innerWidth; canvas.height = window.innerHeight; }
+      window.addEventListener('resize', sizeCanvas);
+      sizeCanvas();
+
+      /* ── FADE HELPERS ── */
+      function fadeInCanvas() { canvas.style.display = 'block'; requestAnimationFrame(function() { canvas.style.opacity = '1'; }); }
+      function fadeOutCanvas(cb) {
+        canvas.style.opacity = '0';
+        setTimeout(function() { canvas.style.display = 'none'; if (cb) cb(); }, FADE);
+      }
+      function fadeInParticles() { particlesEl.style.opacity = '1'; }
+      function fadeOutParticles(cb) {
+        particlesEl.style.opacity = '0';
+        setTimeout(function() { if (cb) cb(); }, FADE);
       }
 
-      function requestUpdate() {
-        if (!ticking) { ticking = true; requestAnimationFrame(update); }
+      /* ═══════════════════════════════════
+         EFFECT: BUBBLES
+         ═══════════════════════════════════ */
+      function startBubbles() {
+        particlesEl.innerHTML = '';
+        particlesEl.style.display = '';
+        particlesEl.style.opacity = '0';
+        var n = window.innerWidth < 640 ? 12 : 25;
+        for (var i = 0; i < n; i++) {
+          var p = document.createElement('div');
+          p.className = 'bg-particle';
+          p.style.left = Math.random() * 100 + '%';
+          p.style.top = (100 + Math.random() * 20) + '%';
+          p.style.animationDuration = (8 + Math.random() * 14) + 's';
+          p.style.animationDelay = (Math.random() * 8) + 's';
+          var sz = (6 + Math.random() * 14) + 'px';
+          p.style.width = p.style.height = sz;
+          p.style.opacity = 0.3 + Math.random() * 0.4;
+          particlesEl.appendChild(p);
+        }
+        requestAnimationFrame(fadeInParticles);
+      }
+      function stopBubbles(cb) {
+        fadeOutParticles(function() { particlesEl.innerHTML = ''; if (cb) cb(); });
       }
 
-      document.addEventListener('mousemove', function(e) {
-        mx = e.clientX; my = e.clientY; requestUpdate();
-      });
-
-      window.addEventListener('scroll', function() {
-        scrollY = window.pageYOffset || document.documentElement.scrollTop;
-        requestUpdate();
-      }, { passive: true });
-
-      window.addEventListener('touchmove', function(e) {
-        if (e.touches.length) { mx = e.touches[0].clientX; my = e.touches[0].clientY; requestUpdate(); }
-      }, { passive: true });
-
-      var container = document.getElementById('particles');
-      var count = window.innerWidth < 640 ? 15 : 30;
-      for (var i = 0; i < count; i++) {
-        var p = document.createElement('div');
-        p.className = 'bg-particle';
-        p.style.left = Math.random() * 100 + '%';
-        p.style.top = (100 + Math.random() * 20) + '%';
-        p.style.animationDuration = (8 + Math.random() * 14) + 's';
-        p.style.animationDelay = (Math.random() * 12) + 's';
-        var size = (6 + Math.random() * 14) + 'px';
-        p.style.width = p.style.height = size;
-        p.style.opacity = 0.3 + Math.random() * 0.4;
-        container.appendChild(p);
+      /* ═══════════════════════════════════
+         EFFECT: MATRIX RAIN
+         ═══════════════════════════════════ */
+      var matrixAnim = null;
+      function startMatrix() {
+        sizeCanvas();
+        canvas.style.opacity = '0'; canvas.style.display = 'block';
+        ctx.fillStyle = 'rgba(8,9,13,1)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        var fs = 14, cols = Math.floor(canvas.width / fs);
+        var drops = [];
+        for (var i = 0; i < cols; i++) drops[i] = Math.random() * -30;
+        var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789αβγδεζηθλπΣΩ∫∂∇≈';
+        function draw() {
+          ctx.fillStyle = 'rgba(8,9,13,0.05)';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.font = fs + 'px monospace';
+          for (var i = 0; i < drops.length; i++) {
+            var ch = chars[Math.floor(Math.random() * chars.length)];
+            var b = 100 + Math.floor(Math.random() * 155);
+            ctx.fillStyle = 'rgba(0,' + b + ',0,0.45)';
+            ctx.fillText(ch, i * fs, drops[i] * fs);
+            if (drops[i] * fs > canvas.height && Math.random() > 0.975) drops[i] = 0;
+            drops[i]++;
+          }
+          matrixAnim = requestAnimationFrame(draw);
+        }
+        draw();
+        requestAnimationFrame(function() { canvas.style.opacity = '1'; });
       }
+      function stopMatrix(cb) {
+        fadeOutCanvas(function() {
+          if (matrixAnim) cancelAnimationFrame(matrixAnim); matrixAnim = null;
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          if (cb) cb();
+        });
+      }
+
+      /* ═══════════════════════════════════
+         EFFECT: TV STATIC + SCANLINES
+         ═══════════════════════════════════ */
+      var staticAnim = null;
+      var noiseOff = document.createElement('canvas');
+      noiseOff.width = 200; noiseOff.height = 150;
+      var noiseCtx = noiseOff.getContext('2d');
+      function startStatic() {
+        sizeCanvas();
+        canvas.style.opacity = '0'; canvas.style.display = 'block';
+        scanlinesEl.style.display = 'block';
+        scanlinesEl.style.opacity = '0';
+        function draw() {
+          var id = noiseCtx.createImageData(200, 150), d = id.data;
+          for (var i = 0; i < d.length; i += 4) {
+            var v = Math.random() * 60;
+            d[i] = d[i + 1] = d[i + 2] = v; d[i + 3] = 18;
+          }
+          noiseCtx.putImageData(id, 0, 0);
+          ctx.imageSmoothingEnabled = false;
+          ctx.drawImage(noiseOff, 0, 0, canvas.width, canvas.height);
+          staticAnim = requestAnimationFrame(draw);
+        }
+        draw();
+        requestAnimationFrame(function() { canvas.style.opacity = '1'; scanlinesEl.style.opacity = '1'; });
+      }
+      function stopStatic(cb) {
+        scanlinesEl.style.opacity = '0';
+        fadeOutCanvas(function() {
+          if (staticAnim) cancelAnimationFrame(staticAnim); staticAnim = null;
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          scanlinesEl.style.display = 'none';
+          if (cb) cb();
+        });
+      }
+
+      /* ═══════════════════════════════════
+         EFFECT: EXPLOSION + PENDULUM
+         ═══════════════════════════════════ */
+      var explosionAnim = null;
+      function startExplosion() {
+        sizeCanvas();
+        canvas.style.opacity = '0'; canvas.style.display = 'block';
+        var cx = canvas.width / 2, cy = canvas.height / 3;
+        var sparks = [];
+        for (var i = 0; i < 200; i++) {
+          var a = Math.random() * Math.PI * 2, spd = 5 + Math.random() * 20;
+          sparks.push({
+            x: cx, y: cy, vx: Math.cos(a) * spd, vy: Math.sin(a) * spd - 6,
+            life: 1, size: 4 + Math.random() * 12,
+            color: ['#6366f1','#ec4899','#f59e0b','#06b6d4','#10b981','#fff'][Math.floor(Math.random() * 6)]
+          });
+        }
+        function drawSparks() {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          var alive = false;
+          for (var i = 0; i < sparks.length; i++) {
+            var s = sparks[i];
+            s.x += s.vx; s.y += s.vy; s.vy += 0.1; s.vx *= 0.995; s.life -= 0.009;
+            if (s.life <= 0) continue;
+            alive = true;
+            ctx.globalAlpha = Math.min(s.life * 1.4, 1);
+            ctx.fillStyle = s.color;
+            ctx.beginPath(); ctx.arc(s.x, s.y, s.size * s.life, 0, Math.PI * 2); ctx.fill();
+            ctx.globalAlpha = s.life * 0.5;
+            ctx.beginPath(); ctx.arc(s.x - s.vx * 0.5, s.y - s.vy * 0.5, s.size * s.life * 0.5, 0, Math.PI * 2); ctx.fill();
+          }
+          ctx.globalAlpha = 1;
+          if (alive) explosionAnim = requestAnimationFrame(drawSparks);
+        }
+        drawSparks();
+        requestAnimationFrame(function() { canvas.style.opacity = '1'; });
+
+        titleEl.style.transformOrigin = 'top center';
+        var swings = [10, -7, 5, -3.5, 2, -1.2, 0.6, -0.2, 0];
+        var si = 0;
+        function swing() {
+          if (si < swings.length) {
+            titleEl.style.transition = 'transform 0.4s ease-in-out';
+            titleEl.style.transform = 'rotate(' + swings[si] + 'deg)';
+            si++; setTimeout(swing, 400);
+          } else {
+            titleEl.style.transition = 'transform 0.6s cubic-bezier(0.34, 1.56, 0.64, 1)';
+            titleEl.style.transform = 'rotate(0deg)';
+            setTimeout(function() {
+              titleEl.style.transform = ''; titleEl.style.transition = ''; titleEl.style.transformOrigin = '';
+            }, 700);
+          }
+        }
+        setTimeout(swing, 200);
+      }
+      function stopExplosion(cb) {
+        fadeOutCanvas(function() {
+          if (explosionAnim) cancelAnimationFrame(explosionAnim); explosionAnim = null;
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          titleEl.style.transform = ''; titleEl.style.transition = ''; titleEl.style.transformOrigin = '';
+          if (cb) cb();
+        });
+      }
+
+      /* ═══════════════════════════════════
+         EFFECT: ELECTRIC ARCS
+         ═══════════════════════════════════ */
+      var elecAnim = null;
+      function makeBolt(w, h) {
+        var x1 = Math.random() * w, x2 = Math.random() * w;
+        var vertical = Math.random() > 0.3;
+        var pts = [], steps = 12 + Math.floor(Math.random() * 12);
+        for (var i = 0; i <= steps; i++) {
+          var t = i / steps;
+          var jitter = (i > 0 && i < steps) ? (Math.random() - 0.5) * 140 : 0;
+          if (vertical) pts.push({ x: x1 + (x2 - x1) * t + jitter, y: t * h });
+          else pts.push({ x: t * w, y: h * 0.3 + (Math.random() - 0.5) * h * 0.5 + jitter * 0.5 });
+        }
+        return { pts: pts, life: 1, hue: ['#6366f1','#818cf8','#a5b4fc','#06b6d4','#c4b5fd'][Math.floor(Math.random() * 5)] };
+      }
+      function startElectric() {
+        sizeCanvas();
+        canvas.style.opacity = '0'; canvas.style.display = 'block';
+        var bolts = [], frame = 0;
+        for (var i = 0; i < 3; i++) bolts.push(makeBolt(canvas.width, canvas.height));
+        function draw() {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          frame++;
+          if (frame % 10 === 0 && bolts.length < 5) bolts.push(makeBolt(canvas.width, canvas.height));
+          for (var b = bolts.length - 1; b >= 0; b--) {
+            var bolt = bolts[b]; bolt.life -= 0.025;
+            if (bolt.life <= 0) { bolts.splice(b, 1); continue; }
+            ctx.save(); ctx.shadowColor = bolt.hue; ctx.shadowBlur = 20;
+            ctx.strokeStyle = bolt.hue; ctx.lineWidth = 2; ctx.globalAlpha = bolt.life;
+            ctx.beginPath(); ctx.moveTo(bolt.pts[0].x, bolt.pts[0].y);
+            for (var s = 1; s < bolt.pts.length; s++) ctx.lineTo(bolt.pts[s].x + (Math.random() - 0.5) * 4, bolt.pts[s].y);
+            ctx.stroke();
+            ctx.lineWidth = 8; ctx.globalAlpha = bolt.life * 0.2;
+            ctx.beginPath(); ctx.moveTo(bolt.pts[0].x, bolt.pts[0].y);
+            for (var s = 1; s < bolt.pts.length; s++) ctx.lineTo(bolt.pts[s].x + (Math.random() - 0.5) * 3, bolt.pts[s].y);
+            ctx.stroke(); ctx.restore();
+          }
+          if (bolts.length > 0) elecAnim = requestAnimationFrame(draw);
+        }
+        draw();
+        requestAnimationFrame(function() { canvas.style.opacity = '1'; });
+      }
+      function stopElectric(cb) {
+        fadeOutCanvas(function() {
+          if (elecAnim) cancelAnimationFrame(elecAnim); elecAnim = null;
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          if (cb) cb();
+        });
+      }
+
+      /* ═══════════════════════════════════
+         EFFECT: CHEMICAL REACTION
+         ═══════════════════════════════════ */
+      var chemAnim = null;
+      function startChemical() {
+        sizeCanvas();
+        canvas.style.opacity = '0'; canvas.style.display = 'block';
+        var drops = [];
+        var palette = ['#6366f1','#ec4899','#06b6d4','#10b981','#f59e0b','#a78bfa'];
+        for (var i = 0; i < 60; i++) {
+          drops.push({
+            x: canvas.width * 0.2 + Math.random() * canvas.width * 0.6,
+            y: canvas.height + Math.random() * 40,
+            vy: -(1 + Math.random() * 3), vx: (Math.random() - 0.5) * 1.5,
+            size: 3 + Math.random() * 8,
+            color: palette[Math.floor(Math.random() * palette.length)],
+            life: 0.6 + Math.random() * 0.4,
+            wobble: Math.random() * Math.PI * 2, wobbleSpeed: 0.02 + Math.random() * 0.04
+          });
+        }
+        function draw() {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          for (var i = 0; i < drops.length; i++) {
+            var d = drops[i];
+            d.y += d.vy; d.x += d.vx + Math.sin(d.wobble) * 0.8; d.wobble += d.wobbleSpeed;
+            d.life -= 0.004; d.size *= 0.999;
+            if (d.life <= 0 || d.y < -20) {
+              d.y = canvas.height + 10; d.life = 0.6 + Math.random() * 0.4;
+              d.size = 3 + Math.random() * 8;
+              d.color = palette[Math.floor(Math.random() * palette.length)];
+            }
+            ctx.globalAlpha = d.life * 0.7;
+            ctx.fillStyle = d.color;
+            ctx.beginPath(); ctx.arc(d.x, d.y, d.size, 0, Math.PI * 2); ctx.fill();
+            ctx.globalAlpha = d.life * 0.15;
+            ctx.beginPath(); ctx.arc(d.x, d.y, d.size * 2.5, 0, Math.PI * 2); ctx.fill();
+          }
+          ctx.globalAlpha = 1;
+          chemAnim = requestAnimationFrame(draw);
+        }
+        draw();
+        requestAnimationFrame(function() { canvas.style.opacity = '1'; });
+      }
+      function stopChemical(cb) {
+        fadeOutCanvas(function() {
+          if (chemAnim) cancelAnimationFrame(chemAnim); chemAnim = null;
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          if (cb) cb();
+        });
+      }
+
+      /* ═══════════════════════════════════
+         SCHEDULER — sequential, with gaps
+         ═══════════════════════════════════ */
+      var effects = [
+        { start: startBubbles,   stop: stopBubbles,    dur: 14000 },
+        { start: startMatrix,    stop: stopMatrix,     dur: 10000 },
+        { start: startExplosion, stop: stopExplosion,   dur: 8000  },
+        { start: startElectric,  stop: stopElectric,   dur: 8000  },
+        { start: startChemical,  stop: stopChemical,   dur: 10000 },
+        { start: startStatic,    stop: stopStatic,     dur: 8000  },
+      ];
+      var idx = 0;
+
+      function runCycle() {
+        var fx = effects[idx];
+        fx.start();
+        setTimeout(function() {
+          fx.stop(function() {
+            setTimeout(function() {
+              idx = (idx + 1) % effects.length;
+              runCycle();
+            }, GAP);
+          });
+        }, fx.dur);
+      }
+      runCycle();
     })();
   </script>
 </body>
