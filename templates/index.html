@@ -60,23 +60,23 @@
     }
     .bg-particle {
       position: absolute;
-      width: 2px;
-      height: 2px;
       border-radius: 50%;
-      background: rgba(255,255,255,0.15);
+      background: radial-gradient(circle at 35% 30%, rgba(255,255,255,0.18), rgba(255,255,255,0.03) 60%, transparent);
+      border: 1px solid rgba(255,255,255,0.2);
+      box-shadow: inset 0 0 4px rgba(255,255,255,0.06), 0 0 8px rgba(165,180,252,0.15);
       animation: float-particle linear infinite;
     }
     @keyframes float-particle {
       0% { transform: translateY(0) translateX(0); opacity: 0; }
       10% { opacity: 1; }
       90% { opacity: 1; }
-      100% { transform: translateY(-100vh) translateX(40px); opacity: 0; }
+      100% { transform: translateY(-100vh) translateX(50px); opacity: 0; }
     }
 
     .page { position: relative; z-index: 1; }
 
     header {
-      padding: 48px 24px 0;
+      padding: 32px 24px 0;
       text-align: center;
     }
 
@@ -167,8 +167,8 @@
       justify-content: center;
       gap: 20px;
       max-width: 1080px;
-      margin: 56px auto 0;
-      padding: 0 24px 80px;
+      margin: 40px auto 0;
+      padding: 0 24px 24px;
     }
 
     .card {
@@ -289,7 +289,7 @@
 
     footer {
       text-align: center;
-      padding: 32px 24px 40px;
+      padding: 16px 24px 24px;
       color: rgba(255,255,255,0.2);
       font-size: 0.82rem;
     }
@@ -318,9 +318,9 @@
 
     @media (max-width: 640px) {
       .projects {
-        padding: 0 16px 60px;
+        padding: 0 16px 20px;
       }
-      header { padding-top: 36px; }
+      header { padding-top: 24px; }
     }
   </style>
 </head>
@@ -447,8 +447,9 @@
         p.style.top = (100 + Math.random() * 20) + '%';
         p.style.animationDuration = (8 + Math.random() * 14) + 's';
         p.style.animationDelay = (Math.random() * 12) + 's';
-        p.style.width = p.style.height = (1 + Math.random() * 2) + 'px';
-        p.style.opacity = 0.1 + Math.random() * 0.2;
+        var size = (6 + Math.random() * 14) + 'px';
+        p.style.width = p.style.height = size;
+        p.style.opacity = 0.3 + Math.random() * 0.4;
         container.appendChild(p);
       }
     })();
