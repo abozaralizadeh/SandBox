@@ -957,7 +957,9 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
                          i + 1, p.get("size", "?"), bool(p.get("image_url")),
                          p.get("dialogue", "")[:50])
         arc_theme = _parse_arc_theme(state["arc"])
-        html = _assemble_html(arc_title, episode_number, date, recap, teaser, panels, theme=arc_theme)
+        actual_title = state["arc"].get("title", arc_title) if state["arc"] else arc_title
+        actual_ep = state["episode_number"]
+        html = _assemble_html(actual_title, actual_ep, date, recap, teaser, panels, theme=arc_theme)
         state["assembled_panels"] = panels
         state["assembled_recap"] = recap
         state["assembled_teaser"] = teaser
