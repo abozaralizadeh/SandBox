@@ -650,14 +650,12 @@
          ═══════════════════════════════════ */
       var elecAnim = null;
       function makeBolt(w, h) {
-        var x1 = Math.random() * w, x2 = Math.random() * w;
-        var vertical = Math.random() > 0.3;
+        var x1 = Math.random() * w, x2 = x1 + (Math.random() - 0.5) * w * 0.3;
         var pts = [], steps = 12 + Math.floor(Math.random() * 12);
         for (var i = 0; i <= steps; i++) {
           var t = i / steps;
           var jitter = (i > 0 && i < steps) ? (Math.random() - 0.5) * 140 : 0;
-          if (vertical) pts.push({ x: x1 + (x2 - x1) * t + jitter, y: t * h });
-          else pts.push({ x: t * w, y: h * 0.3 + (Math.random() - 0.5) * h * 0.5 + jitter * 0.5 });
+          pts.push({ x: x1 + (x2 - x1) * t + jitter, y: t * h });
         }
         return { pts: pts, life: 1, hue: ['#6366f1','#818cf8','#a5b4fc','#06b6d4','#c4b5fd'][Math.floor(Math.random() * 5)] };
       }
