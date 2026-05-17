@@ -572,15 +572,42 @@ ARC LIFECYCLE:
    - Decide how many episodes the story naturally needs (could be 3, could be 15 —
      let the story dictate, not a fixed number).
    - Call start_new_arc with your creative details including the color_theme.
-3. If an ACTIVE arc exists:
-   - Review the recent episode summaries and the story_outline for continuity.
-   - The arc length was decided when you wrote the story_outline — it contains an \
-     episode-by-episode breakdown. Follow that plan. Use episodes_so_far and \
-     planned_episodes to know which episode you are writing today.
-   - Only call end_current_arc AFTER you have written the final episode described \
-     in the story_outline (i.e., episodes_so_far >= planned_episodes).
-   - Plan today's episode according to the story_outline's breakdown for this \
-     episode number. No filler, no skipping, no ending early.
+3. If an ACTIVE arc exists — FOLLOW THIS DECISION TREE EXACTLY:
+
+   Read these three numbers from the arc status / input context:
+   - planned_episodes (total episodes the arc is supposed to have)
+   - episodes_so_far (episodes ALREADY published — does NOT include today's)
+   - episode_number_today (the episode you are producing right now =
+     episodes_so_far + 1)
+
+   CASE A — episode_number_today <= planned_episodes
+   (i.e., the arc is NOT yet complete, today's episode is part of this arc):
+     - You MUST plan today's episode for THIS arc, using the story_outline's
+       breakdown for episode #episode_number_today.
+     - If episode_number_today == planned_episodes, today IS the FINALE.
+       Plan a satisfying conclusion that pays off every setup, character arc,
+       and thread. Do NOT close the arc yet — the finale must be PRODUCED first.
+     - DO NOT call end_current_arc.
+     - DO NOT call start_new_arc.
+
+   CASE B — episode_number_today > planned_episodes
+   (i.e., the previous run already produced the finale; all planned episodes
+   are published; the arc is complete):
+     - Call end_current_arc with a brief conclusion note.
+     - Then create a brand-new arc as described in step 2 (start_new_arc +
+       save_story_outline) and plan episode 1 of that new arc.
+
+   HARD RULES — these are non-negotiable:
+   - NEVER call end_current_arc while episode_number_today <= planned_episodes.
+     Doing so destroys the active arc BEFORE its finale is produced, and any
+     episode you plan today would be assigned to a new arc — the old story
+     would be left incomplete and unwatchable.
+   - NEVER skip an episode in the planned sequence. No filler is allowed, but
+     no skipping either.
+   - "The story feels like it's wrapping up" is NOT a reason to close early.
+     The arc is done when all planned_episodes are produced — not before.
+   - Trust the planned_episodes count. It was set deliberately when the
+     story_outline was written. Do not second-guess it during the run.
 
 STORY OUTLINE:
 - After creating a new arc, you MUST call save_story_outline with a comprehensive narrative plan.
@@ -830,15 +857,20 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
         recent_eps = get_recent_episodes(a["RowKey"], limit=5, hydrate_html=False)
         logger.info("  -> Active arc: '%s' (%s), %s episodes so far",
                      a.get("title", ""), a["RowKey"], a.get("episodes_count", 0))
+        planned_eps = int(a.get("planned_episodes", 0) or a.get("target_days", 0) or 8)
+        episodes_done = int(a.get("episodes_count", 0))
+        episode_today = state["episode_number"]
         return {
             "status": "active",
             "arc_id": a["RowKey"],
             "title": a.get("title", ""),
             "logline": a.get("logline", ""),
             "genre": a.get("genre", ""),
-            "planned_episodes": int(a.get("planned_episodes", 0) or a.get("target_days", 0) or 8),
-            "episodes_so_far": int(a.get("episodes_count", 0)),
-            "episode_number_today": state["episode_number"],
+            "planned_episodes": planned_eps,
+            "episodes_so_far": episodes_done,
+            "episode_number_today": episode_today,
+            "is_today_the_finale": episode_today == planned_eps,
+            "is_arc_complete_before_today": episodes_done >= planned_eps,
             "start_date": a.get("start_date", ""),
             "characters": a.get("characters", ""),
             "art_style": a.get("art_style", ""),
@@ -907,6 +939,25 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
         if not a:
             logger.warning("  -> No active arc to close!")
             return {"error": "No active arc to close"}
+        planned_eps = int(a.get("planned_episodes", 0) or a.get("target_days", 0) or 0)
+        episodes_done = int(a.get("episodes_count", 0))
+        if planned_eps > 0 and episodes_done < planned_eps:
+            logger.warning(
+                "  -> REFUSED: arc '%s' has only %d/%d planned episodes published — cannot close yet",
+                a.get("title", a["RowKey"]), episodes_done, planned_eps,
+            )
+            return {
+                "error": "arc_not_complete",
+                "message": (
+                    f"Cannot close arc yet: only {episodes_done} of {planned_eps} planned "
+                    f"episodes have been published. Today's episode (#{state['episode_number']}) "
+                    f"belongs to THIS arc. Plan it now and do NOT close the arc. "
+                    f"end_current_arc may only be called when episodes_so_far >= planned_episodes."
+                ),
+                "episodes_so_far": episodes_done,
+                "planned_episodes": planned_eps,
+                "episode_number_today": state["episode_number"],
+            }
         _storage_close_arc(a["RowKey"], end_date=target_date)
         update_arc_metadata(a["RowKey"], conclusion=conclusion_note)
         logger.info("  -> Arc '%s' closed", a.get("title", a["RowKey"]))
@@ -1088,15 +1139,19 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
     }
 
     if arc:
+        planned_eps = int(arc.get("planned_episodes", 0) or arc.get("target_days", 0) or 0)
+        episodes_done = int(arc.get("episodes_count", 0))
         input_context["current_arc"] = {
             "title": arc.get("title", ""),
             "logline": arc.get("logline", ""),
             "genre": arc.get("genre", ""),
             "characters": arc.get("characters", ""),
             "art_style": arc.get("art_style", ""),
-            "episode_number": episode_number,
-            "planned_episodes": arc.get("planned_episodes", ""),
-            "episodes_so_far": int(arc.get("episodes_count", 0)),
+            "episode_number_today": episode_number,
+            "planned_episodes": planned_eps,
+            "episodes_so_far": episodes_done,
+            "is_today_the_finale": planned_eps > 0 and episode_number == planned_eps,
+            "is_arc_complete_before_today": planned_eps > 0 and episodes_done >= planned_eps,
         }
         input_context["recent_episodes"] = _summarize_episodes(recent)
         story_outline = get_arc_story_outline(arc)
