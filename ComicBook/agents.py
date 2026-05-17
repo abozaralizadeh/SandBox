@@ -358,27 +358,98 @@ STORY CONTEXT:
 - Do NOT translate the story_context itself — it is reference only. Only translate the \
   text fields (title, recap, teaser, dialogue_N, caption_N, sfx_N).
 
-TRANSLATION PHILOSOPHY:
-- FLUENCY IS EVERYTHING. Never translate word-for-word. Restructure sentences so they \
-  flow naturally in the target language. A Persian reader should feel they are reading \
-  Persian literature, not decoded English.
-- For Persian (Farsi): Write in elegant, modern Farsi. Use natural sentence order \
-  (SOV), colloquial warmth in dialogue, and poetic rhythm in narration. Avoid clunky \
-  compound constructions — break long English sentences into shorter, punchier Farsi ones. \
-  Use spoken Farsi patterns in dialogue (how real people talk on the street, not formal \
-  written prose). Narration can be more literary but must still flow beautifully.
-- For Italian: Write with the musicality and expressiveness Italian is known for. Use \
-  idiomatic expressions, natural exclamations (Accidenti!, Dai!, Madonna!), and the rich \
-  emotional register of spoken Italian. Let dialogue breathe with Italian rhythm.
-- Adapt idioms and metaphors to ones that resonate in the target culture. If an English \
-  idiom has no equivalent, convey the same FEELING with a natural expression.
-- Dialogue must sound like REAL PEOPLE SPEAKING that language — with contractions, \
-  interruptions, emotion, and personality. A gruff sailor sounds different from a nervous \
-  scholar in every language.
-- Captions and narration should read like beautiful prose — evocative, atmospheric, with \
-  sensory detail and rhythm. Short sentences for tension. Flowing ones for wonder.
-- Comic energy: keep it punchy, dramatic, alive. Exclamations should hit hard. Whispers \
-  should feel intimate. Action should crackle.
+TRANSLATION PHILOSOPHY — THIS IS THE MOST IMPORTANT SECTION:
+
+THE TWO-STEP RULE (do this for EVERY line):
+1. First, ask: what does the speaker actually MEAN and FEEL? What is the intent \
+   behind the words — a threat, a dare, a tease, a plea, a warning, a confession?
+2. Then ask: how would a native speaker of the target language express that same \
+   feeling/intent in this exact situation? Write THAT — not a translation of the \
+   English words.
+
+If your translation is a word-by-word mirror of the English, YOU HAVE FAILED. \
+Restructure. Reword. Rewrite from scratch if needed. The English is just a \
+description of what the character is doing emotionally — your job is to write \
+that scene in the target language as if no English ever existed.
+
+CRITICAL — English constructions that almost ALWAYS need rewriting:
+
+"Don't you dare [do X]" — this is a CHALLENGE/DARE in English, daring someone to \
+do something so the speaker can react. It is NOT a polite prohibition. \
+  - WRONG (literal): "جرئت نکن بگی فقط صدای باد بود" (sounds like a parent scolding a child)
+  - RIGHT (idiomatic): "اگه جرئت داری بگو فقط صدای باد بود" (matches the defiant, \
+    challenging tone — "if you dare, say it was just the wind")
+  - Italian RIGHT: "Provaci a dirmi che era solo vento" or "Non ti azzardare a dirmi..."
+
+"You can't be serious"
+  - Persian: "شوخی می‌کنی؟" / "جدی نمی‌گی!" (NOT "نمی‌توانی جدی باشی")
+  - Italian: "Stai scherzando?" / "Non dirai sul serio!" / "Ma dai!" (NOT "Non puoi essere serio")
+
+"What the hell?"
+  - Persian: "این دیگه چیه؟" / "چه خبره اینجا؟"
+  - Italian: "Ma che diavolo?" / "Che cavolo succede?" (NOT "Che inferno?" — that means literal hell)
+
+"Give me a break"
+  - Persian: "بیخیال!" / "ولم کن!"
+  - Italian: "Ma piantala!" / "Ma dai!" / "Lasciami in pace!" (NOT "Dammi una pausa" — that's asking for a coffee break)
+
+"I told you so"
+  - Persian: "بهت گفته بودم!" (with attitude, not flat)
+  - Italian: "Te l'avevo detto!" (NOT "Te l'ho detto così")
+
+"Are you kidding me?"
+  - Persian: "شوخیت گرفته؟" / "سر کاریه؟"
+  - Italian: "Mi prendi in giro?" / "Stai scherzando?" / "Mi prendi per i fondelli?"
+
+GENERAL PRINCIPLES:
+- FLUENCY IS EVERYTHING. The reader of the target language should feel they are \
+  reading their own native literature/comics, not decoded English.
+
+REGISTER MUST MATCH THE FIELD AND THE CHARACTER (applies to ALL target languages):
+- This rule is language-agnostic. Every language has a spoken/colloquial register and \
+  a written/literary register. Use them deliberately, by FIELD and by CHARACTER.
+- DIALOGUE (speech bubbles): spoken/colloquial register is the DEFAULT for everyday \
+  characters in everyday scenes — the way real people actually talk, with contractions, \
+  elisions, fragments, fillers, slang, and natural rhythm. BUT this is NOT a blanket \
+  rule — let the CHARACTER and SCENE drive the register: a king on his throne, an \
+  ancient priest, a formal scholar, a sacred invocation, a ceremonial address, a \
+  character intentionally speaking stiffly, an archaic spirit, or an old-world villain \
+  should use written/literary register even in their speech bubbles. A child, a \
+  peasant joking with friends, a street thief, a soldier in the trenches — these \
+  should be deeply colloquial. STORY AND CHARACTER ALWAYS OVERRIDE THE DEFAULT.
+- CAPTIONS / RECAP / TEASER / NARRATION (text boxes, narrator voice): use the \
+  written/literary register of the target language — NEVER spoken/colloquial. This \
+  is the narrator's voice, prose that feels published. Beautiful, flowing, evocative. \
+  Short sentences for tension, longer for atmosphere. Only break this rule if the \
+  story explicitly establishes a colloquial first-person narrator (rare).
+- TITLE: written/literary register, the formal title of the work.
+
+LANGUAGE-SPECIFIC CUES (apply the rule above to each language's registers):
+- Persian (Farsi): spoken (محاوره) uses "می‌خوام", "بریم", "نمی‌دونم", "چیه", \
+  pro-drop pronouns, colloquial connectors ("خب", "آخه", "یعنی", "هان"); \
+  written (کتابی) uses full forms "می‌خواهم", "می‌رویم", "نمی‌دانم", "چیست", \
+  literary syntax, fuller pronouns.
+- Italian: spoken uses contractions, elisions (un po', dirgli, dammelo), idiomatic \
+  exclamations (Accidenti!, Dai!, Madonna!, Cavolo!, Mamma mia!), regional flavor \
+  where appropriate; written uses fuller forms, subjunctive precision, and the rich \
+  literary register of Italian narrative prose.
+- For any language not listed: apply the same principle — identify that language's \
+  spoken vs. written registers and pick by field and character.
+
+- Adapt idioms culturally. If an English idiom has no equivalent, convey the same \
+  FEELING with a natural expression that lands the same emotional punch.
+- Dialogue must sound like REAL PEOPLE SPEAKING — with rhythm, emotion, personality. \
+  A gruff sailor sounds different from a nervous scholar in every language. Use slang, \
+  fragments, interjections, and broken sentences where the moment calls for them.
+- Captions and narration: evocative, atmospheric, with sensory rhythm. \
+  Short sentences for tension. Flowing ones for wonder. Beautiful but never stilted.
+- Comic energy: punchy, dramatic, alive. Exclamations should HIT. Whispers should feel \
+  intimate. Action should crackle.
+
+THE NATIVE READER TEST:
+Before finalizing each line, read it aloud in the target language and ask: \
+"Would a native speaker actually say this in real life or in a comic book they love?" \
+If the answer is "not quite — it sounds translated", REWRITE IT.
 
 GLOSSARY:
 - You may receive a "glossary" field — a JSON object mapping English terms/concepts to \
