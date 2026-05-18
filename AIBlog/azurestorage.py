@@ -15,14 +15,17 @@ connection_string = os.getenv('connection_string')
 container_name = os.getenv('aiblog_blob_name')
 table_name = os.getenv('aiblog_table_name') 
 
-# Create a TableServiceClient
-service_client = TableServiceClient.from_connection_string(conn_str=connection_string)
-# Get a reference to the table client
-table_client = service_client.get_table_client(table_name)
-# Create a BlobServiceClient
-blob_service_client = BlobServiceClient.from_connection_string(connection_string)
-# Create the container if it does not exist
-container_client = blob_service_client.get_container_client(container_name)
+if connection_string:
+    service_client = TableServiceClient.from_connection_string(conn_str=connection_string)
+    table_client = service_client.get_table_client(table_name)
+    blob_service_client = BlobServiceClient.from_connection_string(connection_string)
+    container_client = blob_service_client.get_container_client(container_name)
+else:
+    service_client = None
+    table_client = None
+    blob_service_client = None
+    container_client = None
+    print("WARNING: AIBlog Azure connection_string not set — storage functions will fail at call time")
 
 MAX_TABLE_PROPERTY_CHARS = 32000
 
