@@ -229,7 +229,7 @@ Make tangible, ORIGINAL progress on the following problem. Do not merely summari
    - Verify proof steps computationally
    - Perform symbolic manipulations and simplifications
 5. Develop rigorous arguments based on what you discover.
-6. Use web search ONLY when you need to verify a specific theorem, look up a known result, or check whether your approach has been attempted.
+6. Use web search ALWAYS to verify a specific theorem, look up a known result, or check whether your approach has been attempted.
 
 ## Historical Progress
 {history_snippet}

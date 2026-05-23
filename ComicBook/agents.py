@@ -647,7 +647,7 @@ EPISODE DESIGN (inside the outline):
   to maintain consistency. You may adapt small details but never contradict major plot points.
 
 WEB SEARCH:
-- You have a web search tool available. Use it whenever you need inspiration or research:
+- You have a web search tool available. Use it always to get inspiration or research:
   * When creating a new arc — search for trending topics, cultural events, interesting scientific
     discoveries, mythology, folklore, or anything that could spark a unique story idea.
   * When writing about a specific setting, culture, or technical subject — search for accuracy.
