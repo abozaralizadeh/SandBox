@@ -21,11 +21,14 @@ from ComicBook.azurestorage import (
     get_active_arc,
     get_arc_glossary,
     get_arc_story_outline,
+    get_first_episode,
+    get_key_panels,
     get_recent_arc_summaries,
     get_recent_episodes,
     save_arc_glossary,
     save_arc_story_outline,
     save_episode,
+    save_key_panel,
     start_new_arc as _storage_start_new_arc,
     update_arc_metadata,
 )
@@ -760,7 +763,13 @@ distinguishing features) AND the primary environment/setting for this episode.
 "watercolor whimsy", "pixel art retro").
 This reference image is your visual anchor. Every panel must be consistent with it.
 
-STEP 3 — GENERATE EACH PANEL:
+STEP 3 — GENERATE EACH PANEL (SEQUENTIAL — ONE AT A TIME):
+You MUST generate panels one by one, in order: call generate_panel_image for panel 1,
+wait for its result, then call it for panel 2, and so on. Never call multiple
+generate_panel_image tools in parallel. Each completed panel image is automatically
+added as a reference for the next panel — this is how visual consistency is maintained
+across the episode. Parallel calls skip this mechanism and produce drifting visuals.
+
 For every panel in the script, call generate_panel_image with:
 - prompt: A detailed image generation prompt. Include:
   * Character names and their specific visual traits (hair color, clothing, etc.)
@@ -771,6 +780,16 @@ For every panel in the script, call generate_panel_image with:
   * The art style (must be consistent across all panels)
 - reference_url: The URL returned from step 2 (the character reference sheet)
 - size: "wide", "tall", or "square" as specified in the script
+
+NEW CHARACTER RULE — after generating any panel that shows a character who does NOT
+appear on the original character sheet (a mid-arc introduction), immediately call
+mark_key_panel with:
+- image_url: the URL returned by generate_panel_image
+- character_name: the character's name
+- reason: one sentence (e.g., "First appearance of Lord Mara, the ghost queen")
+This stores the panel as a permanent visual anchor for all future episodes in this arc.
+If a MID-ARC CHARACTER REFERENCES section appears above the script, those characters
+are already registered — do NOT call mark_key_panel for them again.
 
 STEP 4 — ASSEMBLE LAYOUT:
 After ALL images are generated, call assemble_layout with:
@@ -825,15 +844,37 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
     else:
         logger.info("No active arc — Director will create a new one")
 
+    # Build a set of reference panel URLs for visual consistency across the arc.
+    # Order: most-recent episode panels first (immediate continuity), then first-episode
+    # panels (character-introduction anchor, especially important mid-arc and when new
+    # characters appear).  We hydrate HTML separately so the main `recent` list stays
+    # lightweight for the episode-summary context.
     prev_episode_images: list[str] = []
-    if recent:
-        last_ep_html = recent[0].get("html_content", "")
-        prev_episode_images = _extract_panel_images(last_ep_html)[:4]
+    if arc:
+        # Most-recent episode — hydrated so blob-stored HTML is fetched
+        recent_hydrated = get_recent_episodes(arc["RowKey"], limit=1, hydrate_html=True)
+        if recent_hydrated:
+            prev_episode_images.extend(
+                _extract_panel_images(recent_hydrated[0].get("html_content", ""))[:3]
+            )
+        # First episode of the arc — character-intro anchor (skip on episode 1 itself)
+        if int(arc.get("episodes_count", 0)) >= 2:
+            first_ep = get_first_episode(arc["RowKey"])
+            if first_ep:
+                for url in _extract_panel_images(first_ep.get("html_content", ""))[:2]:
+                    if url not in prev_episode_images:
+                        prev_episode_images.append(url)
+    logger.info("Arc reference panel pool: %d image(s)", len(prev_episode_images))
+
+    key_panels: list[dict] = get_key_panels(arc) if arc else []
+    logger.info("Key panels loaded: %d", len(key_panels))
 
     state: Dict[str, Any] = {
         "arc": arc,
         "episode_number": episode_number,
         "prev_episode_images": prev_episode_images,
+        "key_panels": key_panels,
+        "key_panel_urls": [p["url"] for p in key_panels if p.get("url")],
         "generated_panel_urls": [],
     }
 
@@ -1033,12 +1074,19 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
         logger.info("TOOL generate_panel_image called (size='%s', has_ref=%s, prompt='%s')",
                      size, bool(reference_url), prompt[:80])
         try:
-            image_urls = []
-            if reference_url:
-                image_urls.append(reference_url)
-            image_urls.extend(state["generated_panel_urls"][-2:])
-            image_urls.extend(state["prev_episode_images"][-2:])
-            image_urls = [u for u in image_urls if u]
+            seen: set[str] = set()
+            image_urls: list[str] = []
+            def _add(u: str) -> None:
+                if u and u not in seen:
+                    seen.add(u)
+                    image_urls.append(u)
+            _add(reference_url)                          # character sheet — always first
+            for u in state["key_panel_urls"][-3:]:       # mid-arc character key panels
+                _add(u)
+            for u in state["generated_panel_urls"][-2:]: # panels from this session
+                _add(u)
+            for u in state["prev_episode_images"][-2:]:  # arc history anchor
+                _add(u)
 
             if len(image_urls) > 1:
                 url = await create_image_with_references(prompt, image_urls, size)
@@ -1053,6 +1101,29 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
         except Exception as exc:
             logger.error("  -> Panel image generation FAILED: %s", exc)
             return {"error": str(exc)}
+
+    @function_tool
+    async def mark_key_panel(image_url: str, character_name: str, reason: str) -> Dict[str, Any]:
+        """Mark a generated panel as a permanent visual reference for a character introduced mid-arc.
+        Call this immediately after generate_panel_image whenever a panel shows a character who does
+        NOT appear on the original character sheet. The panel URL will be included as a reference
+        image for all future generate_panel_image calls in this arc."""
+        logger.info("TOOL mark_key_panel: character='%s', reason='%s'", character_name, reason)
+        a = state["arc"]
+        if not a:
+            return {"error": "No active arc"}
+        if not image_url:
+            return {"error": "Missing image_url"}
+        if image_url not in state["key_panel_urls"]:
+            state["key_panel_urls"].append(image_url)
+            state["key_panels"].append({
+                "url": image_url,
+                "character": character_name,
+                "episode": state["episode_number"],
+            })
+            save_key_panel(a["RowKey"], image_url, character_name, state["episode_number"])
+            logger.info("  -> Key panel stored for '%s' (arc=%s)", character_name, a["RowKey"])
+        return {"status": "marked", "character": character_name, "url": image_url}
 
     @function_tool
     async def assemble_layout(
@@ -1095,7 +1166,7 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
     cartoonist = Agent(
         name="Cartoonist",
         instructions=CARTOONIST_INSTRUCTIONS,
-        tools=[generate_character_sheet, generate_panel_image, assemble_layout],
+        tools=[generate_character_sheet, generate_panel_image, mark_key_panel, assemble_layout],
         model=model,
     )
 
@@ -1248,8 +1319,22 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
 
         # Step 3: Cartoonist
         logger.info("STEP 3/4 — Running Cartoonist (max_turns=30)...")
+        cartoonist_input = storyteller_script
+        if state["key_panels"]:
+            chars_lines = "\n".join(
+                f"- {p['character']} (introduced in episode {p['episode']}): {p['url']}"
+                for p in state["key_panels"] if p.get("url")
+            )
+            cartoonist_input = (
+                "=== MID-ARC CHARACTER REFERENCES ===\n"
+                "These characters were introduced after episode 1 and already have key panels stored.\n"
+                "Their images are automatically included as references in generate_panel_image.\n"
+                "Do NOT call mark_key_panel for any of these characters again.\n"
+                f"{chars_lines}\n"
+                "=== END REFERENCES ===\n\n"
+            ) + storyteller_script
         with trace(name="Cartoonist", run_type="chain"):
-            cartoonist_result = await Runner.run(cartoonist, storyteller_script, max_turns=30)
+            cartoonist_result = await Runner.run(cartoonist, cartoonist_input, max_turns=30)
         logger.info("Cartoonist finished.")
 
         # Step 4: Translations (Italian + Persian) — run sequentially

@@ -280,6 +280,48 @@ def _count_episodes(arc_id: str) -> int:
     return len(entities)
 
 
+def save_key_panel(arc_id: str, panel_url: str, character_name: str, episode_number: int) -> None:
+    """Append a key panel to the arc's key_panels list (capped at 20 most recent)."""
+    import json
+    try:
+        arc = arcs_table.get_entity(partition_key="arc", row_key=arc_id)
+    except Exception:
+        arc = {}
+    raw = arc.get("key_panels", "[]")
+    try:
+        panels = json.loads(raw) if raw else []
+    except Exception:
+        panels = []
+    panels.append({"url": panel_url, "character": character_name, "episode": episode_number})
+    panels = panels[-20:]  # keep most recent 20
+    content = json.dumps(panels, ensure_ascii=False)
+    arcs_table.upsert_entity(
+        entity={"PartitionKey": "arc", "RowKey": arc_id, "key_panels": content},
+        mode=UpdateMode.MERGE,
+    )
+
+
+def get_key_panels(arc: dict) -> list:
+    """Return the list of key panels stored for this arc."""
+    import json
+    raw = arc.get("key_panels", "")
+    if not raw:
+        return []
+    try:
+        return json.loads(raw)
+    except Exception:
+        return []
+
+
+def get_first_episode(arc_id: str) -> Optional[dict]:
+    """Return the oldest (first) episode of an arc with HTML hydrated — used as a character-anchor reference."""
+    episodes = list(episodes_table.query_entities(f"PartitionKey eq '{arc_id}'", results_per_page=200))
+    if not episodes:
+        return None
+    first = sorted(episodes, key=lambda x: x.get("RowKey", ""))[0]
+    return _hydrate_html_content(first)
+
+
 def get_recent_episodes(arc_id: str, limit: int = 3, hydrate_html: bool = True) -> List[dict]:
     episodes = list(episodes_table.query_entities(f"PartitionKey eq '{arc_id}'", results_per_page=200))
     episodes = _sort_by_rowkey(episodes)
