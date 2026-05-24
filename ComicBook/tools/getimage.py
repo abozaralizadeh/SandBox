@@ -36,6 +36,18 @@ def _resolve_size(size: str) -> str:
     return size_map.get(size, "1024x1024")
 
 
+def _resolve_quality(quality: str) -> str:
+    """Map a shared quality level to the model-specific parameter value.
+
+    gpt-image-1 accepts: "low", "medium", "high"
+    dall-e-3     accepts: "standard", "hd"
+    """
+    model = _get_model()
+    if model == "dall-e-3":
+        return "hd" if quality == "high" else "standard"
+    return quality if quality in ("low", "medium", "high") else "medium"
+
+
 async def _download_image_bytes(url: str) -> Optional[bytes]:
     if not url:
         return None
@@ -59,18 +71,19 @@ def _upload_result(result) -> str:
     return save_photo_to_blob(image_url)
 
 
-async def create_image(prompt: str, size: str = "square") -> str:
+async def create_image(prompt: str, size: str = "square", quality: str = "medium") -> str:
     """Generate an image from a text prompt. Returns the blob URL."""
     model = _get_model()
     result = await _get_client().images.generate(
         model=model,
         prompt=prompt,
         size=_resolve_size(size),
+        quality=_resolve_quality(quality),
     )
     return await asyncio.to_thread(_upload_result, result)
 
 
-async def create_image_with_reference(prompt: str, reference_url: str, size: str = "square") -> str:
+async def create_image_with_reference(prompt: str, reference_url: str, size: str = "square", quality: str = "medium") -> str:
     """Generate an image using a text prompt and a reference image for style/character consistency."""
     model = _get_model()
     reference_bytes = await _download_image_bytes(reference_url)
@@ -79,6 +92,7 @@ async def create_image_with_reference(prompt: str, reference_url: str, size: str
         "model": model,
         "prompt": prompt,
         "size": _resolve_size(size),
+        "quality": _resolve_quality(quality),
     }
     if reference_bytes and model != "dall-e-3":
         reference_file = BytesIO(reference_bytes)
@@ -93,6 +107,7 @@ async def create_image_with_references(
     prompt: str,
     image_urls: list[str],
     size: str = "square",
+    quality: str = "medium",
 ) -> str:
     """Generate an image using a text prompt and multiple reference images (up to 16).
 
@@ -104,7 +119,7 @@ async def create_image_with_references(
 
     if model == "dall-e-3":
         first = image_urls[0] if image_urls else ""
-        return await create_image_with_reference(prompt, first, size)
+        return await create_image_with_reference(prompt, first, size, quality)
 
     downloads = await asyncio.gather(
         *[_download_image_bytes(u) for u in image_urls[:16]]
@@ -118,7 +133,7 @@ async def create_image_with_references(
 
     if not files:
         result = await _get_client().images.generate(
-            model=model, prompt=prompt, size=_resolve_size(size),
+            model=model, prompt=prompt, size=_resolve_size(size), quality=_resolve_quality(quality),
         )
         return await asyncio.to_thread(_upload_result, result)
 
@@ -126,6 +141,7 @@ async def create_image_with_references(
         "model": model,
         "prompt": prompt,
         "size": _resolve_size(size),
+        "quality": _resolve_quality(quality),
         "image": files if len(files) > 1 else files[0],
     }
     result = await _get_client().images.edit(**kwargs)

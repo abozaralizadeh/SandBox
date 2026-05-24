@@ -548,8 +548,13 @@ ARC LIFECYCLE:
      Pick a different genre, different setting, different character archetypes, and a different art style.
    - Invent a completely fresh, creative story premise.
    - Choose an unexpected genre/tone combination.
-   - Create 2-4 compelling main characters with names, detailed visual descriptions,
-     and personality traits.
+   - Create 2-4 compelling main characters with names, personality traits, and
+     FULL VISUAL DESCRIPTIONS. For EVERY character who appears at any point in the
+     arc (including antagonists and supporting characters introduced in later episodes),
+     describe: hair color and style, eye color, skin tone, build, distinctive facial
+     features, and their exact outfit/costume. These descriptions are used to generate
+     the character reference sheet on episode 1, so every character must be fully
+     specified even if they don't appear until episode 5 or 8.
    - Pick a distinctive art style for this arc (e.g., "ink wash noir", "vibrant manga",
      "watercolor whimsy", "retro pixel art", "charcoal sketch", "pop art bold").
    - Design a color_theme as a JSON string that matches the arc's mood and genre. The theme \
@@ -757,11 +762,13 @@ descriptions, the art style, and every panel's requirements.
 
 STEP 2 — GENERATE CHARACTER REFERENCE SHEET:
 Call generate_character_sheet with:
-- description: A detailed description of ALL main characters (appearance, clothing, \
-distinguishing features) AND the primary environment/setting for this episode.
+- description: Descriptions of ALL characters from the FULL ARC CHARACTER ROSTER section
+  above (not just today's characters) plus the primary environment/setting. Include every
+  character who appears at any point in the arc — the sheet is generated once and reused
+  for the whole arc. For each character state: name, hair, eyes, skin, build, outfit.
 - style: The art style specified by the Director (e.g., "ink wash noir", "vibrant manga", \
 "watercolor whimsy", "pixel art retro").
-This reference image is your visual anchor. Every panel must be consistent with it.
+This reference image is your visual anchor for the entire arc. Every panel must be consistent with it.
 
 STEP 3 — GENERATE EACH PANEL (SEQUENTIAL — ONE AT A TIME):
 You MUST generate panels one by one, in order: call generate_panel_image for panel 1,
@@ -1040,15 +1047,21 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
                 logger.info("  -> Returning cached character sheet: %s", cached_url[:120])
                 return {"status": "success", "reference_url": cached_url, "style": style, "cached": True}
 
+        # Build the prompt from the full arc character roster when available, so
+        # characters who appear in future episodes are included in the sheet even
+        # if they are absent from today's script.
+        arc_chars = (state["arc"].get("characters", "") if state["arc"] else "") or description
         prompt = (
             f"Character and environment reference sheet, {style} art style. "
-            f"Show all characters clearly with distinct visual features, full body. "
-            f"Include the primary setting/environment in the background. "
-            f"Clean composition, labeled character positions. "
-            f"{description}"
+            f"Show ALL characters listed below clearly with full body, distinct visual features, "
+            f"face clearly visible, each labeled by name. "
+            f"Include the primary setting/environment as background. "
+            f"Clean grid-style composition with generous spacing between characters. "
+            f"No text overlays, no speech bubbles. "
+            f"Characters: {arc_chars}"
         )
         try:
-            url = await create_image(prompt, size="wide")
+            url = await create_image(prompt, size="wide", quality="high")
             logger.info("  -> Character sheet generated: %s", url[:120])
             if a:
                 update_arc_metadata(a["RowKey"], character_sheet_url=url)
@@ -1320,6 +1333,20 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
         # Step 3: Cartoonist
         logger.info("STEP 3/4 — Running Cartoonist (max_turns=30)...")
         cartoonist_input = storyteller_script
+
+        # Prepend full arc character roster so generate_character_sheet covers everyone,
+        # including characters who don't appear until future episodes.
+        arc_chars = state["arc"].get("characters", "") if state["arc"] else ""
+        if arc_chars:
+            cartoonist_input = (
+                "=== FULL ARC CHARACTER ROSTER ===\n"
+                "When calling generate_character_sheet (Step 2), include ALL characters listed here "
+                "in the description — even those absent from today's episode. The character sheet "
+                "is generated once for the whole arc and must show every character who will ever appear.\n"
+                f"{arc_chars}\n"
+                "=== END ROSTER ===\n\n"
+            ) + cartoonist_input
+
         if state["key_panels"]:
             chars_lines = "\n".join(
                 f"- {p['character']} (introduced in episode {p['episode']}): {p['url']}"
@@ -1332,7 +1359,7 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
                 "Do NOT call mark_key_panel for any of these characters again.\n"
                 f"{chars_lines}\n"
                 "=== END REFERENCES ===\n\n"
-            ) + storyteller_script
+            ) + cartoonist_input
         with trace(name="Cartoonist", run_type="chain"):
             cartoonist_result = await Runner.run(cartoonist, cartoonist_input, max_turns=30)
         logger.info("Cartoonist finished.")
