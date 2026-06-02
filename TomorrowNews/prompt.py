@@ -18,7 +18,12 @@ LANGUAGE_CONFIG = {
             "The newspaper title should be 'Tomorrow News - اخبار فردا'. "
             "Use right-to-left (RTL) layout by adding dir=\"rtl\" to the HTML body tag "
             "and using appropriate RTL CSS (text-align: right, direction: rtl). "
-            "All headlines, stories, and text must be in fluent, idiomatic Persian."
+            "All headlines, stories, and text must be in fluent, idiomatic Persian. "
+            "For typography, import and use the 'Vazirmatn' font from Google Fonts for body text "
+            "and 'Noto Naskh Arabic' for headlines to give it an elegant, official newspaper look. "
+            "Add this in the HTML <head>: "
+            '<link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;700;900&family=Noto+Naskh+Arabic:wght@400;700&display=swap" rel="stylesheet"> '
+            "Then set body { font-family: 'Vazirmatn', sans-serif; } and headlines (h1, h2, h3) { font-family: 'Noto Naskh Arabic', serif; }."
         ),
     },
     "it": {
@@ -49,15 +54,20 @@ def _get_rowkey(parsed_date, lang="en"):
 
 def _build_system_prompt(timestamp, next_day, lang="en"):
     lang_config = LANGUAGE_CONFIG.get(lang, LANGUAGE_CONFIG["en"])
-    base_prompt = f"""Using today's ({timestamp.strftime('%Y-%m-%d')}) actual newspaper as a foundation, \
-apply reasoning and analysis to predict future events. \
-Create the next day's ({next_day.strftime('%Y-%m-%d')}) edition of 'Tomorrow News,' \
-complete with imaginative yet plausible headlines and stories. \
-Avoid simply continuing or expanding on today's news—instead, \
-focus on predicting the next events and news that could arise as consequences of current happenings or emerge unexpectedly. \
-Make it feel like a genuine glimpse into the future of politics, geopolitics, economy, events, Culture, \
-Environment, Technology, Health, Security, Education, Science, Energy, Trade, Human Rights, Diplomacy, Military, \
-Infrastructure, Agriculture, Transportation, Media, Religion, Demographics, Finance, Law, Tourism, Sports, Migration and what come next!\
+    base_prompt = f"""You are producing the {next_day.strftime('%Y-%m-%d')} edition of 'Tomorrow News'. \
+Start by reading today's ({timestamp.strftime('%Y-%m-%d')}) real newspaper using the tool. \
+Your job is to predict realistic near-future events—NOT to repeat today's headlines and NOT to invent science fiction. \
+Think like an experienced political analyst, economist, or investigative journalist: \
+study today's news carefully, identify ongoing tensions, pending decisions, scheduled events, building trends, \
+and logical next steps, then predict what will realistically happen next. \
+Your predictions should be the kind a well-informed expert would make—grounded in real-world dynamics, \
+specific with real names, real places, and real institutions. Most stories should be natural progressions \
+of current affairs (a vote that is expected to pass, a negotiation likely to conclude, an economic indicator about to shift). \
+A few stories can be less obvious—connecting dots between separate events to foresee a consequence others might miss—\
+but they must still be plausible and rooted in facts, never fantastical or exaggerated. \
+Cover a wide range of domains: politics, geopolitics, economy, Culture, Environment, Technology, Health, Security, \
+Education, Science, Energy, Trade, Human Rights, Diplomacy, Military, Infrastructure, Agriculture, Transportation, \
+Media, Religion, Demographics, Finance, Law, Tourism, Sports, and Migration.\
 
 Next, design an HTML page for the newspaper. The layout should resemble a professional newspaper, optimized for both desktop and mobile screens. Ensure that the design includes:
 
@@ -72,6 +82,7 @@ Images for news stories: Use the image tool to create realistic photos that comp
 to create the best photo, think as a newspaper photographer and describe the photo with details and tell the tool explicitly to create a realistic photo.
 Be aware that the image tool has content filtering and cannot create any image, try to create images that are not going to filtered, an in case of an error raised by content filtering retry another photo instead of that.
 The layout should avoid unnecessary gaps and ensure that content is well-aligned and fits seamlessly into the space.
+CRITICAL LAYOUT RULE: All three columns (left, center, right) must be roughly equal in total content height. Do NOT leave any column short or empty at the bottom while another column is long. Distribute stories and images across all columns so they end at approximately the same vertical position. If one column is running short, add more story content or move a story into it. Every column must be filled from top to bottom—no blank space at the bottom of any column.
 Prioritize responsive design, so the layout adapts beautifully to both desktop and mobile screens.
 After creating the visual design and content, ensure the HTML is well-structured and ready to be rendered correctly by a browser, making it appear as a genuine newspaper page, with functional columns, images, and headings.
 
