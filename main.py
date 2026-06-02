@@ -60,17 +60,18 @@ def tomorrownewscontent():
     if referer:
         parsed_date = None
         date_param = request.args.get('dt')
+        lang = request.args.get('lang', 'en')
+        if lang not in ('en', 'fa', 'it'):
+            lang = 'en'
         if date_param:
             try:
-                # Parse the date parameter to a Python datetime object
                 from datetime import datetime
                 parsed_date = datetime.fromisoformat(date_param)
             except:
                 parsed_date = None
-        tomorrownews, datetime = gettomorrownews(parsed_date)
-        # Create a response object and add a custom header
+        tomorrownews, dt = gettomorrownews(parsed_date, lang=lang)
         response = make_response(tomorrownews)
-        response.headers['Timestamp'] = datetime  # Replace 'Custom-Header' and 'CustomValue' with your desired values
+        response.headers['Timestamp'] = dt
         return response
     else:
         return "404 Not Found", 404

@@ -1,10 +1,8 @@
-import getpass
 import os
-
 from typing import Annotated
 
 from TomorrowNews.tools.getimage import get_image_by_text
-from TomorrowNews.tools.getnews import get_todays_news_feed
+from TomorrowNews.tools.getnews import get_todays_news_feed, create_news_feed_tool, RSS_URLS
 from langchain_core.messages import BaseMessage
 from typing_extensions import TypedDict
 
@@ -23,49 +21,39 @@ if "AZURE_OPENAI_ENDPOINT" not in os.environ:
 class State(TypedDict):
     messages: Annotated[list, add_messages]
 
-graph_builder = StateGraph(State)
-
-newstool = get_todays_news_feed
-imagetool = get_image_by_text
-tools = [newstool, imagetool]
-
-from langchain_deepseek import ChatDeepSeek
-
-# llm = ChatDeepSeek(
-#     model=os.environ["AZURE_OPENAI_MODEL"],
-#     temperature=0,
-#     max_tokens=None,
-#     timeout=None,
-#     max_retries=2,
-#     api_key=os.environ["AZURE_OPENAI_API_KEY"],
-#     # other params...
-# )
-
 llm = AzureChatOpenAI(
-    azure_deployment=os.environ["AZURE_OPENAI_MODEL"],  # or your deployment
-    api_version=os.environ["AZURE_OPENAI_API_VERSION"],  # or your api version
+    azure_deployment=os.environ["AZURE_OPENAI_MODEL"],
+    api_version=os.environ["AZURE_OPENAI_API_VERSION"],
     temperature=1,
     max_tokens=None,
     timeout=None,
     max_retries=2,
-    # other params...
 )
 
-llm_with_tools = llm.bind_tools(tools)
+imagetool = get_image_by_text
 
-def agent(state: State):
-    return {"messages": [llm_with_tools.invoke(state["messages"])]}
 
-graph_builder.add_node("agent", agent)
+def create_news_graph(news_tool):
+    tools = [news_tool, imagetool]
+    llm_with_tools = llm.bind_tools(tools)
 
-tool_node = ToolNode(tools=tools)
-graph_builder.add_node("tools", tool_node)
+    graph_builder = StateGraph(State)
 
-graph_builder.add_conditional_edges(
-    "agent",
-    tools_condition,
-)
-# Any time a tool is called, we return to the chatbot to decide the next step
-graph_builder.add_edge("tools", "agent")
-graph_builder.set_entry_point("agent")
-news_graph = graph_builder.compile()
+    def agent(state: State):
+        return {"messages": [llm_with_tools.invoke(state["messages"])]}
+
+    graph_builder.add_node("agent", agent)
+    tool_node = ToolNode(tools=tools)
+    graph_builder.add_node("tools", tool_node)
+    graph_builder.add_conditional_edges("agent", tools_condition)
+    graph_builder.add_edge("tools", "agent")
+    graph_builder.set_entry_point("agent")
+    return graph_builder.compile()
+
+
+news_graphs = {
+    lang: create_news_graph(create_news_feed_tool(rss_url))
+    for lang, rss_url in RSS_URLS.items()
+}
+
+news_graph = news_graphs["en"]

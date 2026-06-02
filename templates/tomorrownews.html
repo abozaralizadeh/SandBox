@@ -202,6 +202,22 @@
             margin-bottom: 10px;
         }
 
+        /* Language selector */
+        .language-select {
+            padding: 8px 12px;
+            margin-left: 15px;
+            font-size: 14px;
+            border: 1px solid #a7a7a7;
+            border-radius: 5px;
+            background-color: white;
+            cursor: pointer;
+        }
+
+        .language-select:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
         /* Action buttons */
         .date-picker-actions {
             display: flex;
@@ -242,6 +258,11 @@
         <button id="previousBtn">◀</button>
         <span class="date-display" id="currentDate">2025-01-01 00:00</span>
         <button id="nextBtn">▶</button>
+        <select id="languageSelect" class="language-select">
+            <option value="en" selected>English</option>
+            <option value="fa">فارسی</option>
+            <option value="it">Italiano</option>
+        </select>
     </div>
 
     <!-- Date Picker Container -->
@@ -336,20 +357,37 @@
             currentDate.setMinutes(0, 0, 0);
         }
 
+        // Multi-language support: entries before this date are English-only
+        const MULTI_LANG_START_DATE = new Date("2026-06-02T00:00:00");
+
         // Global variables for date picker
         let selectedDate = new Date(currentDate);
         let displayedMonth = selectedDate.getMonth();
         let displayedYear = selectedDate.getFullYear();
 
+        function getSelectedLang() {
+            return document.getElementById('languageSelect').value;
+        }
+
+        function updateLanguageDropdown() {
+            const langSelect = document.getElementById('languageSelect');
+            if (currentDate < MULTI_LANG_START_DATE) {
+                langSelect.disabled = true;
+                langSelect.value = 'en';
+            } else {
+                langSelect.disabled = false;
+            }
+        }
+
         function updateIframe() {
-            //const formattedDate = currentDate.toISOString();
-            var tzoffset = (currentDate).getTimezoneOffset() * 60000; //offset in milliseconds
+            var tzoffset = (currentDate).getTimezoneOffset() * 60000;
             var localISOTime = (new Date(currentDate - tzoffset)).toISOString().slice(0, -1);
-            
-            // Update URL with current date (date only)
+
             updateUrlWithDate(currentDate);
-            
-            fetch(`/tomorrownewscontent?dt=${encodeURIComponent(localISOTime)}`)
+            updateLanguageDropdown();
+
+            const lang = getSelectedLang();
+            fetch(`/tomorrownewscontent?dt=${encodeURIComponent(localISOTime)}&lang=${lang}`)
                 .then(response => {
                     const timestamp = response.headers.get('Timestamp');
                     currentDate = new Date(timestamp);
@@ -359,6 +397,7 @@
                         currentDate.setMinutes(0, 0, 0);
                     }
                     document.getElementById('currentDate').textContent = currentDate.toLocaleString();
+                    updateLanguageDropdown();
                     return response.text();
                 })
                 .then(htmlContent => {
@@ -401,6 +440,13 @@
             } else {
                 currentDate.setHours(currentDate.getHours() + 1); // Increase by 1 hour before January 27th
             }
+            updateIframe();
+        });
+
+        // Language selector: reload content when changed
+        document.getElementById('languageSelect').addEventListener('change', () => {
+            document.getElementById('spinner').style.display = 'block';
+            document.getElementById('newsIframe').style.display = 'none';
             updateIframe();
         });
 

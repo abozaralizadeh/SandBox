@@ -144,14 +144,13 @@ def upload_image_bytes_to_blob(image_bytes):
 
     return blob_client.url
 
-def insert_history(rowkey, html_content):
-    # Define the entity (row) to insert
+def insert_history(rowkey, html_content, language="en"):
     entity = {
-        "PartitionKey": "getimagetool",  # Logical grouping for entities
-        "RowKey": rowkey,                # Unique identifier within the partition
+        "PartitionKey": "getimagetool",
+        "RowKey": rowkey,
+        "language": language,
     }
     _attach_html_payload(entity, html_content)
-    # Insert the entity
     try:
         table_client.create_entity(entity=entity)
         print("Row inserted successfully!")
