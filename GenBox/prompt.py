@@ -92,7 +92,7 @@ Consider implementing a new taxation policy focused on environmental sustainabil
     ],
     "temperature": 0.75,
     "top_p": 0.95,
-    "max_tokens": 2000
+    "max_completion_tokens": 2000
   }
 
   if date:
@@ -143,7 +143,8 @@ Consider implementing a new taxation policy focused on environmental sustainabil
       response = requests.post(ENDPOINT, headers=headers, json=payload)
       response.raise_for_status()  # Will raise an HTTPError if the HTTP request returned an unsuccessful status code
   except requests.RequestException as e:
-      raise SystemExit(f"Failed to make the request. Error: {e}")
+      body = getattr(e.response, "text", "<no response body>") if e.response is not None else "<no response>"
+      raise SystemExit(f"Failed to make the request. Error: {e}\nResponse body: {body}")
 
   if response and response.json() and \
     response.json()["choices"][0]["message"]["content"]:
