@@ -26,7 +26,8 @@ async def get_react_agent():
     savetitletool = set_title
     imagetool = get_image_by_text
     tools = [{"type": "web_search"}, imagetool, savetitletool]
-    tools += await get_browsewebtools()
+    browse_tools, browser_aclose = await get_browsewebtools()
+    tools += browse_tools
 
     max_input_tokens = int(os.environ.get("AZURE_OPENAI_MAX_INPUT_TOKENS", "270000"))
     tool_token_limit = int(
@@ -60,4 +61,4 @@ async def get_react_agent():
 
     from langgraph.prebuilt import create_react_agent
     react_agent = create_react_agent(llm, tools=tools)
-    return react_agent
+    return react_agent, browser_aclose

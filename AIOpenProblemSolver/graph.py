@@ -40,7 +40,7 @@ async def get_open_deep_search_agent():
 
     #search_tools: List = [ddg_search_results, ddg_search, tavily_search]
     search_tools: List = [{ 'type': "web_search" }, ddg_search_results, ddg_search, tavily_search]
-    browse_tools = await get_browse_web_tools()
+    browse_tools, browser_aclose = await get_browse_web_tools()
     math_tools: List = [python_math_sandbox, symbolic_calculator]
     tools = [_truncate_tool_output(tool) for tool in [*math_tools, *search_tools, *browse_tools]]
 
@@ -86,7 +86,7 @@ You are not a research assistant. You are an independent mathematical mind. You 
             tools=tools,
             system_prompt=instructions,
         )
-        return agent
+        return agent, browser_aclose
     except TypeError as exc:
         if "post_model_hook" not in str(exc):
             raise
@@ -96,7 +96,7 @@ You are not a research assistant. You are an independent mathematical mind. You 
             llm,
             tools=tools,
             prompt=instructions,
-        )
+        ), browser_aclose
 
 
 MAX_TOOL_OUTPUT_CHARS = int(os.getenv("AIOPS_TOOL_MAX_CHARS", "12000"))

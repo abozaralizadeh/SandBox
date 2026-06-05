@@ -81,7 +81,7 @@ async def getaiblog(parsed_date):
     lastdayblogs = get_last_n_rows(30)
     lastdayblogstitles = [row.get("title", "") for row in lastdayblogs]
 
-    react_agent = await get_react_agent()
+    react_agent, browser_aclose = await get_react_agent()
     prompt = f"""
     Search and Identify a Narrow Topic:
 
@@ -134,13 +134,22 @@ async def getaiblog(parsed_date):
     - No extra markdown or explanations—just the pure HTML. (not even ```html at start and ``` at the end). Your response will be parsed directly in a browser, so it should render correctly as HTML.
     """
 
-    async for event in react_agent.astream(
-        {"messages": [("system", prompt)]},
-        {"recursion_limit": 1000}
-    ):
-        print("event: ", event)
-        for value in event.values():
-            print("React Agent:", value["messages"][-1].content)
+    try:
+        async for event in react_agent.astream(
+            {"messages": [("system", prompt)]},
+            {"recursion_limit": 1000}
+        ):
+            print("event: ", event)
+            for value in event.values():
+                print("React Agent:", value["messages"][-1].content)
+    finally:
+        # Tear down the Playwright browser/driver inside this event loop, before
+        # Flask's per-request loop closes — prevents 'Event loop is closed' on GC.
+        # Swallow teardown errors so they can't mask an agent exception in flight.
+        try:
+            await browser_aclose()
+        except Exception as cleanup_error:
+            print("Browser cleanup failed:", cleanup_error)
 
     last_message = value["messages"][-1]
     # When the web_search tool is active, responses arrive as structured chunks.

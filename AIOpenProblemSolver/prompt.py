@@ -206,7 +206,7 @@ def _history_context(problem: str, limit: int = 5) -> str:
 
 
 async def _run_iteration(problem: str, today: datetime) -> Dict[str, Any]:
-    agent = await get_open_deep_search_agent()
+    agent, browser_aclose = await get_open_deep_search_agent()
     history_snippet = _history_context(problem)
 
     system_prompt = f"""
@@ -259,7 +259,16 @@ Task: Make original progress on the problem today. Think creatively, compute ext
 """
 
     agent_input = {"messages": [("system", system_prompt.strip()), ("user", user_prompt.strip())]}
-    final_state = await agent.ainvoke(agent_input, {"recursion_limit": GRAPH_RECURSION_LIMIT})
+    try:
+        final_state = await agent.ainvoke(agent_input, {"recursion_limit": GRAPH_RECURSION_LIMIT})
+    finally:
+        # Tear down the Playwright browser/driver inside this event loop, before
+        # Flask's per-request loop closes — prevents 'Event loop is closed' on GC.
+        # Swallow teardown errors so they can't mask an agent exception in flight.
+        try:
+            await browser_aclose()
+        except Exception as cleanup_error:
+            print("Browser cleanup failed:", cleanup_error)
 
     payload = _extract_message_container(final_state)
 

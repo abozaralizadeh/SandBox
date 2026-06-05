@@ -23,11 +23,21 @@ async def create_async_playwright_browser(
     from playwright.async_api import async_playwright
     playwright = await async_playwright().start()
     browser = await playwright.chromium.launch(headless=headless, args=args)
-    return browser
+    return browser, playwright
 
 
 async def get_browse_web_tools():
+    """Return (tools, aclose). Callers MUST ``await aclose()`` once finished so the
+    Chromium subprocess and Playwright driver are torn down before the event loop
+    closes — otherwise GC finalizes them later and raises 'Event loop is closed'."""
     from langchain_community.agent_toolkits import PlayWrightBrowserToolkit
-    async_browser = await create_async_playwright_browser()
+    async_browser, playwright = await create_async_playwright_browser()
     toolkit = PlayWrightBrowserToolkit.from_browser(async_browser=async_browser)
-    return toolkit.get_tools()
+
+    async def aclose():
+        try:
+            await async_browser.close()
+        finally:
+            await playwright.stop()
+
+    return toolkit.get_tools(), aclose
