@@ -24,7 +24,7 @@ class State(TypedDict):
 llm = AzureChatOpenAI(
     azure_deployment=os.environ["AZURE_OPENAI_MODEL"],
     api_version=os.environ["AZURE_OPENAI_API_VERSION"],
-    temperature=1.1,
+    temperature=1.3,
     max_tokens=None,
     timeout=None,
     max_retries=2,

@@ -55,27 +55,25 @@ def _get_rowkey(parsed_date, lang="en"):
 def _build_system_prompt(timestamp, next_day, lang="en"):
     lang_config = LANGUAGE_CONFIG.get(lang, LANGUAGE_CONFIG["en"])
     base_prompt = f"""You are a journalist writing the {next_day.strftime('%Y-%m-%d')} edition of 'Tomorrow News'. \
-Start by reading today's ({timestamp.strftime('%Y-%m-%d')}) real newspaper using the tool. \
-Your job is to predict realistic near-future events—NOT to repeat today's headlines and NOT to invent science fiction. \
-Think like an experienced political analyst, economist, or investigative journalist: \
-study today's news carefully, identify ongoing tensions, pending decisions, scheduled events, building trends, \
-and logical next steps, then predict what will realistically happen next. \
-Your predictions should be the kind a well-informed expert would make—grounded in real-world dynamics, \
-specific with real names, real places, and real institutions. Most stories should be natural progressions \
-of current affairs (a vote that is expected to pass, a negotiation likely to conclude, an economic indicator about to shift). \
-A few stories can be less obvious—connecting dots between separate events to foresee a consequence others might miss—\
-but they must still be plausible and rooted in facts, never fantastical or exaggerated. \
-Then write tomorrow's newspaper as if the events have ALREADY HAPPENED. \
-Write every headline and story in the past tense or present tense, exactly as a real newspaper would. \
-NEVER use phrases like "most likely", "it is expected", "probably", "predicted", "might happen", "could unfold", \
-"forecast", "analysts believe", or any speculative language. \
-Write with certainty: "Parliament passed the bill", "The minister resigned", "Markets surged after..."—\
-as if you are reporting facts, not guesses. \
-To decide what to write about: study today's real news, identify ongoing tensions, pending decisions, scheduled events, \
-and building trends, then determine the most realistic next developments. \
-Keep it grounded in real-world dynamics with real names, places, and institutions. \
-Most stories should be natural progressions of current affairs. \
-A few can connect less-obvious dots, but everything must remain plausible—no science fiction, no exaggeration. \
+First, read today's ({timestamp.strftime('%Y-%m-%d')}) real newspaper using the tool to understand the current situation. \
+
+CRITICAL: Every single story must report a NEW EVENT that has NOT happened yet—a development that occurs AFTER today. \
+Do NOT describe, recap, or re-explain today's existing news. That is the single most important rule. \
+If today's paper reports "negotiations are ongoing", your story is what the negotiations PRODUCED (a deal signed, a walkout, a new demand). \
+If today reports "a storm is approaching", your story is the storm's AFTERMATH (the damage, the response, the death toll). \
+If today reports "a company plans a launch", your story is the launch HAPPENING (the result, the reaction, the stock move). \
+Every headline must be an EVENT THAT MOVED THINGS FORWARD, not a status update on the present. \
+
+Method: for each major thread in today's news, ask "what is the most likely NEXT thing to happen?" and then write that next thing \
+as a concrete, finished event. Take a reasonable hypothetical step forward in the chain of cause and effect. \
+Stay grounded—real names, real places, real institutions, plausible outcomes. No science fiction, no sensationalism, no exaggeration. \
+But you MUST commit to specific outcomes: who won, what number, which decision, what consequence. \
+
+Write everything as if it has ALREADY HAPPENED—past or present tense, exactly like a real newspaper reporting completed events. \
+NEVER use speculative language: no "most likely", "expected to", "probably", "could", "might", "forecast", "analysts predict", "is set to". \
+Write with full certainty: "Parliament passed the bill", "The ceasefire collapsed after...", "Markets surged 4% as...". \
+A reader landing on this page should believe they are reading real news from the future, full of fresh events—not a summary of today. \
+
 Cover a wide range of domains: politics, geopolitics, economy, Culture, Environment, Technology, Health, Security, \
 Education, Science, Energy, Trade, Human Rights, Diplomacy, Military, Infrastructure, Agriculture, Transportation, \
 Media, Religion, Demographics, Finance, Law, Tourism, Sports, and Migration.\
