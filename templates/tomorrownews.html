@@ -190,6 +190,16 @@
             color: #ccc;
         }
 
+        .calendar-grid .day.disabled {
+            color: #ddd;
+            cursor: not-allowed;
+            pointer-events: none;
+        }
+
+        .calendar-grid .day.disabled:hover {
+            background-color: transparent;
+        }
+
         /* Time picker for dates before Jan 25, 2025 */
         .time-picker {
             margin-top: 15px;
@@ -315,18 +325,28 @@
     </div>
 
     <script>
+        const SUPPORTED_LANGS = ['en', 'fa', 'it'];
+
         // Function to get URL hash fragment
         function getUrlHash() {
             return window.location.hash.substring(1); // Remove the # symbol
         }
 
-        // Function to update URL with current date using hash fragment (date only)
+        // Function to read language from the URL query param (?lang=)
+        function getUrlLang() {
+            const lang = new URLSearchParams(window.location.search).get('lang');
+            return SUPPORTED_LANGS.includes(lang) ? lang : 'en';
+        }
+
+        // Function to update URL with current date (hash) and language (query param)
         function updateUrlWithDate(date) {
             const year = date.getFullYear();
             const month = String(date.getMonth() + 1).padStart(2, '0');
             const day = String(date.getDate()).padStart(2, '0');
             const dateOnly = `${year}-${month}-${day}`;
-            window.location.hash = dateOnly;
+            const params = new URLSearchParams(window.location.search);
+            params.set('lang', getSelectedLang());
+            history.replaceState(null, '', `${window.location.pathname}?${params.toString()}#${dateOnly}`);
         }
 
         // Initialize currentDate from URL hash or default to current date
@@ -359,6 +379,18 @@
 
         // Multi-language support: entries before this date are English-only
         const MULTI_LANG_START_DATE = new Date("2026-06-02T00:00:00");
+
+        // Latest selectable date: today (future days have no real news to base predictions on)
+        function getMaxSelectableDate() {
+            const d = new Date();
+            d.setHours(0, 0, 0, 0);
+            return d;
+        }
+
+        // Clamp the initial date so a future date (e.g. from a stale URL) can't trigger generation
+        if (currentDate > getMaxSelectableDate()) {
+            currentDate = getMaxSelectableDate();
+        }
 
         // Global variables for date picker
         let selectedDate = new Date(currentDate);
@@ -434,12 +466,18 @@
         });
 
         document.getElementById('nextBtn').addEventListener('click', () => {
-            if (currentDate >= new Date("2025-01-25T00:00:00")) {
-                currentDate.setHours(0, 0, 0, 0);
-                currentDate.setHours(currentDate.getHours() + 24); // Increase by 24 hours after January 27th
+            const candidate = new Date(currentDate);
+            if (candidate >= new Date("2025-01-25T00:00:00")) {
+                candidate.setHours(0, 0, 0, 0);
+                candidate.setHours(candidate.getHours() + 24); // Increase by 24 hours after January 27th
             } else {
-                currentDate.setHours(currentDate.getHours() + 1); // Increase by 1 hour before January 27th
+                candidate.setHours(candidate.getHours() + 1); // Increase by 1 hour before January 27th
             }
+            // Do not navigate into the future
+            if (candidate > getMaxSelectableDate()) {
+                return;
+            }
+            currentDate = candidate;
             updateIframe();
         });
 
@@ -543,7 +581,10 @@
                 
                 // Get days from previous month to fill in the first row
                 const daysInPrevMonth = new Date(displayedYear, displayedMonth, 0).getDate();
-                
+
+                // Latest selectable date (today) — future days are disabled
+                const maxDate = getMaxSelectableDate();
+
                 // Add days from previous month
                 for (let i = 0; i < firstDay; i++) {
                     const dayElement = document.createElement('div');
@@ -551,7 +592,11 @@
                     dayElement.textContent = daysInPrevMonth - firstDay + i + 1;
                     // Set date for previous month days
                     const prevMonthDate = new Date(displayedYear, displayedMonth - 1, daysInPrevMonth - firstDay + i + 1);
-                    dayElement.addEventListener('click', () => selectDay(prevMonthDate));
+                    if (prevMonthDate > maxDate) {
+                        dayElement.classList.add('disabled');
+                    } else {
+                        dayElement.addEventListener('click', () => selectDay(prevMonthDate));
+                    }
                     calendarGrid.appendChild(dayElement);
                 }
 
@@ -563,13 +608,17 @@
                     
                     // Check if this day is the selected day
                     const currentMonthDate = new Date(displayedYear, displayedMonth, i);
-                    if (currentMonthDate.getDate() === selectedDate.getDate() && 
-                        currentMonthDate.getMonth() === selectedDate.getMonth() && 
+                    if (currentMonthDate.getDate() === selectedDate.getDate() &&
+                        currentMonthDate.getMonth() === selectedDate.getMonth() &&
                         currentMonthDate.getFullYear() === selectedDate.getFullYear()) {
                         dayElement.classList.add('selected');
                     }
-                    
-                    dayElement.addEventListener('click', () => selectDay(currentMonthDate));
+
+                    if (currentMonthDate > maxDate) {
+                        dayElement.classList.add('disabled');
+                    } else {
+                        dayElement.addEventListener('click', () => selectDay(currentMonthDate));
+                    }
                     calendarGrid.appendChild(dayElement);
                 }
 
@@ -582,7 +631,11 @@
                     dayElement.textContent = i;
                     // Set date for next month days
                     const nextMonthDate = new Date(displayedYear, displayedMonth + 1, i);
-                    dayElement.addEventListener('click', () => selectDay(nextMonthDate));
+                    if (nextMonthDate > maxDate) {
+                        dayElement.classList.add('disabled');
+                    } else {
+                        dayElement.addEventListener('click', () => selectDay(nextMonthDate));
+                    }
                     calendarGrid.appendChild(dayElement);
                 }
 
@@ -619,6 +672,9 @@
 
         // Initialize the date picker
         document.addEventListener('DOMContentLoaded', initDatePicker);
+
+        // Restore language selection from the URL query param before the first load
+        document.getElementById('languageSelect').value = getUrlLang();
 
         // Initial iframe load
         updateIframe();
