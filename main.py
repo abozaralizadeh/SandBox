@@ -12,6 +12,7 @@ from TomorrowNews.prompt import *
 from ComicBook.prompt import get_comicbook
 from ComicBook.azurestorage import get_episode_index, get_arc_list
 from GenBox.prompt import get_llm_response
+from GenBox.video import ensure_generation_started
 from AIOpenProblemSolver.prompt import get_problem_history
 from AIOpenProblemSolver.azurestorage import (
     get_problem_details,
@@ -152,6 +153,20 @@ async def aiblogcontent():
 @app.route('/genbox')
 def genbox():
     return render_template('tv.html')
+
+@app.route('/genbox-video-status', methods=['GET'])
+def genbox_video_status():
+    # Lazily kicks off background generation on the first poll for an eligible date,
+    # then reports {status, video_url}. Non-blocking.
+    date_param = request.args.get('date')
+    parsed_date = None
+    if date_param:
+        try:
+            from datetime import datetime
+            parsed_date = datetime.fromisoformat(date_param).date()
+        except ValueError:
+            parsed_date = None
+    return jsonify(ensure_generation_started(parsed_date))
 
 @app.route('/ai-open-problem-solver', methods=['GET'])
 def ai_open_problem_solver():

@@ -62,7 +62,7 @@
       font-family: monospace;
       padding: 10px;
       overflow: hidden;
-      position: static;
+      position: relative;
       margin-top: -12px;
       margin-left: -113px;
       border-radius: 75px;
@@ -82,6 +82,18 @@
       display: inline-block;
       animation: scroll 30s linear infinite;
       white-space: pre-line;
+    }
+
+    /* News-anchor video fills the CRT screen; #screen's mask fades its edges too. */
+    #tvVideo {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      border-radius: 75px;
+      background: #000;
     }
 
     #button1 {
@@ -248,6 +260,7 @@
   <div id="tv">
     <div id="screen">
       <p id="content"></p>
+      <video id="tvVideo" playsinline preload="auto" style="display:none"></video>
     </div>
     <button id="button1"></button>
     <button id="button2"></button>
@@ -257,6 +270,15 @@
 
   <script>
     let currentDate = new Date();
+
+    // ---- text / video mode state ----
+    let mode = 'text';            // 'text' | 'video'
+    let videoAvailable = false;   // a ready video exists for currentDate
+    let userInteracted = false;   // gate unmuted autoplay behind a user gesture
+    let currentVideoUrl = '';
+    let statusPollTimer = null;
+    const videoEl = document.getElementById('tvVideo');
+    const contentEl = document.getElementById('content');
 
     function getContent(date = null) {
       const url = date ? `/get-string?date=${date.toISOString()}` : '/get-string';
@@ -281,7 +303,73 @@
       });
     }
 
+    function sameDay(a, b) {
+      return a && b &&
+        a.getFullYear() === b.getFullYear() &&
+        a.getMonth() === b.getMonth() &&
+        a.getDate() === b.getDate();
+    }
+
+    function showText() {
+      mode = 'text';
+      try { videoEl.pause(); } catch (e) {}
+      videoEl.style.display = 'none';
+      contentEl.style.display = 'block';
+    }
+
+    function showVideo(url) {
+      if (!url) return;
+      mode = 'video';
+      if (videoEl.getAttribute('src') !== url) videoEl.src = url;
+      videoEl.muted = !userInteracted;   // before a gesture, only muted autoplay is allowed
+      videoEl.style.display = 'block';
+      contentEl.style.display = 'none';
+      videoEl.play().catch(() => {});
+    }
+
+    async function fetchVideoStatus(date) {
+      try {
+        const url = `/genbox-video-status?date=${(date || new Date()).toISOString()}`;
+        const r = await fetch(url);
+        if (!r.ok) return { status: 'absent', video_url: '' };
+        return await r.json();
+      } catch (e) {
+        return { status: 'absent', video_url: '' };
+      }
+    }
+
+    // Poll the status endpoint; the first poll lazily starts background generation.
+    function startStatusPolling(date) {
+      clearInterval(statusPollTimer);
+      videoAvailable = false;
+      currentVideoUrl = '';
+      const pollDate = date ? new Date(date) : new Date();
+      const poll = async () => {
+        const s = await fetchVideoStatus(pollDate);
+        if (s.status === 'ready' && s.video_url) {
+          clearInterval(statusPollTimer);
+          videoAvailable = true;
+          currentVideoUrl = s.video_url;
+          // Auto-switch to video (default mode) once it's ready, if still on this day
+          // and the user has interacted (so the anchor's audio is allowed to play).
+          if (sameDay(pollDate, currentDate) && userInteracted) {
+            showVideo(currentVideoUrl);
+          }
+        } else if (s.status === 'generating') {
+          // keep polling
+        } else {
+          // absent | disabled | failed -> no video for this day
+          clearInterval(statusPollTimer);
+          videoAvailable = false;
+        }
+      };
+      poll();
+      statusPollTimer = setInterval(poll, 4000);
+    }
+
     async function displayServerText(date = null) {
+      // Each day (re)load starts on text; video is offered/auto-switched when ready.
+      showText();
       const contentDiv = document.getElementById('content');
       let scrollingText = document.getElementById('scrollingText');
 
@@ -294,6 +382,8 @@
 
       const serverText = await fetchServerText(date);
       scrollingText.innerHTML = serverText + '\n<a href="https://medium.com/@abozar-alizadeh/exploring-ai-driven-governance-building-a-virtual-world-where-ai-rules-22419690a409" target="_blank" class="custom-link">Discover More!</a>'; // Only update the text content
+
+      startStatusPolling(date);
     }
 
     const button1 = document.getElementById('button1');
@@ -301,6 +391,7 @@
     button1.addEventListener('click', () => {
       const audio = new Audio('static/click.mp3');
       audio.play();
+      userInteracted = true;
       rotationAngle1 += 45;
       button1.style.transform = `rotate(${rotationAngle1}deg)`;
 
@@ -313,6 +404,7 @@
     button2.addEventListener('click', () => {
       const audio = new Audio('static/click2.mp3');
       audio.play();
+      userInteracted = true;
       rotationAngle2 -= 45;
       button2.style.transform = `rotate(${rotationAngle2}deg)`;
 
@@ -337,8 +429,17 @@
     button3.addEventListener('click', () => {
       const audio = new Audio('static/click3.mp3');
       audio.play();
+      userInteracted = true;
       rotationAngle3 += 90;
       button3.style.transform = `rotate(${rotationAngle3}deg)`;
+
+      // In video mode, button3 pauses/plays the clip.
+      if (mode === 'video') {
+        if (videoEl.paused) { videoEl.play().catch(() => {}); }
+        else { videoEl.pause(); }
+        return;
+      }
+
       const scrollingText = document.getElementById('scrollingText');
 
       clickCount3++;
@@ -363,25 +464,25 @@
       }
     });
 
+    // Lowest button: toggle between scrolling text and the news-anchor video.
     const button4 = document.getElementById('button4');
     let rotationAngle4 = 0;
     button4.addEventListener('click', () => {
       const audio = new Audio('static/click4.mp3');
       audio.play();
+      userInteracted = true;
       rotationAngle4 -= 90;
       button4.style.transform = `rotate(${rotationAngle4}deg)`;
 
-      clickCount3++;
-
-      const scrollingText = document.getElementById('scrollingText');
-
-      if (clickCount3 % 2 === 1) {
-        // Pause scrolling animation
-        scrollingText.style.animationPlayState = 'paused';
+      if (mode === 'text') {
+        const url = currentVideoUrl || videoEl.getAttribute('src');
+        if (videoAvailable && url) {
+          showVideo(url);
+        }
+        // No video for this day yet -> stay on text (graceful fallback).
       } else {
-        scrollingText.style.animationPlayState = 'running';
+        showText();
       }
-
     });
 
     displayServerText();

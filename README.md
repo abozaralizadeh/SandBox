@@ -100,9 +100,52 @@ https://SandBoxes.Live/tomorrownews
 
 This experimental project explores the potential of AI as an autonomous decision-maker for a virtual world. Using Azure OpenAI and a structured prompt-response loop, the system generates daily high-level decisions on critical areas such as economy, society, environment, and global politics. Each decision is designed to be realistic, impactful, and ethically informed, balancing immediate outcomes with long-term sustainability. The goal is to create an engaging and evolving narrative that demonstrates the capabilities of generative AI while inviting users to reflect on governance and the complexities of decision-making in a simulated world. [Read more](https://abozar-alizadeh.medium.com/exploring-ai-driven-governance-building-a-virtual-world-where-ai-rules-22419690a409)
 
+The decisions are presented on a retro CRT television: the classic experience scrolls the day's decision as green terminal text, and the four physical knobs let you step backward/forward through the timeline and pause or reverse the scroll.
+
 I invite you to explore the very simple interface at https://SandBoxes.Live/genbox, where you can witness the AI’s daily decisions and follow the evolving narrative of this virtual world.
 
 ![TV](https://github.com/abozaralizadeh/SandBox/blob/main/static/sample.png?raw=true)
+
+### AI News Anchor (Sora 2 Video)
+
+GenBox now broadcasts each daily decision as an AI-generated **TV news segment** that plays on the CRT in place of the scrolling text. Instead of reading the (often long) decision verbatim, it's covered like a real bulletin — a short anchor headline ("The AI Government today decided to…"), a field report with b-roll, and a brief interview — all with natively generated speech and lip-sync from **Sora 2 on Azure OpenAI**. When a video is available it becomes the default display mode; the original scrolling text is always one button-press away.
+
+#### Key Features
+- **News-Bulletin Format**: An **OpenAI Agents SDK** "Producer" agent distills the decision (not a verbatim read) into a segmented shot list — **anchor lead → field report → interview → sign-off** — with every spoken line sized to Sora's 4/8/12-second clip limits.
+- **Anchor, Reporter & Interviewee**: Beyond the studio anchor, the segment features an on-location **correspondent** and an **interviewee** (an official, expert, or citizen), each rendered as their own on-camera speaker.
+- **Native Speech & B-Roll**: Sora 2 generates synchronized audio and dialogue directly, so each speaker actually talks. The producer interleaves face-free b-roll cutaways (cityscapes, factories, solar farms, maps) to illustrate the report.
+- **Scene Consistency**: Each speaker is kept visually stable across their clips via a fixed character/set description plus a stable per-speaker seed (the anchor has a fixed studio "bible"), while consecutive b-roll shots are chained by feeding the previous clip's last frame as the next clip's first frame (`input_reference`).
+- **Seamless Stitching**: All clips are merged with a bundled static `ffmpeg` (via `imageio-ffmpeg`, no system package required) into a single MP4 stored in Azure Blob Storage and streamed back to the TV.
+- **Non-Blocking Generation**: Rendering runs in a background thread guarded by a single-flight table lock, so the page never hangs — the TV shows text immediately and switches to video automatically once the segment is ready. Status is polled via `/genbox-video-status` and cached per day.
+- **CRT Controls, Now for Video**: The **lowest knob** toggles between the classic scrolling text and the news video. The back/next knobs move through the timeline (loading each day's video when available), and the pause knob pauses/plays the clip. Older, text-only decisions keep working exactly as before.
+
+#### Configuration
+Video is generated for new dates only (configurable cutoff). Point GenBox at a dedicated Sora 2 deployment and storage container via `.env`:
+
+```
+AZURE_OPENAI_ENDPOINT_SORA       # Sora 2 resource endpoint(s)
+AZURE_OPENAI_API_KEY_SORA        # matching API key(s)
+AZURE_OPENAI_MODEL_SORA=sora-2   # deployment name(s)
+AZURE_OPENAI_API_VERSION_SORA=preview
+genbox_video_blob_name=genbox-video   # blob container for merged MP4s
+GENBOX_VIDEO_CUTOFF_DATE=2026-06-05   # only dates >= this get video
+GENBOX_VIDEO_ENABLED=true
+GENBOX_VIDEO_MAX_CLIPS=6               # cost cap on clips per segment
+```
+
+**Multiple Sora resources / distributed credits.** Sora's API is job-scoped: a `create` call returns a video id that only exists on the resource that served it, so the follow-up `poll {id}` and `download {id}` must hit that *same* resource — a round-robin gateway in front of several resources breaks this affinity. To spread load across resources instead, list them **directly** (not behind a balancer) as comma-separated values aligned by index; GenBox round-robins at the *job* level and pins each clip's whole create→poll→download lifecycle to the resource it picked (and fails a clip over to the next resource on error):
+
+```
+AZURE_OPENAI_ENDPOINT_SORA=https://res1.openai.azure.com,https://res2.openai.azure.com,https://res3.openai.azure.com
+AZURE_OPENAI_API_KEY_SORA=key1,key2,key3
+AZURE_OPENAI_MODEL_SORA=sora-2   # single value applies to all, or give one per resource
+```
+
+#### Tech Stack
+- **OpenAI Agents SDK** (`openai-agents`) — the Producer agent that scripts the segment
+- **Sora 2 on Azure OpenAI** — text/image-to-video with native audio (`/openai/v1/videos`)
+- **imageio-ffmpeg** — bundled static `ffmpeg` for last-frame extraction and clip concatenation
+- **Azure Table & Blob Storage** — per-date video status/metadata and merged MP4 hosting
 
 ## ComicBook
 
