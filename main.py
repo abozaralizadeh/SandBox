@@ -6,13 +6,18 @@ import os
 
 from dotenv import load_dotenv
 load_dotenv()
-from flask import Flask, jsonify, make_response, request, render_template
+from flask import Flask, jsonify, make_response, request, render_template, Response
 from AIBlog.prompt import *
 from TomorrowNews.prompt import *
 from ComicBook.prompt import get_comicbook
 from ComicBook.azurestorage import get_episode_index, get_arc_list
 from GenBox.prompt import get_llm_response
-from GenBox.video import ensure_generation_started
+from GenBox.video import ensure_generation_started, video_status
+from GenBox.azurestorage import (
+    video_blob_name_from_url,
+    get_video_blob_size,
+    download_video_blob_bytes,
+)
 from AIOpenProblemSolver.prompt import get_problem_history
 from AIOpenProblemSolver.azurestorage import (
     get_problem_details,
@@ -154,19 +159,74 @@ async def aiblogcontent():
 def genbox():
     return render_template('tv.html')
 
+def _parse_date_arg(date_param):
+    if not date_param:
+        return None
+    try:
+        from datetime import datetime
+        return datetime.fromisoformat(date_param).date()
+    except ValueError:
+        return None
+
+
+def _parse_range(range_header, size):
+    """Parse an HTTP Range header into (start, end) inclusive, or None."""
+    try:
+        units, rng = range_header.split("=", 1)
+        if units.strip().lower() != "bytes":
+            return None
+        start_s, end_s = rng.split("-", 1)
+        if start_s.strip() == "":
+            suffix = int(end_s)
+            if suffix <= 0:
+                return None
+            start, end = max(0, size - suffix), size - 1
+        else:
+            start = int(start_s)
+            end = int(end_s) if end_s.strip() else size - 1
+        if start > end or start >= size:
+            return None
+        return start, min(end, size - 1)
+    except Exception:
+        return None
+
+
 @app.route('/genbox-video-status', methods=['GET'])
 def genbox_video_status():
     # Lazily kicks off background generation on the first poll for an eligible date,
     # then reports {status, video_url}. Non-blocking.
-    date_param = request.args.get('date')
-    parsed_date = None
-    if date_param:
-        try:
-            from datetime import datetime
-            parsed_date = datetime.fromisoformat(date_param).date()
-        except ValueError:
-            parsed_date = None
-    return jsonify(ensure_generation_started(parsed_date))
+    return jsonify(ensure_generation_started(_parse_date_arg(request.args.get('date'))))
+
+
+@app.route('/genbox-video', methods=['GET'])
+def genbox_video():
+    # Same-origin proxy that streams the merged MP4 from (private) blob storage, with
+    # HTTP Range support so the <video> element can play/seek regardless of the blob
+    # container's public-access setting.
+    parsed_date = _parse_date_arg(request.args.get('date'))
+    st = video_status(parsed_date)
+    if st.get("status") != "ready" or not st.get("video_url"):
+        return ("Video not ready", 404)
+    blob_name = video_blob_name_from_url(st["video_url"])
+    try:
+        size = get_video_blob_size(blob_name)
+    except Exception:
+        return ("Video not found", 404)
+
+    range_header = request.headers.get("Range")
+    rng = _parse_range(range_header, size) if range_header else None
+    if rng:
+        start, end = rng
+        data = download_video_blob_bytes(blob_name, offset=start, length=end - start + 1)
+        resp = Response(data, status=206, mimetype="video/mp4")
+        resp.headers["Content-Range"] = f"bytes {start}-{end}/{size}"
+    else:
+        data = download_video_blob_bytes(blob_name)
+        resp = Response(data, mimetype="video/mp4")
+    resp.headers["Accept-Ranges"] = "bytes"
+    resp.headers["Content-Length"] = str(len(data))
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 @app.route('/ai-open-problem-solver', methods=['GET'])
 def ai_open_problem_solver():

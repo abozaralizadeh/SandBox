@@ -61,7 +61,6 @@ SORA_MODEL = _first_resource[0]["model"] if _first_resource else "sora-2"
 VIDEO_SIZE = os.getenv("GENBOX_VIDEO_SIZE", "1280x720")  # landscape for the CRT screen
 ALLOWED_SECONDS = (4, 8, 12)                              # Sora 2 clip durations
 MAX_CLIPS = int(os.getenv("GENBOX_VIDEO_MAX_CLIPS", "6"))
-ANCHOR_SEED = int(os.getenv("GENBOX_VIDEO_ANCHOR_SEED", "424242"))
 
 
 def _enabled() -> bool:
@@ -107,9 +106,10 @@ def video_enabled_for(value=None) -> bool:
     return True
 
 
-# Fixed "anchor bible": identical text prepended to every anchor clip prompt so Sora
-# regenerates the same persona + set. Combined with ANCHOR_SEED this is the hybrid
-# substitute for face-as-reference (Azure Sora's input_reference rejects human faces).
+# Fixed "anchor bible": identical text used for the anchor's FIRST clip so Sora renders a
+# defined persona + set. Subsequent anchor clips are produced by remixing that first clip
+# (see pipeline), which keeps the look consistent without face references (Azure Sora's
+# input_reference rejects human faces) or a seed (Sora 2 has none).
 ANCHOR_BIBLE = (
     "Television news studio. A single news anchor, a calm 40-year-old presenter with "
     "short dark hair and a neat navy-blue suit over a white shirt, sits at a glossy "

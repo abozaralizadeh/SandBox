@@ -124,6 +124,22 @@ def get_video_meta(flat_date: str):
         return None
 
 
+def video_blob_name_from_url(video_url: str) -> str:
+    """Extract the blob name (last path segment) from a stored video URL."""
+    return (video_url or "").rstrip("/").rsplit("/", 1)[-1].split("?", 1)[0]
+
+
+def get_video_blob_size(blob_name: str) -> int:
+    """Size in bytes of a video blob (for HTTP Range responses)."""
+    return _video_container_client.get_blob_client(blob_name).get_blob_properties().size
+
+
+def download_video_blob_bytes(blob_name: str, offset: int = None, length: int = None) -> bytes:
+    """Download all of a video blob, or a byte range when offset/length are given."""
+    blob_client = _video_container_client.get_blob_client(blob_name)
+    return blob_client.download_blob(offset=offset, length=length).readall()
+
+
 def set_video_meta(flat_date: str, **fields):
     """Upsert (MERGE) video metadata; status transitions never clobber other fields."""
     now = datetime.now(timezone.utc).isoformat()

@@ -94,6 +94,28 @@
       object-fit: cover;
       border-radius: 75px;
       background: #000;
+
+      /* Fade the video's edges into the screen, matching the scrolling text. */
+      -webkit-mask-image: radial-gradient(ellipse 80% 80% at center, rgba(0, 0, 0, 1) 55%, rgba(0, 0, 0, 0) 100%);
+      mask-image: radial-gradient(ellipse 80% 80% at center, rgba(0, 0, 0, 1) 55%, rgba(0, 0, 0, 0) 100%);
+      -webkit-mask-size: cover;
+      mask-size: cover;
+    }
+
+    #soundHint {
+      position: absolute;
+      bottom: 22px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 5;
+      color: #00ff00;
+      font-family: monospace;
+      font-size: 12px;
+      background: rgba(0, 0, 0, 0.55);
+      padding: 3px 10px;
+      border-radius: 12px;
+      pointer-events: none;
+      white-space: nowrap;
     }
 
     #button1 {
@@ -261,6 +283,7 @@
     <div id="screen">
       <p id="content"></p>
       <video id="tvVideo" playsinline preload="auto" style="display:none"></video>
+      <div id="soundHint" style="display:none">🔊 click for sound</div>
     </div>
     <button id="button1"></button>
     <button id="button2"></button>
@@ -275,6 +298,7 @@
     let mode = 'text';            // 'text' | 'video'
     let videoAvailable = false;   // a ready video exists for currentDate
     let userInteracted = false;   // gate unmuted autoplay behind a user gesture
+    let paused = false;           // button3: pause BOTH video and scrolling text
     let currentVideoUrl = '';
     let statusPollTimer = null;
     const videoEl = document.getElementById('tvVideo');
@@ -310,22 +334,92 @@
         a.getDate() === b.getDate();
     }
 
+    function updateSoundHint() {
+      const hint = document.getElementById('soundHint');
+      if (!hint) return;
+      hint.style.display = (mode === 'video' && videoEl.muted && !videoEl.paused) ? 'block' : 'none';
+    }
+
     function showText() {
       mode = 'text';
       try { videoEl.pause(); } catch (e) {}
       videoEl.style.display = 'none';
       contentEl.style.display = 'block';
+      const st = document.getElementById('scrollingText');
+      if (st) st.style.animationPlayState = paused ? 'paused' : 'running';
+      updateSoundHint();
+    }
+
+    // Play preferring SOUND. Only fall back to muted if the browser actually blocks
+    // unmuted autoplay (NotAllowedError = no user gesture yet) — NOT on transient
+    // interruptions (AbortError) caused by restarting/switching, which must not mute us.
+    function playPreferSound() {
+      videoEl.muted = false;
+      const p = videoEl.play();
+      if (p && typeof p.catch === 'function') {
+        p.catch((err) => {
+          if (err && err.name === 'NotAllowedError') {
+            videoEl.muted = true;            // autoplay-with-sound blocked -> muted + hint
+            videoEl.play().catch(() => {});
+          }
+          updateSoundHint();
+        });
+      }
+      updateSoundHint();
     }
 
     function showVideo(url) {
       if (!url) return;
       mode = 'video';
       if (videoEl.getAttribute('src') !== url) videoEl.src = url;
-      videoEl.muted = !userInteracted;   // before a gesture, only muted autoplay is allowed
+      try { videoEl.currentTime = 0; } catch (e) {}   // restart from the top each time
       videoEl.style.display = 'block';
       contentEl.style.display = 'none';
-      videoEl.play().catch(() => {});
+      if (paused) { videoEl.pause(); updateSoundHint(); return; }
+      playPreferSound();
     }
+
+    // Apply the current pause state to whichever mode is showing (button3).
+    function applyPause() {
+      if (mode === 'video') {
+        if (paused) videoEl.pause(); else playPreferSound();
+      } else {
+        const st = document.getElementById('scrollingText');
+        if (st) st.style.animationPlayState = paused ? 'paused' : 'running';
+      }
+      updateSoundHint();
+    }
+
+    // EVERY click is a user gesture: unlock sound on the playing video (works repeatedly,
+    // so a muted auto-start can always be turned on by clicking anywhere).
+    document.addEventListener('click', () => {
+      userInteracted = true;
+      if (mode === 'video' && !paused && videoEl.muted) {
+        videoEl.muted = false;
+        videoEl.play().catch(() => {});
+        updateSoundHint();
+      }
+    }, true);
+    videoEl.addEventListener('playing', updateSoundHint);
+    // If the proxied MP4 can't load, fall back to scrolling text instead of a black screen.
+    videoEl.addEventListener('error', () => {
+      console.error('TV video failed to load:', videoEl.error);
+      videoAvailable = false;
+      showText();
+    });
+
+    // ---- video <-> text loop ----
+    // When the video ends, switch to scrolling text; after one full text scroll cycle,
+    // switch back to the video. Repeats. (No-ops while paused or when no video exists.)
+    videoEl.addEventListener('ended', () => {
+      if (!paused && videoAvailable) showText();
+    });
+    document.addEventListener('animationiteration', (e) => {
+      if (e.target && e.target.id === 'scrollingText'
+          && mode === 'text' && !paused && videoAvailable && currentVideoUrl) {
+        showVideo(currentVideoUrl);
+      }
+    });
 
     async function fetchVideoStatus(date) {
       try {
@@ -349,10 +443,11 @@
         if (s.status === 'ready' && s.video_url) {
           clearInterval(statusPollTimer);
           videoAvailable = true;
-          currentVideoUrl = s.video_url;
-          // Auto-switch to video (default mode) once it's ready, if still on this day
-          // and the user has interacted (so the anchor's audio is allowed to play).
-          if (sameDay(pollDate, currentDate) && userInteracted) {
+          // Play via the same-origin proxy so it works even if the blob container is private.
+          currentVideoUrl = `/genbox-video?date=${pollDate.toISOString()}`;
+          // Auto-switch to video (the default mode) once it's ready, for the current day.
+          // If the user hasn't clicked yet it plays muted with a "click for sound" hint.
+          if (sameDay(pollDate, currentDate)) {
             showVideo(currentVideoUrl);
           }
         } else if (s.status === 'generating') {
@@ -368,7 +463,8 @@
     }
 
     async function displayServerText(date = null) {
-      // Each day (re)load starts on text; video is offered/auto-switched when ready.
+      // Each day (re)load starts on text, unpaused; video is offered/auto-switched when ready.
+      paused = false;
       showText();
       const contentDiv = document.getElementById('content');
       let scrollingText = document.getElementById('scrollingText');
@@ -412,20 +508,10 @@
       displayServerText(currentDate);
     });
 
+    // Third button from top: pause / resume BOTH the video and the scrolling text
+    // (a plain pause — no direction reversing). Pausing also halts the video<->text loop.
     const button3 = document.getElementById('button3');
     let rotationAngle3 = 0;
-    let clickCount3 = 0;
-    let clickCount3_b = 0;
-
-    let scrolla = 'scroll'
-    let scrollRa = 'scrollRev'
-    let scrollNa = 'scrollNone'
-    if (window.innerWidth <= 990) {
-      scrolla = 'sscroll'
-      scrollRa = 'sscrollRev'
-      scrollNa = 'sscrollNone'
-    }
-
     button3.addEventListener('click', () => {
       const audio = new Audio('static/click3.mp3');
       audio.play();
@@ -433,35 +519,8 @@
       rotationAngle3 += 90;
       button3.style.transform = `rotate(${rotationAngle3}deg)`;
 
-      // In video mode, button3 pauses/plays the clip.
-      if (mode === 'video') {
-        if (videoEl.paused) { videoEl.play().catch(() => {}); }
-        else { videoEl.pause(); }
-        return;
-      }
-
-      const scrollingText = document.getElementById('scrollingText');
-
-      clickCount3++;
-
-      if (clickCount3 % 2 === 1) {
-        // Stop scrolling animation
-        scrollingText.style.animation = `${scrollNa} 60s linear infinite`;
-        scrollingText.style.animationDelay = '-30s';
-        scrollingText.style.animationPlayState = 'paused';
-      } else {
-        clickCount3_b++;
-        if (clickCount3_b % 2 === 1) {
-          // Change to a faster scroll animation
-          scrollingText.style.animation = `${scrollRa} 60s linear infinite`;
-          scrollingText.style.animationDelay = '-30s'; // Start midway
-        } else {
-          // Change to a faster scroll animation
-          scrollingText.style.animation = `${scrolla} 60s linear infinite`;
-          scrollingText.style.animationDelay = '-30s'; // Start midway
-        }
-        scrollingText.style.animationPlayState = 'running';
-      }
+      paused = !paused;
+      applyPause();
     });
 
     // Lowest button: toggle between scrolling text and the news-anchor video.
@@ -471,6 +530,7 @@
       const audio = new Audio('static/click4.mp3');
       audio.play();
       userInteracted = true;
+      paused = false;   // switching modes resumes playback
       rotationAngle4 -= 90;
       button4.style.transform = `rotate(${rotationAngle4}deg)`;
 

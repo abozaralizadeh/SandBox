@@ -1,26 +1,28 @@
 """Deterministic orchestration: shot list -> Sora clips -> merged MP4 -> blob.
 
 The producer agent decides the creative shot list (anchor lead -> field report ->
-interview -> sign-off); this module executes it with hard caps, single retries, stable
-per-speaker seeds, and face-free frame chaining for b-roll.
+interview -> sign-off); this module executes it deterministically.
+
+Consistency: Sora 2 has no usable seed and rejects human faces in input_reference, so the
+only reliable lever is REMIX. Each on-camera speaker's FIRST clip is a fresh create; every
+later clip of that same speaker is a remix of their first clip (on the same resource that
+owns it), which reuses its layout/look. B-roll (face-free) uses last-frame chaining.
 """
 import asyncio
-import hashlib
 import logging
 
 import httpx
 
 from GenBox.azurestorage import upload_video_bytes_to_blob
-from GenBox.newsvideo import config, mux
+from GenBox.newsvideo import config, mux, sora_client
 from GenBox.newsvideo.producer_agent import produce_shot_list
-from GenBox.newsvideo.sora_client import generate_clip
 
 logger = logging.getLogger("GenBoxVideo.pipeline")
 
 
 def _talking_head_prompt(shot: dict) -> str:
-    """Prompt for an on-camera speaker. The studio anchor uses the fixed ANCHOR_BIBLE;
-    reporters/interviewees use their own per-speaker description."""
+    """Prompt for the FIRST clip of an on-camera speaker. The studio anchor uses the fixed
+    ANCHOR_BIBLE; reporters/interviewees use their own per-speaker description."""
     if shot["type"] == "anchor":
         base = config.ANCHOR_BIBLE
     else:
@@ -38,13 +40,22 @@ def _talking_head_prompt(shot: dict) -> str:
     )
 
 
-def _seed_for(shot: dict) -> int:
-    """A stable seed per speaker so a given person looks consistent across their clips.
-    The anchor uses the fixed ANCHOR_SEED; others are derived from their speaker label."""
-    if shot["type"] == "anchor":
-        return config.ANCHOR_SEED
-    label = (shot.get("speaker") or shot.get("speaker_description") or shot["type"]).lower()
-    return int(hashlib.md5(label.encode("utf-8")).hexdigest(), 16) % 1_000_000
+def _remix_prompt(shot: dict) -> str:
+    """Prompt for a LATER clip of a speaker, remixed from their first clip. Describe only
+    the change (new line / action); remix preserves the source's look."""
+    who = (
+        "the same news anchor at the same GENBOX NEWS desk"
+        if shot["type"] == "anchor"
+        else "the same person in the same setting as the source video"
+    )
+    return (
+        f"Keep {who} — identical face, hair, wardrobe, lighting and framing as the source "
+        f"video; change only what is described next.\n"
+        f"Shot: {shot['visual']}\n"
+        f"Spoken dialogue (say exactly this, nothing else):\n"
+        f"\"{shot['dialogue']}\"\n"
+        f"{config.BROLL_NEGATIVE}"
+    )
 
 
 def _broll_prompt(shot: dict) -> str:
@@ -75,32 +86,25 @@ def _format_http_error(exc: httpx.HTTPStatusError) -> str:
     return f"HTTP {resp.status_code} {resp.reason_phrase} ({where}): {body[:800]}"
 
 
-async def _generate_with_retry(prompt: str, seconds: int, seed, ref_image_bytes, label: str):
-    """Generate one clip with a single retry. On a 400 that looks like an input_reference
-    (face) rejection, drop the reference and retry without it.
-
-    Returns (clip_bytes_or_None, error_detail_or_None) so the caller can surface the
-    real Sora/Azure failure instead of a generic message.
-    """
-    ref = ref_image_bytes
+async def _safe(factory, label: str):
+    """Run an async clip factory with one retry. Returns (result_or_None, error_detail).
+    Surfaces the real HTTP status + Azure body instead of a generic message."""
     last_detail = None
     for attempt in range(2):
         try:
-            clip = await generate_clip(prompt, seconds, seed=seed, ref_image_bytes=ref)
-            return clip, None
+            return await factory(), None
         except httpx.HTTPStatusError as exc:
             last_detail = _format_http_error(exc)
-            if ref is not None and exc.response is not None and exc.response.status_code == 400:
-                logger.warning("%s: reference rejected (400); retrying without input_reference. %s",
-                               label, last_detail)
-                ref = None
-                continue
             logger.warning("%s: HTTP error (attempt %d): %s", label, attempt + 1, last_detail)
         except Exception as exc:  # network/timeout/etc.
             last_detail = f"{type(exc).__name__}: {exc}"
             logger.warning("%s: error (attempt %d): %s", label, attempt + 1, last_detail)
     logger.error("%s: failed after retries: %s", label, last_detail)
     return None, last_detail
+
+
+def _speaker_key(shot: dict) -> str:
+    return (shot.get("speaker") or shot["type"]).lower()
 
 
 async def build_news_video(decision_text: str, flat_date: str):
@@ -111,44 +115,78 @@ async def build_news_video(decision_text: str, flat_date: str):
 
     clips = []
     last_error = None
-    prev_last_frame = None  # carried only across consecutive frame-chained b-roll shots
+    prev_last_frame = None             # carried across consecutive frame-chained b-roll shots
+    bases = {}                          # speaker_key -> (resource, base_job_id) for remixing
     for idx, shot in enumerate(shots):
         stype = shot["type"]
-        is_broll = stype == "broll"
         seconds = shot["seconds"]
         label = f"clip{idx}:{stype}"
 
-        if is_broll:
-            prompt = _broll_prompt(shot)
-            seed = None
-            ref = prev_last_frame  # seed first frame from the previous b-roll's last frame
+        # ---- b-roll: fresh create, face-free, optional frame chaining ----
+        if stype == "broll":
+            resource = sora_client.next_resource()
+            ref = prev_last_frame
+            res, err = await _safe(
+                lambda r=resource, rf=ref: sora_client.create_clip(r, _broll_prompt(shot), seconds, ref_image_bytes=rf),
+                label,
+            )
+            if res is None and ref is not None:
+                logger.warning("%s: retrying b-roll without reference frame", label)
+                res, err = await _safe(
+                    lambda r=resource: sora_client.create_clip(r, _broll_prompt(shot), seconds),
+                    label,
+                )
+            if res is None:
+                last_error = err or last_error
+                prev_last_frame = None
+                continue
+            data, _jid = res
+            clips.append(data)
+            if shot.get("frame_chain"):
+                try:
+                    prev_last_frame = await asyncio.to_thread(mux.extract_last_frame, data)
+                except Exception as exc:
+                    logger.warning("%s: last-frame extraction failed: %s", label, exc)
+                    prev_last_frame = None
+            else:
+                prev_last_frame = None
+            continue
+
+        # ---- talking head (anchor / reporter / interview) ----
+        prev_last_frame = None
+        key = _speaker_key(shot)
+        if key in bases:
+            # Subsequent clip of a known speaker -> remix their first clip for consistency.
+            resource, base_id = bases[key]
+            res, err = await _safe(
+                lambda r=resource, b=base_id: sora_client.remix_clip(r, b, _remix_prompt(shot), seconds),
+                f"{label}:remix",
+            )
+            if res is None:
+                logger.warning("%s: remix failed (%s); falling back to a fresh create", label, err)
+                res, err = await _safe(
+                    lambda r=resource: sora_client.create_clip(r, _talking_head_prompt(shot), seconds),
+                    f"{label}:create-fallback",
+                )
         else:
-            # anchor / reporter / interview — an on-camera speaker (never a face reference)
-            prompt = _talking_head_prompt(shot)
-            seed = _seed_for(shot)
-            ref = None
+            # First clip of this speaker -> fresh create; remember it as the remix base.
+            resource = sora_client.next_resource()
+            res, err = await _safe(
+                lambda r=resource: sora_client.create_clip(r, _talking_head_prompt(shot), seconds),
+                f"{label}:create",
+            )
 
-        clip, err = await _generate_with_retry(prompt, seconds, seed, ref, label)
-
-        if clip is None:
+        if res is None:
             last_error = err or last_error
             if stype == "anchor" and not clips:
                 # The opening anchor lead is required; abort so we don't ship a headless segment.
                 raise RuntimeError(f"Anchor lead clip failed for {flat_date}: {err}")
-            prev_last_frame = None
             continue
 
-        clips.append(clip)
-
-        # Prepare a chain frame for the next shot only when this b-roll asked to chain.
-        if is_broll and shot.get("frame_chain"):
-            try:
-                prev_last_frame = await asyncio.to_thread(mux.extract_last_frame, clip)
-            except Exception as exc:
-                logger.warning("%s: last-frame extraction failed: %s", label, exc)
-                prev_last_frame = None
-        else:
-            prev_last_frame = None
+        data, jid = res
+        clips.append(data)
+        if key not in bases:
+            bases[key] = (resource, jid)
 
     if not clips:
         raise RuntimeError(f"No clips generated for {flat_date}: {last_error}")

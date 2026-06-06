@@ -10,10 +10,10 @@ Workflow (async, JOB-SCOPED):
 
 A returned ``id`` only exists on the resource that served the create call, so poll and
 download MUST target that SAME resource. To spread load across several resources while
-respecting that affinity, we round-robin at the JOB level: ``generate_clip`` picks one
-resource from the pool and runs create/poll/download all against it. (Do NOT route this
-through a round-robin gateway — it would send each call to a different backend that has
-never heard of the job id.)
+respecting that affinity, we round-robin at the JOB level: ``create_clip`` picks one
+resource from the pool and runs create/poll/download all against it, and ``remix_clip``
+reuses that same resource. (Do NOT route this through a round-robin gateway — it would
+send each call to a different backend that has never heard of the job id.)
 
 Auth is the Azure-style ``api-key`` header (same as GenBox/prompt.py).
 """
@@ -68,23 +68,14 @@ def _headers(resource: dict) -> dict:
     return {"api-key": resource["key"]}
 
 
-def _is_seed_rejection(exc: httpx.HTTPStatusError) -> bool:
-    resp = exc.response
-    if resp is None or resp.status_code != 400:
-        return False
-    try:
-        return "seed" in (resp.text or "").lower()
-    except Exception:
-        return False
-
-
-def _multipart_parts(model: str, prompt: str, seconds: int, size: str, seed,
+def _multipart_parts(model: str, prompt: str, seconds: int, size: str,
                      image_bytes=None) -> dict:
     """Build the multipart/form-data parts for a create call.
 
     The Azure Sora 2 create endpoint mirrors OpenAI's v1 ``/videos`` surface, which is
     multipart/form-data (it carries the optional ``input_reference`` file). Scalar fields
     are sent as text parts ``(None, value)`` — equivalent to ``curl -F key=value``.
+    (Note: Sora 2 has no ``seed`` parameter, so we never send one.)
     """
     parts = {
         "model": (None, model),
@@ -92,48 +83,37 @@ def _multipart_parts(model: str, prompt: str, seconds: int, size: str, seed,
         "size": (None, size),
         "seconds": (None, str(seconds)),
     }
-    if seed is not None:
-        parts["seed"] = (None, str(seed))
     if image_bytes is not None:
         parts["input_reference"] = ("frame.png", image_bytes, "image/png")
     return parts
 
 
-async def _post_create(resource: dict, parts: dict) -> str:
-    """POST a multipart create request to a specific resource, returning the job id.
-    Retries once without ``seed`` if the API rejects that field."""
-    url = _videos_url(resource)
+async def _post(url: str, resource: dict, parts: dict) -> str:
+    """POST a multipart request to ``url`` on ``resource``, returning the new job id."""
     async with httpx.AsyncClient(timeout=180) as client:
-        try:
-            resp = await client.post(url, headers=_headers(resource), files=parts)
-            resp.raise_for_status()
-        except httpx.HTTPStatusError as exc:
-            if "seed" in parts and _is_seed_rejection(exc):
-                logger.warning("Sora rejected 'seed'; retrying without it.")
-                parts = {k: v for k, v in parts.items() if k != "seed"}
-                resp = await client.post(url, headers=_headers(resource), files=parts)
-                resp.raise_for_status()
-            else:
-                raise
+        resp = await client.post(url, headers=_headers(resource), files=parts)
+        resp.raise_for_status()
         return resp.json()["id"]
 
 
 async def create_video_job(resource: dict, prompt: str, seconds: int, size: str = None,
-                           seed: int = None) -> str:
-    """Create a text-only video job (multipart/form-data) on ``resource``. Returns job id."""
+                           image_bytes: bytes = None) -> str:
+    """Create a video job (multipart/form-data) on ``resource``. Returns the job id.
+    Pass ``image_bytes`` to use it as the first frame (face-free content only)."""
     size = size or config.VIDEO_SIZE
-    return await _post_create(resource, _multipart_parts(resource["model"], prompt, seconds, size, seed))
+    parts = _multipart_parts(resource["model"], prompt, seconds, size, image_bytes)
+    return await _post(_videos_url(resource), resource, parts)
 
 
-async def create_video_job_with_reference(resource: dict, prompt: str, seconds: int,
-                                          image_bytes: bytes, size: str = None,
-                                          seed: int = None) -> str:
-    """Create an image-guided video job on ``resource`` whose first frame is ``image_bytes``.
+async def remix_video_job(resource: dict, base_job_id: str, prompt: str, seconds: int) -> str:
+    """Remix a previously completed video (on the SAME resource that created it).
 
-    The reference is sent as multipart/form-data and must match ``size``. Returns job id.
+    Remix reuses the source video's framework, scene transitions, and visual layout while
+    applying the change in ``prompt`` — the consistency mechanism that needs no face images
+    or gated character access. Returns the new job id.
     """
-    size = size or config.VIDEO_SIZE
-    return await _post_create(resource, _multipart_parts(resource["model"], prompt, seconds, size, seed, image_bytes))
+    parts = {"prompt": (None, prompt), "seconds": (None, str(seconds))}
+    return await _post(_videos_url(resource, f"/{base_job_id}/remix"), resource, parts)
 
 
 async def poll_until_complete(resource: dict, job_id: str, interval: float = 6.0,
@@ -168,18 +148,21 @@ async def download_video_bytes(resource: dict, job_id: str) -> bytes:
         return resp.content
 
 
-async def generate_clip(prompt: str, seconds: int, seed: int = None,
-                        ref_image_bytes: bytes = None) -> bytes:
-    """Create -> poll -> download a single clip on ONE round-robin-selected resource.
+async def create_clip(resource: dict, prompt: str, seconds: int,
+                      ref_image_bytes: bytes = None) -> tuple:
+    """Create -> poll -> download a fresh clip on ``resource``. Returns (mp4_bytes, job_id).
 
-    Pinning the whole lifecycle to the chosen resource preserves job affinity while
-    spreading jobs across the pool to use distributed credits.
+    The job id is returned so the caller can remix this clip later for consistency.
     """
-    resource = next_resource()
-    logger.info("generate_clip on resource %s (model=%s)", _host(resource), resource.get("model"))
-    if ref_image_bytes:
-        job_id = await create_video_job_with_reference(resource, prompt, seconds, ref_image_bytes, seed=seed)
-    else:
-        job_id = await create_video_job(resource, prompt, seconds, seed=seed)
+    logger.info("create_clip on resource %s (model=%s)", _host(resource), resource.get("model"))
+    job_id = await create_video_job(resource, prompt, seconds, image_bytes=ref_image_bytes)
     await poll_until_complete(resource, job_id)
-    return await download_video_bytes(resource, job_id)
+    return await download_video_bytes(resource, job_id), job_id
+
+
+async def remix_clip(resource: dict, base_job_id: str, prompt: str, seconds: int) -> tuple:
+    """Remix -> poll -> download on the base clip's resource. Returns (mp4_bytes, job_id)."""
+    logger.info("remix_clip of %s on resource %s", base_job_id, _host(resource))
+    job_id = await remix_video_job(resource, base_job_id, prompt, seconds)
+    await poll_until_complete(resource, job_id)
+    return await download_video_bytes(resource, job_id), job_id

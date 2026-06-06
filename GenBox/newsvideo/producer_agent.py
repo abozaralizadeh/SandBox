@@ -2,7 +2,7 @@
 
 Reuses the OpenAI Agents SDK wiring from ComicBook/agents.py (AsyncAzureOpenAI ->
 OpenAIResponsesModel -> Agent -> Runner.run). The agent ONLY emits JSON; the pipeline
-executes it deterministically so we keep hard caps on clip count, seeds, and retries.
+executes it deterministically so we keep hard caps on clip count, remixing, and retries.
 """
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ import os
 
 from dotenv import load_dotenv
 
-from agents import Agent, ModelSettings, OpenAIResponsesModel, Runner, set_tracing_disabled
+from agents import Agent, ModelSettings, OpenAIResponsesModel, Runner, WebSearchTool, set_tracing_disabled
 
 set_tracing_disabled(True)
 from openai import AsyncAzureOpenAI
@@ -188,7 +188,7 @@ async def produce_shot_list(decision_text: str) -> dict:
     agent = Agent(
         name=PRODUCER_NAME,
         instructions=PRODUCER_INSTRUCTIONS.format(MAX_CLIPS=config.MAX_CLIPS),
-        tools=[],
+        tools=[WebSearchTool(search_context_size="high")],
         model=model,
         model_settings=ModelSettings(temperature=0.6),
     )
