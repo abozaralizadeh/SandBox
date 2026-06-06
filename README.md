@@ -170,4 +170,8 @@ ComicBook produces a daily AI-generated comic strip using three collaborating ag
 - **Azure OpenAI** — GPT for agent reasoning, gpt-image for image generation
 - **Azure Table & Blob Storage** — Arc/episode persistence, image and HTML hosting
 
-gunicorn --bind=0.0.0.0 --timeout 600 main:app
+![ComicBook](https://github.com/abozaralizadeh/SandBox/blob/main/static/ComicBook.png?raw=true)
+
+---
+## Command to run the project
+`gunicorn --bind=0.0.0.0 --timeout 600 main:app`

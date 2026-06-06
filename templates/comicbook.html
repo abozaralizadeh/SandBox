@@ -545,6 +545,23 @@
         #comicContent .comic-page[dir=rtl] .caption-box { transform-origin: top center; }
 
         /* ─────────────────────────────────────────────────────
+           Native-retelling overlay boxes (agent-placed lettering)
+        ───────────────────────────────────────────────────── */
+        #comicContent .overlay-box { position: absolute; box-sizing: border-box; }
+        #comicContent .overlay-box .speech-bubble,
+        #comicContent .overlay-box .caption-box { max-width: 100%; }
+        #comicContent .overlay-box .speech-bubble { position: relative; }
+        #comicContent .comic-page[dir=rtl] .overlay-box .speech-bubble,
+        #comicContent .comic-page[dir=rtl] .overlay-box .caption-box { text-align: right; }
+        /* On narrow screens (matching the panel grid's single-column switch) the
+           agent-placed boxes stop floating and stack under the art for readability. */
+        @media (max-width: 600px) {
+            #comicContent .overlay-box { position: static !important; max-width: 100% !important; transform: none !important; margin: 3px 0; }
+            #comicContent .panel:has(.overlay-box) { display: flex; flex-direction: column; }
+            #comicContent .panel:has(.overlay-box) img { height: auto; }
+        }
+
+        /* ─────────────────────────────────────────────────────
            Responsive
         ───────────────────────────────────────────────────── */
         @media (max-width: 720px) {

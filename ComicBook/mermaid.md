@@ -27,7 +27,7 @@ flowchart TD
 
     %% ── Outline Adapter (ep 1 only) ──────────────────────────────────────
     subgraph OA ["🌐  OutlineAdapter   ×2 languages   (episode 1 only)"]
-        OA_resp["Responsibility\n─────────────────────────\n• Adapts the story outline to Italian\n  and Persian — not a literal translation\n• Rewrites as if originally authored in\n  the target language & culture\n• Preserves all plot points, character arcs\n  and episode-by-episode breakdown\n• Saved once; reused by Translator\n  every episode for consistent context"]
+        OA_resp["Responsibility\n─────────────────────────\n• Adapts the story outline to Italian\n  and Persian — not a literal translation\n• Rewrites as if originally authored in\n  the target language & culture\n• Preserves all plot points, character arcs\n  and episode-by-episode breakdown\n• Saved once; reused by Reteller\n  every episode for consistent context"]
     end
 
     DIR -->|"story outline\n(ep. 1 only)"| OA
@@ -55,12 +55,12 @@ flowchart TD
 
     STORY -->|"Panel-by-panel script\n+ FULL ARC ROSTER\n+ mid-arc char refs"| TOON
 
-    %% ── Translator ───────────────────────────────────────────────────────
-    subgraph TRANS ["🗣️  Translator   ×2 languages   (sequential: IT → FA)"]
-        T_resp["Responsibility\n─────────────────────────\n• Translates title, recap, teaser,\n  all dialogue, captions and SFX\n• Idiomatic — rewrites from intent,\n  not word-for-word from English\n• Dialogue: spoken/colloquial register\n  tuned to each character's personality\n• Captions/narration: literary register\n• Adapts idioms & cultural references\n• Maintains arc glossary for consistency\n  of names, places & coined terms\n• Outputs updated_glossary every run\n• No tools — pure text-in / JSON-out"]
+    %% ── Reteller ─────────────────────────────────────────────────────────
+    subgraph TRANS ["🗣️  Reteller   ×2 languages   (sequential: IT → FA)"]
+        T_resp["Responsibility\n─────────────────────────\n• RETELLS the episode natively over the\n  shared images — not a translation\n• Full creative freedom: may split, merge,\n  drop or re-pace lines per panel\n• Faithful to the fixed art + the plot\n  (every beat must still land somewhere)\n• Also LETTERS: places each text box per\n  panel via a 9-zone anchor (+ optional tail)\n• Dialogue: spoken register per character;\n  captions/narration: literary register\n• Maintains arc glossary for consistent\n  names, places & coined terms\n• Outputs updated_glossary every run\n• No tools — pure JSON-in / JSON-out"]
     end
 
-    TOON -->|"en HTML + panels\n+ Director plan\n+ Storyteller script\n+ arc glossary\n+ lang story outline"| TRANS
+    TOON -->|"panels manifest (intent ref)\n+ Director plan\n+ Storyteller script\n+ arc glossary\n+ lang story outline"| TRANS
 
     %% ── Storage ──────────────────────────────────────────────────────────
     subgraph STORAGE ["☁️  Azure Storage"]
@@ -113,7 +113,7 @@ flowchart TD
 | **Director** | Arc lifecycle + episode planner | WebSearch, get_arc_status, start_new_arc, end_current_arc, save_story_outline | Every episode |
 | **Storyteller** | Panel-by-panel script writer | — | Every episode |
 | **Cartoonist** | Image generation + HTML assembly | generate_character_sheet, generate_panel_image, mark_key_panel, assemble_layout | Every episode |
-| **Translator** | Literary translation (IT + FA) | — | Every episode × 2 |
+| **Reteller** | Native retelling + box placement (IT + FA) | — | Every episode × 2 |
 | **OutlineAdapter** | Adapts story outline to target language | — | Episode 1 only × 2 |
 
 ## Key Design Decisions
@@ -124,5 +124,6 @@ flowchart TD
 | Character sheet uses **ALL arc characters** (incl. future eps) at `quality=high` | Generated once on ep. 1 and cached — must cover every character who ever appears |
 | **key_panels** list on arc entity | Mid-arc characters (not on original sheet) get a dedicated reference panel persisted across all future episodes |
 | **prev_episode_images** = last ep. panels + first ep. panels | Last episode for immediate continuity; first episode as the character-introduction visual anchor |
-| **OutlineAdapter** runs on ep. 1 only | Adapts the outline once per arc; Translator reads it every episode for consistent story context |
-| Translations run **sequentially** (IT → FA) | Avoids race conditions on glossary writes to the Arcs Table |
+| **OutlineAdapter** runs on ep. 1 only | Adapts the outline once per arc; the Reteller reads it every episode for consistent story context |
+| Retellings run **sequentially** (IT → FA) | Avoids race conditions on glossary writes to the Arcs Table |
+| **Reteller** retells natively + letters per language | Fragment-by-fragment translation forced English's text architecture onto every language; retelling lets each language restructure dialogue/captions and place its own boxes to fit native text + reading direction |
