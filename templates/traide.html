@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script type="text/javascript">
+    (function(c,l,a,r,i,t,y){
+        c[a]=c[a]||function(){(c[a].q=c[a].q||[]).push(arguments)};
+        t=l.createElement(r);t.async=1;t.src="https://www.clarity.ms/tag/"+i;
+        y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y);
+    })(window, document, "clarity", "script", "t77h1h8sb7");
+  </script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>trAIde — Autonomous Crypto Agents</title>
+  <link rel="icon" type="image/png" href="/static/faviconTRD.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+  <style>
+    :root {
+      --bg:       #05070a;
+      --s0:       #0a0e14;
+      --s1:       #0e131b;
+      --s2:       #141b25;
+      --border:   rgba(120,160,200,0.10);
+      --border2:  rgba(120,160,200,0.20);
+
+      --up:       #00e6a8;
+      --up-glow:  rgba(0,230,168,0.35);
+      --down:     #ff3b5c;
+      --down-glow:rgba(255,59,92,0.35);
+      --cyan:     #2dd4ff;
+      --amber:    #ffb020;
+      --violet:   #a78bfa;
+
+      --text:   #e6edf3;
+      --text-2: #8aa0b4;
+      --text-3: #50637a;
+
+      --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+      --sans: 'Space Grotesk', system-ui, -apple-system, sans-serif;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: var(--sans);
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    .bg-grid {
+      position: fixed; inset: 0; z-index: 0; pointer-events: none;
+      background-image:
+        linear-gradient(rgba(45,212,255,0.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(45,212,255,0.035) 1px, transparent 1px);
+      background-size: 44px 44px;
+      mask-image: radial-gradient(ellipse 100% 70% at 50% 0%, #000 40%, transparent 100%);
+    }
+    .bg-glow { position: fixed; border-radius: 50%; filter: blur(140px); opacity: 0.18; z-index: 0; pointer-events: none; }
+    .bg-glow.g1 { top: -240px; left: -120px; width: 560px; height: 560px; background: var(--up); }
+    .bg-glow.g2 { top: -180px; right: -140px; width: 520px; height: 520px; background: var(--cyan); opacity: 0.12; }
+
+    .wrap { position: relative; z-index: 1; max-width: 1280px; margin: 0 auto; padding: 22px 20px 60px; }
+
+    /* ── Home / back link ── */
+    .back-link {
+      display: inline-flex; align-items: center; gap: 7px; align-self: flex-start;
+      font-family: var(--mono); font-size: 0.74rem; font-weight: 500; letter-spacing: 0.3px;
+      color: var(--text-2); text-decoration: none; margin-bottom: 16px;
+      padding: 7px 12px; border-radius: 9px;
+      border: 1px solid var(--border); background: rgba(255,255,255,0.02);
+      transition: color 0.15s, border-color 0.15s, background 0.15s;
+    }
+    .back-link:hover { color: var(--up); border-color: var(--border2); background: var(--s2); }
+
+    /* ── Hero ── */
+    .hero { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; margin-bottom: 6px; }
+    .brand { display: flex; align-items: center; gap: 14px; }
+    .brand-mark {
+      width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center;
+      font-family: var(--mono); font-weight: 700; font-size: 1.1rem;
+      background: linear-gradient(135deg, rgba(0,230,168,0.18), rgba(45,212,255,0.12));
+      border: 1px solid var(--border2); color: var(--up); box-shadow: 0 0 22px var(--up-glow);
+      overflow: hidden;
+    }
+    .brand-mark img { width: 32px; height: 32px; border-radius: 8px; }
+    .brand h1 {
+      font-size: 1.6rem; font-weight: 700; letter-spacing: -0.5px; line-height: 1;
+      background: linear-gradient(120deg, #fff, #9fe9d4 60%, var(--cyan));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+    }
+    .brand p { color: var(--text-3); font-size: 0.8rem; margin-top: 4px; letter-spacing: 0.3px; }
+    .hero-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .pill {
+      font-family: var(--mono); font-size: 0.7rem; font-weight: 600; letter-spacing: 0.5px;
+      padding: 6px 11px; border-radius: 999px; border: 1px solid var(--border2);
+      background: rgba(255,255,255,0.02); color: var(--text-2); text-transform: uppercase;
+      display: inline-flex; align-items: center; gap: 7px;
+    }
+    .pill .dot { width: 7px; height: 7px; border-radius: 50%; }
+    .pill.live  { color: var(--down); border-color: rgba(255,59,92,0.4); }
+    .pill.live .dot  { background: var(--down); box-shadow: 0 0 8px var(--down); animation: blink 1.6s infinite; }
+    .pill.paper { color: var(--cyan); border-color: rgba(45,212,255,0.35); }
+    .pill.paper .dot { background: var(--cyan); box-shadow: 0 0 8px var(--cyan); animation: blink 2.2s infinite; }
+    @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0.25; } }
+    .pill.muted { color: var(--text-3); }
+
+    /* ── KPI row ── */
+    .kpis { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin: 22px 0; }
+    .kpi {
+      position: relative; background: linear-gradient(180deg, var(--s1), var(--s0));
+      border: 1px solid var(--border); border-radius: 14px; padding: 16px 16px 14px; overflow: hidden;
+    }
+    .kpi::after { content: ''; position: absolute; left: 0; top: 0; height: 2px; width: 100%; opacity: 0.7; }
+    .kpi.k-up::after   { background: linear-gradient(90deg, var(--up), transparent); }
+    .kpi.k-cyan::after { background: linear-gradient(90deg, var(--cyan), transparent); }
+    .kpi.k-amber::after{ background: linear-gradient(90deg, var(--amber), transparent); }
+    .kpi.k-violet::after{ background: linear-gradient(90deg, var(--violet), transparent); }
+    .kpi.k-down::after { background: linear-gradient(90deg, var(--down), transparent); }
+    .kpi .label { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.8px; color: var(--text-3); }
+    .kpi .value { font-family: var(--mono); font-size: 1.85rem; font-weight: 700; margin-top: 8px; line-height: 1; }
+    .kpi .sub { font-family: var(--mono); font-size: 0.72rem; color: var(--text-2); margin-top: 7px; }
+    .up { color: var(--up); } .down { color: var(--down); } .flat { color: var(--text-2); }
+
+    /* ── Panels / grid ── */
+    .grid { display: grid; grid-template-columns: 2fr 1fr; gap: 14px; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .panel {
+      background: linear-gradient(180deg, var(--s1), var(--s0));
+      border: 1px solid var(--border); border-radius: 16px; padding: 16px 18px; margin-bottom: 14px;
+    }
+    .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+    .panel-title { font-size: 0.82rem; font-weight: 600; letter-spacing: 0.4px; color: var(--text); display: flex; align-items: center; gap: 9px; }
+    .panel-title .tick { width: 6px; height: 14px; border-radius: 2px; background: var(--up); box-shadow: 0 0 10px var(--up-glow); }
+    .panel-title.t-cyan .tick { background: var(--cyan); box-shadow: 0 0 10px rgba(45,212,255,0.4); }
+    .panel-title.t-violet .tick { background: var(--violet); box-shadow: 0 0 10px rgba(167,139,250,0.4); }
+    .panel-title.t-amber .tick { background: var(--amber); box-shadow: 0 0 10px rgba(255,176,32,0.4); }
+
+    /* segmented control */
+    .seg { display: inline-flex; background: var(--s2); border: 1px solid var(--border); border-radius: 9px; padding: 3px; gap: 2px; }
+    .seg button {
+      font-family: var(--mono); font-size: 0.72rem; font-weight: 500; color: var(--text-2);
+      background: transparent; border: 0; padding: 5px 11px; border-radius: 7px; cursor: pointer; transition: all 0.15s;
+    }
+    .seg button:hover { color: var(--text); }
+    .seg button.active { background: rgba(0,230,168,0.14); color: var(--up); box-shadow: inset 0 0 0 1px rgba(0,230,168,0.3); }
+
+    .chart { width: 100%; height: 300px; }
+    .chart.sm { height: 220px; }
+
+    /* tables */
+    table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+    thead th {
+      text-align: left; font-weight: 500; font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.6px;
+      color: var(--text-3); padding: 6px 10px; border-bottom: 1px solid var(--border);
+    }
+    tbody td { padding: 9px 10px; border-bottom: 1px solid rgba(120,160,200,0.05); font-family: var(--mono); }
+    tbody tr:last-child td { border-bottom: 0; }
+    .sym { font-weight: 700; font-family: var(--mono); color: var(--text); }
+    .sym-cell { display: inline-flex; align-items: center; gap: 7px; }
+    .coin-ic { border-radius: 50%; flex-shrink: 0; vertical-align: middle; background: rgba(255,255,255,0.05); }
+    .tag {
+      font-family: var(--mono); font-size: 0.62rem; font-weight: 600; letter-spacing: 0.4px; text-transform: uppercase;
+      padding: 2px 7px; border-radius: 5px; display: inline-block;
+    }
+    .tag.long  { color: var(--up);   background: rgba(0,230,168,0.12); }
+    .tag.short { color: var(--down); background: rgba(255,59,92,0.12); }
+    .tag.spot  { color: var(--cyan); background: rgba(45,212,255,0.10); }
+    .tag.futures { color: var(--amber); background: rgba(255,176,32,0.10); }
+
+    /* decision feed (ticker) */
+    .feed { max-height: 420px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+    .feed::-webkit-scrollbar { width: 7px; } .feed::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 6px; }
+    /* Desktop: size the decisions panel to the (taller) research column and scroll the feed
+       inside it — no gap, never taller than the right side. The feed is absolutely positioned
+       so its content length doesn't grow the panel; the grid row is driven by the right column. */
+    @media (min-width: 901px) {
+      .feed-panel { display: flex; flex-direction: column; }
+      .feed-panel .feed-wrap { flex: 1; position: relative; min-height: 0; }
+      .feed-panel .feed-wrap .feed { position: absolute; inset: 0; max-height: none; }
+    }
+    .feed-item {
+      display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center;
+      background: var(--s2); border: 1px solid var(--border); border-left-width: 3px; border-radius: 10px; padding: 9px 11px;
+      animation: slidein 0.4s ease;
+    }
+    @keyframes slidein { from { opacity: 0; transform: translateX(-6px); } to { opacity: 1; transform: none; } }
+    .feed-item .a-sym { font-family: var(--mono); font-weight: 700; font-size: 0.82rem; min-width: 78px; display: flex; align-items: center; gap: 7px; }
+    .feed-item .a-reason { color: var(--text-2); font-size: 0.76rem; line-height: 1.35; overflow: hidden; }
+    .feed-item .a-action {
+      font-family: var(--mono); font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
+      padding: 2px 7px; border-radius: 5px; white-space: nowrap;
+    }
+    .feed-item .a-meta { text-align: right; font-family: var(--mono); font-size: 0.64rem; color: var(--text-3); white-space: nowrap; }
+    .conf { height: 3px; border-radius: 3px; background: rgba(255,255,255,0.06); margin-top: 5px; overflow: hidden; }
+    .conf > span { display: block; height: 100%; border-radius: 3px; }
+
+    .ac-buy   { color: var(--up);   background: rgba(0,230,168,0.14); } .b-buy   { border-left-color: var(--up); }
+    .ac-sell  { color: var(--down); background: rgba(255,59,92,0.14); } .b-sell  { border-left-color: var(--down); }
+    .ac-hold  { color: var(--cyan); background: rgba(45,212,255,0.12); } .b-hold  { border-left-color: var(--cyan); }
+    .ac-manage{ color: var(--amber);background: rgba(255,176,32,0.12); } .b-manage{ border-left-color: var(--amber); }
+    .ac-close { color: var(--violet);background: rgba(167,139,250,0.14);} .b-close { border-left-color: var(--violet); }
+    .ac-decline{color: var(--text-3);background: rgba(120,160,200,0.08);} .b-decline{ border-left-color: var(--text-3); }
+
+    /* notes */
+    .note { background: var(--s2); border: 1px solid var(--border); border-radius: 10px; padding: 11px 13px; margin-bottom: 9px; }
+    .note .who { font-family: var(--mono); font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.5px; color: var(--cyan); margin-bottom: 5px; }
+    .note .body { font-size: 0.8rem; color: var(--text-2); line-height: 1.45; }
+    .note .ttl { font-weight: 600; color: var(--text); font-size: 0.82rem; margin-bottom: 3px; }
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+    .chip { font-family: var(--mono); font-size: 0.64rem; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--border2); color: var(--text-2); display: inline-flex; align-items: center; gap: 5px; }
+
+    .empty { color: var(--text-3); font-size: 0.82rem; text-align: center; padding: 26px 10px; font-family: var(--mono); }
+
+    .vbreak { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 6px; }
+    .vstat { background: var(--s2); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+    .vstat .vh { font-family: var(--mono); font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-3); margin-bottom: 7px; }
+    .vstat .vrow { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 0.76rem; color: var(--text-2); padding: 2px 0; }
+    .vstat .vrow b { color: var(--text); }
+
+    footer { text-align: center; margin-top: 30px; color: var(--text-3); font-size: 0.74rem; }
+    footer a { color: var(--text-2); text-decoration: none; } footer a:hover { color: var(--up); }
+
+    @media (max-width: 900px) {
+      .kpis { grid-template-columns: repeat(2, 1fr); }
+      .grid, .grid-2 { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="bg-grid"></div>
+  <div class="bg-glow g1"></div>
+  <div class="bg-glow g2"></div>
+
+  <div class="wrap">
+    <!-- Home -->
+    <a class="back-link" href="/">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+      Home
+    </a>
+
+    <!-- Hero -->
+    <div class="hero">
+      <div class="brand">
+        <div class="brand-mark"><img src="/static/faviconTRD.png" alt="trAIde"></div>
+        <div>
+          <h1>trAIde</h1>
+          <p>Autonomous crypto trading agents — live decisions &amp; performance</p>
+        </div>
+      </div>
+      <div class="hero-meta" id="heroMeta">
+        <span class="pill muted" id="modePill"><span class="dot" style="background:var(--text-3)"></span> connecting…</span>
+        <span class="pill muted" id="disclosurePill">normalized %</span>
+        <span class="pill muted" id="updatedPill">—</span>
+      </div>
+    </div>
+
+    <!-- KPIs -->
+    <div class="kpis" id="kpis">
+      <div class="kpi k-up"><div class="label">Win Rate</div><div class="value" id="kWin">—</div><div class="sub" id="kWinSub">&nbsp;</div></div>
+      <div class="kpi k-cyan"><div class="label">Return (indexed)</div><div class="value" id="kRet">—</div><div class="sub" id="kRetSub">base 100</div></div>
+      <div class="kpi k-violet"><div class="label">Closed Trades</div><div class="value" id="kClosed">—</div><div class="sub" id="kClosedSub">&nbsp;</div></div>
+      <div class="kpi k-amber"><div class="label">Open Positions</div><div class="value" id="kOpen">—</div><div class="sub" id="kOpenSub">&nbsp;</div></div>
+      <div class="kpi k-down"><div class="label">Drawdown (today)</div><div class="value" id="kDD">—</div><div class="sub">from day open</div></div>
+    </div>
+
+    <!-- Equity + Win/Loss -->
+    <div class="grid">
+      <div class="panel">
+        <div class="panel-head">
+          <div class="panel-title"><span class="tick"></span> Equity curve <span style="color:var(--text-3);font-weight:400;font-family:var(--mono);font-size:0.7rem">· indexed return, UTC</span></div>
+          <div class="seg" id="periodSeg">
+            <button data-p="day">1D</button>
+            <button data-p="week">1W</button>
+            <button data-p="month">1M</button>
+            <button data-p="all" class="active">ALL</button>
+          </div>
+        </div>
+        <div class="chart" id="equityChart"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><div class="panel-title t-cyan"><span class="tick"></span> Win / Loss</div></div>
+        <div class="chart sm" id="donutChart"></div>
+        <div class="vbreak" id="venueBreak"></div>
+      </div>
+    </div>
+
+    <!-- Per-trade + Positions -->
+    <div class="grid">
+      <div class="panel">
+        <div class="panel-head"><div class="panel-title t-violet"><span class="tick"></span> Recent trade outcomes</div></div>
+        <div class="chart sm" id="tradesChart"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><div class="panel-title t-amber"><span class="tick"></span> Open positions</div></div>
+        <div id="positionsBox"><div class="empty">No open positions</div></div>
+      </div>
+    </div>
+
+    <!-- Decision feed + Research/Supervisor -->
+    <div class="grid">
+      <div class="panel feed-panel">
+        <div class="panel-head"><div class="panel-title"><span class="tick"></span> Live agent decisions</div></div>
+        <div class="feed-wrap">
+          <div class="feed" id="feedBox"><div class="empty">Waiting for decisions…</div></div>
+        </div>
+      </div>
+      <div>
+        <div class="panel">
+          <div class="panel-head"><div class="panel-title t-cyan"><span class="tick"></span> Research agent</div></div>
+          <div id="researchBox"><div class="empty">No research notes yet</div></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><div class="panel-title t-violet"><span class="tick"></span> Supervisor notes</div></div>
+          <div id="notesBox"><div class="empty">No supervisor notes</div></div>
+        </div>
+      </div>
+    </div>
+
+    <footer>
+      Read-only spectator view · No account balances, sizes, or identities are ever shown ·
+      <a href="/">SandBoxes.live</a>
+    </footer>
+  </div>
+
+  <script>
+    const INDEX_BASE = 100;
+    let equityChart, donutChart, tradesChart;
+    let currentPeriod = 'all';
+
+    function el(id) { return document.getElementById(id); }
+    function esc(s) { return (s == null ? '' : String(s)).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+    function relTime(ts) {
+      if (!ts) return '—';
+      const d = Math.floor(Date.now() / 1000) - ts;
+      if (d < 60) return d + 's ago';
+      if (d < 3600) return Math.floor(d / 60) + 'm ago';
+      if (d < 86400) return Math.floor(d / 3600) + 'h ago';
+      return Math.floor(d / 86400) + 'd ago';
+    }
+    function dayToLabel(day) {
+      const dt = new Date(day * 86400 * 1000);
+      const mm = String(dt.getUTCMonth() + 1).padStart(2, '0');
+      const dd = String(dt.getUTCDate()).padStart(2, '0');
+      return mm + '-' + dd;
+    }
+    function fmtPct(v, digits = 2) {
+      if (v == null || isNaN(v)) return '—';
+      return (v >= 0 ? '+' : '') + Number(v).toFixed(digits) + '%';
+    }
+    function cls(v) { return v > 0 ? 'up' : (v < 0 ? 'down' : 'flat'); }
+
+    /* Coin icons — free, CDN-hosted set (spothq/cryptocurrency-icons via jsDelivr).
+       No API key or rate limit; unknown tickers fall back to a generic coin glyph. */
+    const COIN_ICON_BASE = 'https://cdn.jsdelivr.net/npm/cryptocurrency-icons@0.18.1/svg/color/';
+    function coinIcon(symbol, size = 16) {
+      const t = (symbol || '').replace(/-?USDT$/i, '').trim().toLowerCase();
+      const gen = COIN_ICON_BASE + 'generic.svg';
+      const src = t ? COIN_ICON_BASE + encodeURIComponent(t) + '.svg' : gen;
+      return `<img class="coin-ic" src="${src}" alt="" width="${size}" height="${size}" loading="lazy" onerror="this.onerror=null;this.src='${gen}'">`;
+    }
+
+    function actionKind(action) {
+      const a = (action || '').toLowerCase();
+      if (a.includes('decline')) return 'decline';
+      if (a.includes('triggered') || a.includes('close') || a.includes('reduce') || a.includes('cut')) return 'close';
+      if (a.includes('manage') || a.includes('protect')) return 'manage';
+      if (a.includes('hold')) return 'hold';
+      if (a.includes('sell') || a.includes('short')) return 'sell';
+      if (a.includes('buy') || a.includes('long')) return 'buy';
+      return 'hold';
+    }
+
+    /* ---------- ECharts ---------- */
+    const AXIS = { axisLine: { lineStyle: { color: 'rgba(120,160,200,0.18)' } }, axisLabel: { color: '#50637a', fontFamily: 'JetBrains Mono', fontSize: 10 }, splitLine: { lineStyle: { color: 'rgba(120,160,200,0.06)' } } };
+
+    function initCharts() {
+      equityChart = echarts.init(el('equityChart'), null, { renderer: 'canvas' });
+      donutChart = echarts.init(el('donutChart'), null, { renderer: 'canvas' });
+      tradesChart = echarts.init(el('tradesChart'), null, { renderer: 'canvas' });
+      window.addEventListener('resize', () => { equityChart.resize(); donutChart.resize(); tradesChart.resize(); });
+    }
+
+    function renderEquity(points) {
+      points = points || [];
+      const x = points.map(p => dayToLabel(p.day));
+      const idx = points.map(p => p.indexClose == null ? null : Number(p.indexClose));
+      const dd = points.map(p => p.drawdownPct == null ? 0 : -Number(p.drawdownPct));
+      const last = idx.length ? idx[idx.length - 1] : INDEX_BASE;
+      const upColor = last >= INDEX_BASE ? '#00e6a8' : '#ff3b5c';
+      equityChart.setOption({
+        backgroundColor: 'transparent',
+        grid: { left: 44, right: 50, top: 18, bottom: 26 },
+        tooltip: { trigger: 'axis', backgroundColor: 'rgba(10,14,20,0.95)', borderColor: 'rgba(120,160,200,0.2)',
+          textStyle: { color: '#e6edf3', fontFamily: 'JetBrains Mono', fontSize: 11 },
+          formatter: p => { const a = p[0]; const ret = (a.value - INDEX_BASE); return `${a.axisValue}<br/>index <b>${a.value == null ? '—' : a.value.toFixed(2)}</b><br/>return <b style="color:${ret>=0?'#00e6a8':'#ff3b5c'}">${ret>=0?'+':''}${ret.toFixed(2)}%</b>`; } },
+        xAxis: { type: 'category', data: x, boundaryGap: false, ...AXIS },
+        yAxis: [
+          { type: 'value', scale: true, ...AXIS, axisLabel: { ...AXIS.axisLabel, formatter: v => v.toFixed(0) } },
+          { type: 'value', position: 'right', max: 0, ...AXIS, splitLine: { show: false }, axisLabel: { ...AXIS.axisLabel, formatter: v => v.toFixed(0) + '%' } }
+        ],
+        series: [
+          { name: 'drawdown', type: 'line', yAxisIndex: 1, data: dd, smooth: true, symbol: 'none',
+            lineStyle: { width: 0 }, areaStyle: { color: 'rgba(255,59,92,0.10)' }, z: 1 },
+          { name: 'index', type: 'line', data: idx, smooth: true, symbol: 'none', connectNulls: true, z: 3,
+            lineStyle: { width: 2.4, color: upColor, shadowColor: upColor, shadowBlur: 14 },
+            areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+              { offset: 0, color: last >= INDEX_BASE ? 'rgba(0,230,168,0.34)' : 'rgba(255,59,92,0.34)' },
+              { offset: 1, color: 'rgba(0,230,168,0.0)' }]) },
+            markLine: { silent: true, symbol: 'none', data: [{ yAxis: INDEX_BASE }],
+              lineStyle: { color: 'rgba(120,160,200,0.35)', type: 'dashed', width: 1 },
+              label: { color: '#50637a', fontFamily: 'JetBrains Mono', fontSize: 9, formatter: 'base ' + INDEX_BASE } } }
+        ]
+      });
+    }
+
+    function renderDonut(kpis) {
+      const wins = (kpis && kpis.wins) || 0;
+      const losses = (kpis && kpis.losses) || 0;
+      const total = wins + losses;
+      const wr = total ? (wins / total * 100) : 0;
+      donutChart.setOption({
+        backgroundColor: 'transparent',
+        tooltip: { trigger: 'item', backgroundColor: 'rgba(10,14,20,0.95)', borderColor: 'rgba(120,160,200,0.2)', textStyle: { color: '#e6edf3', fontFamily: 'JetBrains Mono', fontSize: 11 } },
+        series: [{
+          type: 'pie', radius: ['62%', '82%'], center: ['50%', '50%'], avoidLabelOverlap: false,
+          label: { show: true, position: 'center', formatter: () => total ? `${wr.toFixed(0)}%\nwin` : 'no\ndata',
+            color: wr >= 50 ? '#00e6a8' : '#ff3b5c', fontFamily: 'JetBrains Mono', fontSize: 22, fontWeight: 700, lineHeight: 22 },
+          labelLine: { show: false },
+          data: total ? [
+            { value: wins, name: 'Wins', itemStyle: { color: '#00e6a8', shadowColor: 'rgba(0,230,168,0.5)', shadowBlur: 12 } },
+            { value: losses, name: 'Losses', itemStyle: { color: '#ff3b5c' } }
+          ] : [{ value: 1, name: 'No data', itemStyle: { color: 'rgba(120,160,200,0.12)' } }]
+        }]
+      });
+    }
+
+    function renderTrades(trades) {
+      trades = (trades || []).slice().reverse(); // oldest→newest left→right
+      const hasUsd = trades.some(t => typeof t.pnl === 'number');
+      const x = trades.map((t, i) => t.symbol ? t.symbol.replace('-USDT', '') : ('#' + i));
+      const data = trades.map(t => {
+        const win = t.win === true || (typeof t.pnl === 'number' && t.pnl > 0);
+        const val = hasUsd ? Math.abs(Number(t.pnl || 0)) : (Number(t.confidence || 0.5));
+        return { value: win ? val : -val, itemStyle: { color: win ? '#00e6a8' : '#ff3b5c',
+          shadowColor: win ? 'rgba(0,230,168,0.4)' : 'rgba(255,59,92,0.4)', shadowBlur: 8, borderRadius: [3, 3, 0, 0] } };
+      });
+      tradesChart.setOption({
+        backgroundColor: 'transparent',
+        grid: { left: 36, right: 14, top: 14, bottom: 36 },
+        tooltip: { trigger: 'axis', backgroundColor: 'rgba(10,14,20,0.95)', borderColor: 'rgba(120,160,200,0.2)',
+          textStyle: { color: '#e6edf3', fontFamily: 'JetBrains Mono', fontSize: 11 },
+          formatter: p => { const t = trades[p[0].dataIndex]; const win = t.win === true || (typeof t.pnl === 'number' && t.pnl > 0);
+            return `${esc(t.symbol||'')}<br/>${win ? '<b style="color:#00e6a8">WIN</b>' : '<b style="color:#ff3b5c">LOSS</b>'}` + (hasUsd ? ` · ${Number(t.pnl).toFixed(2)}` : ` · conf ${(Number(t.confidence||0)).toFixed(2)}`); } },
+        xAxis: { type: 'category', data: x, ...AXIS, axisLabel: { ...AXIS.axisLabel, interval: 0, rotate: x.length > 10 ? 40 : 0, fontSize: 9 } },
+        yAxis: { type: 'value', ...AXIS, axisLabel: { ...AXIS.axisLabel, formatter: v => hasUsd ? Math.abs(v).toFixed(0) : Math.abs(v).toFixed(1) } },
+        series: [{ type: 'bar', data, barMaxWidth: 22 }]
+      });
+    }
+
+    function renderPositions(positions) {
+      const box = el('positionsBox');
+      if (!positions || !positions.length) { box.innerHTML = '<div class="empty">No open positions</div>'; return; }
+      let rows = positions.map(p => `
+        <tr>
+          <td class="sym"><span class="sym-cell">${coinIcon(p.symbol, 16)}${esc((p.symbol||'').replace('-USDT',''))}</span></td>
+          <td><span class="tag ${p.side === 'long' ? 'long' : 'short'}">${esc(p.side||'')}</span> <span class="tag ${p.venue === 'futures' ? 'futures' : 'spot'}">${esc(p.venue||'')}</span></td>
+          <td>${p.avgEntry == null ? '—' : Number(p.avgEntry).toPrecision(5)}</td>
+          <td>${p.currentPrice == null ? '—' : Number(p.currentPrice).toPrecision(5)}</td>
+          <td class="${cls(p.returnPct)}">${fmtPct(p.returnPct)}</td>
+        </tr>`).join('');
+      box.innerHTML = `<table><thead><tr><th>Symbol</th><th>Side</th><th>Entry</th><th>Mark</th><th>Return</th></tr></thead><tbody>${rows}</tbody></table>`;
+    }
+
+    function renderFeed(feed) {
+      const box = el('feedBox');
+      if (!feed || !feed.length) { box.innerHTML = '<div class="empty">Waiting for decisions…</div>'; return; }
+      box.innerHTML = feed.map(d => {
+        const k = actionKind(d.action);
+        const conf = Math.max(0, Math.min(1, Number(d.confidence || 0)));
+        const confColor = k === 'decline' ? '#50637a' : (k === 'sell' ? '#ff3b5c' : '#00e6a8');
+        return `<div class="feed-item b-${k}">
+          <div>
+            <div class="a-sym">${coinIcon(d.symbol, 18)}${esc((d.symbol||'').replace('-USDT',''))}</div>
+            <div class="conf"><span style="width:${(conf*100).toFixed(0)}%;background:${confColor}"></span></div>
+          </div>
+          <div class="a-reason">
+            <span class="a-action ac-${k}">${esc(d.action||'')}</span>
+            ${d.paper ? '<span class="a-action" style="color:var(--cyan);background:rgba(45,212,255,0.1)">paper</span>' : ''}
+            <div style="margin-top:5px">${esc(d.reason||'')}</div>
+          </div>
+          <div class="a-meta">${(conf*100).toFixed(0)}%<br/>${relTime(d.ts)}</div>
+        </div>`;
+      }).join('');
+    }
+
+    function renderResearch(research) {
+      const box = el('researchBox');
+      research = research || {};
+      const plans = research.plans || [], triggers = research.triggers || [], sentiments = research.sentiments || [];
+      let html = '';
+      plans.forEach(p => { html += `<div class="note"><div class="ttl">${esc(p.title||'Research note')}</div><div class="body">${esc(p.summary||'')}</div></div>`; });
+      if (triggers.length) {
+        html += `<div class="note"><div class="who">Watching</div><div class="chips">` +
+          triggers.map(t => `<span class="chip">${coinIcon(t.symbol, 13)}${esc((t.symbol||'').replace('-USDT',''))} · ${esc(t.direction||'')}</span>`).join('') + `</div></div>`;
+      }
+      if (sentiments.length) {
+        html += `<div class="note"><div class="who">Sentiment</div><div class="chips">` +
+          sentiments.map(s => { const sc = Number(s.score || 0); const c = sc > 0 ? 'var(--up)' : (sc < 0 ? 'var(--down)' : 'var(--text-2)');
+            return `<span class="chip" style="color:${c}">${coinIcon(s.symbol, 13)}${esc((s.symbol||'').replace('-USDT',''))} ${sc>0?'+':''}${sc.toFixed(2)}</span>`; }).join('') + `</div></div>`;
+      }
+      box.innerHTML = html || '<div class="empty">No research notes yet</div>';
+    }
+
+    function renderNotes(notes) {
+      const box = el('notesBox');
+      notes = notes || {};
+      const all = [...(notes.permanent || []).map(n => ({ ...n, kind: 'permanent' })), ...(notes.temporary || []).map(n => ({ ...n, kind: 'temporary' }))];
+      if (!all.length) { box.innerHTML = '<div class="empty">No supervisor notes</div>'; return; }
+      box.innerHTML = all.map(n => `<div class="note"><div class="who">${esc(n.author || 'Supervisor')} · ${n.kind}</div><div class="body">${esc(n.content||'')}</div></div>`).join('');
+    }
+
+    function renderVenue(kpis) {
+      const box = el('venueBreak');
+      if (!kpis) { box.innerHTML = ''; return; }
+      function block(name, b) {
+        b = b || {};
+        const wr = b.winRate != null ? (b.winRate * 100).toFixed(0) + '%' : '—';
+        return `<div class="vstat"><div class="vh">${name}</div>
+          <div class="vrow"><span>Win rate</span><b>${wr}</b></div>
+          <div class="vrow"><span>Wins / Losses</span><b>${b.wins||0} / ${b.losses||0}</b></div>
+          <div class="vrow"><span>Trades</span><b>${b.totalTrades||0}</b></div></div>`;
+      }
+      box.innerHTML = block('Spot', kpis.spot) + block('Futures', kpis.futures);
+    }
+
+    function renderKpis(s) {
+      const k = s.kpis || {};
+      const wins = k.wins || 0, losses = k.losses || 0, total = wins + losses;
+      const wr = total ? (wins / total * 100) : (k.winRate != null ? k.winRate * 100 : 0);
+      el('kWin').innerHTML = total ? `<span class="${wr>=50?'up':'down'}">${wr.toFixed(0)}%</span>` : '—';
+      el('kWinSub').textContent = `${wins}W / ${losses}L`;
+
+      const pts = s.equityPoints || [];
+      const lastIdx = pts.length ? Number(pts[pts.length - 1].indexClose) : INDEX_BASE;
+      const ret = lastIdx - INDEX_BASE;
+      el('kRet').innerHTML = `<span class="${cls(ret)}">${ret>=0?'+':''}${ret.toFixed(2)}%</span>`;
+      el('kRetSub').textContent = 'index ' + lastIdx.toFixed(2);
+
+      el('kClosed').textContent = (k.closedWithPnl != null ? k.closedWithPnl : (k.totalTrades || 0));
+      el('kClosedSub').textContent = (k.totalTrades || 0) + ' total';
+
+      const open = (s.positions || []).length;
+      el('kOpen').textContent = open;
+      const longs = (s.positions || []).filter(p => p.side === 'long').length;
+      el('kOpenSub').textContent = `${longs} long / ${open - longs} short`;
+
+      const dd = s.drawdownPct || 0;
+      el('kDD').innerHTML = dd > 0 ? `<span class="down">-${Number(dd).toFixed(2)}%</span>` : `<span class="flat">0.00%</span>`;
+    }
+
+    function renderHero(s) {
+      const mode = el('modePill');
+      if (s.paperTrading) { mode.className = 'pill paper'; mode.innerHTML = '<span class="dot"></span> PAPER'; }
+      else { mode.className = 'pill live'; mode.innerHTML = '<span class="dot"></span> LIVE'; }
+      el('disclosurePill').textContent = (s.disclosure || 'normalized') + ' %';
+      el('updatedPill').textContent = 'updated ' + relTime(s.generatedTs);
+    }
+
+    /* ---------- data ---------- */
+    async function loadLive() {
+      try {
+        const r = await fetch('/traide/live', { headers: { 'X-Requested-With': 'fetch' } });
+        const s = await r.json();
+        if (!s || !s.generatedTs) { showEmpty(); return; }
+        renderHero(s);
+        renderKpis(s);
+        renderDonut(s.kpis);
+        renderVenue(s.kpis);
+        renderTrades(s.trades);
+        renderPositions(s.positions);
+        renderFeed(s.feed);
+        renderResearch(s.research);
+        renderNotes(s.notes);
+        // equity uses its own period endpoint; seed with snapshot tail on first load
+        if (!window._equityLoaded) { renderEquity(s.equityPoints); }
+      } catch (e) { console.warn('live load failed', e); }
+    }
+
+    async function loadEquity(period) {
+      try {
+        currentPeriod = period;
+        const r = await fetch('/traide/equity?period=' + encodeURIComponent(period));
+        const j = await r.json();
+        renderEquity(j.points || []);
+        window._equityLoaded = true;
+      } catch (e) { console.warn('equity load failed', e); }
+    }
+
+    function showEmpty() {
+      el('modePill').className = 'pill muted';
+      el('modePill').innerHTML = '<span class="dot" style="background:var(--amber)"></span> warming up';
+      el('updatedPill').textContent = 'no data yet';
+      ['feedBox','positionsBox','researchBox','notesBox'].forEach(id => {
+        el(id).innerHTML = '<div class="empty">Agents warming up… data appears once the bot publishes its first snapshot.</div>';
+      });
+      renderEquity([]); renderDonut({}); renderTrades([]);
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      initCharts();
+      el('periodSeg').querySelectorAll('button').forEach(b => {
+        b.addEventListener('click', () => {
+          el('periodSeg').querySelectorAll('button').forEach(x => x.classList.remove('active'));
+          b.classList.add('active');
+          loadEquity(b.dataset.p);
+        });
+      });
+      loadLive();
+      loadEquity('all');
+      setInterval(loadLive, 30000);                          // live snapshot: every 30s
+      setInterval(() => loadEquity(currentPeriod), 60000);   // equity curve: every 60s
+    });
+  </script>
+</body>
+</html>

@@ -24,10 +24,24 @@ from AIOpenProblemSolver.azurestorage import (
     get_problem_progress,
     list_problems,
 )
+from TrAIde.azurestorage import (
+    get_live_snapshot as traide_get_live_snapshot,
+    get_equity_series as traide_get_equity_series,
+    get_decision_feed as traide_get_decision_feed,
+    get_closed_trades as traide_get_closed_trades,
+)
 
 app = Flask(__name__)
 
 cache = {}
+
+
+def _env_flag(name, default=False):
+    """Parse a boolean-ish environment variable; falls back to `default` when unset."""
+    val = os.environ.get(name)
+    if val is None:
+        return default
+    return val.strip().lower() in ("1", "true", "yes", "on")
 
 @app.route('/get-string', methods=['GET'])
 def get_string():
@@ -317,9 +331,61 @@ def ai_open_problem_solver_problem_details():
         }
     )
 
+@app.route('/traide', methods=['GET'])
+def traide():
+    return render_template('traide.html')
+
+
+def _traide_guard():
+    """Block hot-linking of the data endpoints; the page itself sets a /traide Referer."""
+    return '/traide' in request.headers.get('Referer', '')
+
+
+@app.route('/traide/live', methods=['GET'])
+def traide_live():
+    if not _traide_guard():
+        return jsonify({"error": "forbidden"}), 403
+    return jsonify(traide_get_live_snapshot())
+
+
+@app.route('/traide/equity', methods=['GET'])
+def traide_equity():
+    if not _traide_guard():
+        return jsonify({"error": "forbidden"}), 403
+    import time as _time
+    period = (request.args.get('period') or 'all').lower()
+    today = int(_time.time() // 86400)
+    span = {"day": 1, "week": 7, "month": 31, "all": None}.get(period, None)
+    start = (today - span) if span else None
+    return jsonify({"period": period, "points": traide_get_equity_series(start_day=start)})
+
+
+@app.route('/traide/feed', methods=['GET'])
+def traide_feed():
+    if not _traide_guard():
+        return jsonify({"error": "forbidden"}), 403
+    try:
+        limit = max(1, min(int(request.args.get('limit', 30)), 100))
+    except ValueError:
+        limit = 30
+    return jsonify({"items": traide_get_decision_feed(limit)})
+
+
+@app.route('/traide/trades', methods=['GET'])
+def traide_trades():
+    if not _traide_guard():
+        return jsonify({"error": "forbidden"}), 403
+    try:
+        limit = max(1, min(int(request.args.get('limit', 100)), 200))
+    except ValueError:
+        limit = 100
+    return jsonify({"items": traide_get_closed_trades(limit)})
+
+
 @app.route('/')
 def home():
-    return render_template('index.html')
+    # The /traide page stays reachable by URL; this flag only hides its card on the landing page.
+    return render_template('index.html', hide_traide=_env_flag("HIDE_TRAIDE_PAGE", True))
 
 if __name__ == '__main__':
     app.run(debug=True, port=5050)

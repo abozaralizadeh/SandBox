@@ -248,6 +248,7 @@
     .card:nth-child(3)::before { background: linear-gradient(135deg, rgba(6,182,212,0.1), transparent 60%); }
     .card:nth-child(4)::before { background: linear-gradient(135deg, rgba(245,158,11,0.1), transparent 60%); }
     .card:nth-child(5)::before { background: linear-gradient(135deg, rgba(16,185,129,0.1), transparent 60%); }
+    .card:nth-child(6)::before { background: linear-gradient(135deg, rgba(0,230,168,0.12), transparent 60%); }
 
     .card-icon {
       flex-shrink: 0;
@@ -272,6 +273,7 @@
     .card:nth-child(3) .card-icon { background: rgba(6,182,212,0.15); }
     .card:nth-child(4) .card-icon { background: rgba(245,158,11,0.15); }
     .card:nth-child(5) .card-icon { background: rgba(16,185,129,0.15); }
+    .card:nth-child(6) .card-icon { background: rgba(0,230,168,0.15); }
 
     .card-body { position: relative; z-index: 1; }
 
@@ -320,6 +322,7 @@
     .card:nth-child(3) .card-tag { color: #67e8f9; background: rgba(6,182,212,0.12); }
     .card:nth-child(4) .card-tag { color: #fcd34d; background: rgba(245,158,11,0.12); }
     .card:nth-child(5) .card-tag { color: #6ee7b7; background: rgba(16,185,129,0.12); }
+    .card:nth-child(6) .card-tag { color: #5eead4; background: rgba(0,230,168,0.12); }
 
     footer {
       text-align: center;
@@ -419,6 +422,17 @@
           <span class="card-tag">Research</span>
         </div>
       </a>
+
+      {% if not hide_traide %}
+      <a class="card" href="/traide">
+        <div class="card-icon"><img src="/static/faviconTRD.png" alt=""></div>
+        <div class="card-body">
+          <div class="card-title">trAIde <span class="card-arrow">&rarr;</span></div>
+          <div class="card-desc">Watch autonomous AI agents trade crypto live — decisions, open positions, and performance in real time.</div>
+          <span class="card-tag">Live Trading</span>
+        </div>
+      </a>
+      {% endif %}
     </div>
 
     <footer>
