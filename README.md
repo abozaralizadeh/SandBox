@@ -7,6 +7,8 @@ These projects are not isolated tools but rather facets of a broader exploration
 Autonomous Creative Mathematician & Deep-Research Agent  
 AI Open Problem Solver extends the LangGraph infrastructure with a creative autonomous mathematician that actively attempts to solve open mathematical problems — including the Millennium Prize Problems. Rather than just searching the internet for existing work, the agent formulates original conjectures, runs computational experiments, develops proof strategies, and uses web research only as a supplement. Each daily iteration is recorded as a rich HTML lab notebook entry. [Read more](https://pub.towardsai.net/can-my-autonomous-ai-agent-solve-a-millennium-problem-and-win-1-000-000-3ff8fff8a786)
 
+📐 **Architecture:** [Technical flow and Mermaid diagrams](AIOpenProblemSolver/architecture.md)
+
 #### Key Capabilities
 - **Creative Problem Solving**: The agent thinks independently — formulating hypotheses, testing conjectures computationally, building proof sketches, and pivoting when approaches fail, rather than passively summarizing existing research.
 - **Python Math Sandbox**: A dedicated computational tool gives the agent a full mathematical laboratory with SymPy (symbolic algebra/calculus), NumPy (numerical computation), SciPy (optimization, integration, special functions), and Matplotlib — enabling it to run experiments, verify proofs numerically, and search for counterexamples.
@@ -41,6 +43,8 @@ AIBlog is an autonomous agent that discovers new developments in machine learnin
 
 AIBlog showcases the potential of recursive agent architectures to create high-quality, verifiable technical content without any human-in-the-loop. [Read more](https://medium.com/design-bootcamp/recursive-intelligence-an-ai-agent-that-researches-and-writes-about-ai-autonomously-100bccd81001)
 
+📐 **Architecture:** [Technical flow and Mermaid diagrams](AIBlog/architecture.md)
+
 Live Demo
 View the daily AI-written blog:
 https://SandBoxes.Live/aiblog
@@ -53,6 +57,8 @@ AI-Driven News Prediction and Decision-Making
 TomorrowNews is an experimental open-source project that uses LangChain Agents and Azure OpenAI to generate speculative, AI-driven news predictions based on real-world events. The project aims to simulate decision-making for the future, providing a creative glimpse into what might happen in various sectors, such as politics, economy, society, and the environment.
 
 By feeding real news as input, this project generates predictions and outcomes for the following day, creating speculative headlines and decisions related to global topics. [Read more](https://ai.gopubby.com/tomorrow-news-how-ai-crafts-futures-headlines-and-stories-8f2b37fd841e)
+
+📐 **Architecture:** [Technical flow and Mermaid diagrams](TomorrowNews/architecture.md)
 
 #### Key Features:
 - **Autonomous AI Predictions**: Uses real-time news data to predict plausible future events.
@@ -101,6 +107,8 @@ https://SandBoxes.Live/tomorrownews
 This experimental project explores the potential of AI as an autonomous decision-maker for a virtual world. Using Azure OpenAI and a structured prompt-response loop, the system generates daily high-level decisions on critical areas such as economy, society, environment, and global politics. Each decision is designed to be realistic, impactful, and ethically informed, balancing immediate outcomes with long-term sustainability. The goal is to create an engaging and evolving narrative that demonstrates the capabilities of generative AI while inviting users to reflect on governance and the complexities of decision-making in a simulated world. [Read more](https://abozar-alizadeh.medium.com/exploring-ai-driven-governance-building-a-virtual-world-where-ai-rules-22419690a409)
 
 The decisions are presented on a retro CRT television: the classic experience scrolls the day's decision as green terminal text, and the four physical knobs let you step backward/forward through the timeline and pause or reverse the scroll.
+
+📐 **Architecture:** [Technical flow and Mermaid diagrams](GenBox/architecture.md)
 
 I invite you to explore the very simple interface at https://SandBoxes.Live/genbox, where you can witness the AI’s daily decisions and follow the evolving narrative of this virtual world.
 
@@ -155,6 +163,8 @@ AZURE_OPENAI_MODEL_SORA=sora-2   # single value applies to all, or give one per 
 
 Multi-Agent AI Comic Strip Generator  
 ComicBook produces a daily AI-generated comic strip using three collaborating agents built on the **OpenAI Agents SDK**. Each agent hands off to the next via the SDK's native handoff mechanism, forming a Director → Storyteller → Cartoonist pipeline that runs end-to-end without human intervention.
+
+📐 **Architecture:** [Technical flow and Mermaid diagrams](ComicBook/architecture.md)
 
 #### Agent Pipeline
 - **Director** — Invents original story arcs (genre, characters, art style), decides when an arc starts and ends based on narrative progression (not a fixed day count), and plans each episode's panel layout and tone.
