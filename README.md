@@ -127,11 +127,15 @@ AZURE_OPENAI_ENDPOINT_SORA       # Sora 2 resource endpoint(s)
 AZURE_OPENAI_API_KEY_SORA        # matching API key(s)
 AZURE_OPENAI_MODEL_SORA=sora-2   # deployment name(s)
 AZURE_OPENAI_API_VERSION_SORA=preview
-genbox_video_blob_name=genbox-video   # blob container for merged MP4s
-GENBOX_VIDEO_CUTOFF_DATE=2026-06-05   # only dates >= this get video
+AZURE_OPENAI_MODEL_TTS=tts       # text-to-speech deployment on the SAME resources
+genbox_video_blob_name=genbox-video   # blob container for merged MP4s + narration
+GENBOX_VIDEO_CUTOFF_DATE=2026-06-05   # only dates >= this get video + narration
 GENBOX_VIDEO_ENABLED=true
 GENBOX_VIDEO_MAX_CLIPS=6               # cost cap on clips per segment
+GENBOX_TTS_VOICE=onyx                 # narration voice (optional)
 ```
+
+When `AZURE_OPENAI_MODEL_TTS` is set, GenBox also narrates the daily decision in a government-spokesperson tone (via the same resources' TTS deployment). The narration renders quickly — well before the video — and plays over the scrolling text, with the scroll slowed to match the speech length. It's gated, cached, stored (in the video blob container), and referenced in the table just like the video, and served same-origin via `/genbox-audio`.
 
 **Multiple Sora resources / distributed credits.** Sora's API is job-scoped: a `create` call returns a video id that only exists on the resource that served it, so the follow-up `poll {id}` and `download {id}` must hit that *same* resource — a round-robin gateway in front of several resources breaks this affinity. To spread load across resources instead, list them **directly** (not behind a balancer) as comma-separated values aligned by index; GenBox round-robins at the *job* level and pins each clip's whole create→poll→download lifecycle to the resource it picked (and fails a clip over to the next resource on error):
 

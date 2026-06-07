@@ -62,6 +62,25 @@ VIDEO_SIZE = os.getenv("GENBOX_VIDEO_SIZE", "1280x720")  # landscape for the CRT
 ALLOWED_SECONDS = (4, 8, 12)                              # Sora 2 clip durations
 MAX_CLIPS = int(os.getenv("GENBOX_VIDEO_MAX_CLIPS", "6"))
 
+# --- text-to-speech (same Azure resources as Sora; just a different deployment) ---
+# Narrates the daily decision text over the scrolling text, in a government-spokesperson tone.
+TTS_MODEL = (os.getenv("AZURE_OPENAI_MODEL_TTS") or "").strip()        # tts deployment name
+TTS_VOICE = os.getenv("GENBOX_TTS_VOICE", "onyx")                      # deep, authoritative
+TTS_FORMAT = os.getenv("GENBOX_TTS_FORMAT", "mp3")
+TTS_MAX_CHARS = int(os.getenv("GENBOX_TTS_MAX_CHARS", "4000"))         # API input cap guard
+# Tone hint (honored by gpt-4o-mini-tts; ignored by tts-1 — sent best-effort).
+TTS_INSTRUCTIONS = os.getenv(
+    "GENBOX_TTS_INSTRUCTIONS",
+    "Speak as a calm, authoritative government spokesperson formally addressing the public "
+    "about a new program — measured pace, clear diction, confident and reassuring.",
+)
+
+
+def tts_enabled_for(value=None) -> bool:
+    """TTS follows the same gate as video (feature on, resources configured, date >= cutoff)
+    and additionally requires a TTS deployment name."""
+    return bool(TTS_MODEL) and video_enabled_for(value)
+
 
 def _enabled() -> bool:
     try:

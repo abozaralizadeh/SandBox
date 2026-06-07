@@ -53,53 +53,79 @@ def _is_stale(meta) -> bool:
     return age > _STALE_SECONDS
 
 
+def _status_dict(meta) -> dict:
+    """Shape the {video, audio} status returned to the frontend from a metadata row."""
+    if not meta:
+        return {"status": "absent", "video_url": "", "audio_status": "absent", "audio_url": ""}
+    return {
+        "status": meta.get("status", "pending"),
+        "video_url": meta.get("video_url", ""),
+        "audio_status": meta.get("audio_status", "absent"),
+        "audio_url": meta.get("audio_url", ""),
+    }
+
+
 def video_status(date=None) -> dict:
     """Read-only status for a date. Safe on any worker. Does NOT start generation."""
     if not config.video_enabled_for(date):
-        return {"status": "disabled", "video_url": ""}
-    meta = get_video_meta(_flat(date))
-    if meta:
-        return {"status": meta.get("status", "pending"), "video_url": meta.get("video_url", "")}
-    return {"status": "absent", "video_url": ""}
+        return {"status": "disabled", "video_url": "", "audio_status": "disabled", "audio_url": ""}
+    return _status_dict(get_video_meta(_flat(date)))
 
 
 def ensure_generation_started(date=None) -> dict:
-    """Idempotent, non-blocking trigger. Starts background generation on first call for
-    an eligible date and returns the current {status, video_url}."""
+    """Idempotent, non-blocking trigger. Starts background generation (audio first, then
+    video) on first call for an eligible date and returns the current status dict."""
     if not config.video_enabled_for(date):
-        return {"status": "disabled", "video_url": ""}
+        return {"status": "disabled", "video_url": "", "audio_status": "disabled", "audio_url": ""}
 
     flat = _flat(date)
     meta = get_video_meta(flat)
     if meta:
         status = meta.get("status")
         if status == "ready":
-            return {"status": "ready", "video_url": meta.get("video_url", "")}
+            return _status_dict(meta)
         if status == "generating" and not _is_stale(meta):
-            return {"status": "generating", "video_url": ""}
+            return _status_dict(meta)
         if status == "failed":
             # Terminal until the row is cleared; the frontend stops polling on 'failed'.
-            return {"status": "failed", "video_url": ""}
+            return _status_dict(meta)
         # stale 'generating' (or anything else) falls through to a fresh attempt
 
     decision = _decision_text_for(flat)
     if not decision:
         # No decision text for this date yet -> nothing to narrate.
-        return {"status": "absent", "video_url": ""}
+        return {"status": "absent", "video_url": "", "audio_status": "absent", "audio_url": ""}
 
     if not try_acquire_video_lock(flat):
         # Another worker just started it.
-        return {"status": "generating", "video_url": ""}
+        return _status_dict(get_video_meta(flat)) or {"status": "generating", "video_url": "",
+                                                       "audio_status": "generating", "audio_url": ""}
 
-    set_video_meta(flat, status="generating", video_url="", error="")
+    init = {"status": "generating", "video_url": "", "error": ""}
+    if config.tts_enabled_for(date):
+        init["audio_status"] = "generating"
+        init["audio_url"] = ""
+    set_video_meta(flat, **init)
     thread = threading.Thread(target=_run_generation, args=(flat, decision), daemon=True)
     thread.start()
-    return {"status": "generating", "video_url": ""}
+    return _status_dict(get_video_meta(flat))
 
 
 def _run_generation(flat_date: str, decision: str):
+    # 1) TTS narration first — it's quick, so text-mode audio becomes available within
+    #    seconds while the (slow) video renders.
+    if config.TTS_MODEL:
+        try:
+            from GenBox.newsvideo.tts_client import build_news_audio
+            audio_url = asyncio.run(build_news_audio(decision, flat_date))
+            set_video_meta(flat_date, audio_status="ready", audio_url=audio_url)
+            logger.info("GenBox audio ready for %s", flat_date)
+        except Exception:
+            logger.exception("GenBox audio generation failed for %s", flat_date)
+            set_video_meta(flat_date, audio_status="failed", audio_url="")
+
+    # 2) Video (slow). Imported lazily so app startup doesn't pull the agents SDK / ffmpeg.
     try:
-        # Imported lazily so app startup doesn't pull the agents SDK / ffmpeg.
         from GenBox.newsvideo.pipeline import build_news_video
         url, clip_count = asyncio.run(build_news_video(decision, flat_date))
         set_video_meta(flat_date, status="ready", video_url=url, clip_count=clip_count, error="")

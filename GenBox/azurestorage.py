@@ -116,6 +116,26 @@ def upload_video_bytes_to_blob(video_bytes: bytes, flat_date: str) -> str:
     return blob_client.url
 
 
+_AUDIO_CONTENT_TYPES = {
+    "mp3": "audio/mpeg", "wav": "audio/wav", "opus": "audio/ogg",
+    "aac": "audio/aac", "flac": "audio/flac", "pcm": "audio/L16",
+}
+
+
+def upload_audio_bytes_to_blob(audio_bytes: bytes, flat_date: str, fmt: str = "mp3") -> str:
+    """Upload TTS narration audio to the SAME video blob container; return its blob URL."""
+    _ensure_video_container()
+    fmt = (fmt or "mp3").lower()
+    blob_name = f"{flat_date}_{uuid.uuid4().hex[:8]}.{fmt}"
+    blob_client = _video_container_client.get_blob_client(blob_name)
+    blob_client.upload_blob(
+        BytesIO(audio_bytes),
+        overwrite=True,
+        content_settings=ContentSettings(content_type=_AUDIO_CONTENT_TYPES.get(fmt, "audio/mpeg")),
+    )
+    return blob_client.url
+
+
 def get_video_meta(flat_date: str):
     """Return the video metadata entity for a date, or None."""
     try:

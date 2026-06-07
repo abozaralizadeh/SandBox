@@ -198,35 +198,49 @@ def genbox_video_status():
     return jsonify(ensure_generation_started(_parse_date_arg(request.args.get('date'))))
 
 
-@app.route('/genbox-video', methods=['GET'])
-def genbox_video():
-    # Same-origin proxy that streams the merged MP4 from (private) blob storage, with
-    # HTTP Range support so the <video> element can play/seek regardless of the blob
-    # container's public-access setting.
-    parsed_date = _parse_date_arg(request.args.get('date'))
-    st = video_status(parsed_date)
-    if st.get("status") != "ready" or not st.get("video_url"):
-        return ("Video not ready", 404)
-    blob_name = video_blob_name_from_url(st["video_url"])
+_AUDIO_MIMES = {"mp3": "audio/mpeg", "wav": "audio/wav", "opus": "audio/ogg",
+                "aac": "audio/aac", "flac": "audio/flac"}
+
+
+def _serve_blob(blob_name, mimetype):
+    """Stream a blob from the genbox-video container with HTTP Range support, so media
+    plays/seeks regardless of the container's public-access setting (same-origin proxy)."""
     try:
         size = get_video_blob_size(blob_name)
     except Exception:
-        return ("Video not found", 404)
-
-    range_header = request.headers.get("Range")
-    rng = _parse_range(range_header, size) if range_header else None
+        return ("Not found", 404)
+    rng = _parse_range(request.headers.get("Range"), size) if request.headers.get("Range") else None
     if rng:
         start, end = rng
         data = download_video_blob_bytes(blob_name, offset=start, length=end - start + 1)
-        resp = Response(data, status=206, mimetype="video/mp4")
+        resp = Response(data, status=206, mimetype=mimetype)
         resp.headers["Content-Range"] = f"bytes {start}-{end}/{size}"
     else:
         data = download_video_blob_bytes(blob_name)
-        resp = Response(data, mimetype="video/mp4")
+        resp = Response(data, mimetype=mimetype)
     resp.headers["Accept-Ranges"] = "bytes"
     resp.headers["Content-Length"] = str(len(data))
     resp.headers["Cache-Control"] = "no-store"
     return resp
+
+
+@app.route('/genbox-video', methods=['GET'])
+def genbox_video():
+    st = video_status(_parse_date_arg(request.args.get('date')))
+    if st.get("status") != "ready" or not st.get("video_url"):
+        return ("Video not ready", 404)
+    return _serve_blob(video_blob_name_from_url(st["video_url"]), "video/mp4")
+
+
+@app.route('/genbox-audio', methods=['GET'])
+def genbox_audio():
+    # Streams the TTS narration MP3 (stored in the same blob container as the video).
+    st = video_status(_parse_date_arg(request.args.get('date')))
+    if st.get("audio_status") != "ready" or not st.get("audio_url"):
+        return ("Audio not ready", 404)
+    blob_name = video_blob_name_from_url(st["audio_url"])
+    ext = blob_name.rsplit(".", 1)[-1].lower()
+    return _serve_blob(blob_name, _AUDIO_MIMES.get(ext, "audio/mpeg"))
 
 @app.route('/ai-open-problem-solver', methods=['GET'])
 def ai_open_problem_solver():

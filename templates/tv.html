@@ -287,6 +287,7 @@
     <div id="screen">
       <p id="content"></p>
       <video id="tvVideo" playsinline preload="auto" style="display:none"></video>
+      <audio id="tvAudio" preload="auto"></audio>
       <div id="soundHint" style="display:none">🔊 click for sound</div>
     </div>
     <button id="button1"></button>
@@ -304,8 +305,11 @@
     let userInteracted = false;   // gate unmuted autoplay behind a user gesture
     let paused = false;           // button3: pause BOTH video and scrolling text
     let currentVideoUrl = '';
+    let audioAvailable = false;   // a ready TTS narration exists for currentDate
+    let currentAudioUrl = '';
     let statusPollTimer = null;
     const videoEl = document.getElementById('tvVideo');
+    const audioEl = document.getElementById('tvAudio');
     const contentEl = document.getElementById('content');
 
     function getContent(date = null) {
@@ -341,7 +345,9 @@
     function updateSoundHint() {
       const hint = document.getElementById('soundHint');
       if (!hint) return;
-      hint.style.display = (mode === 'video' && videoEl.muted && !videoEl.paused) ? 'block' : 'none';
+      const videoNeedsClick = (mode === 'video' && videoEl.muted && !videoEl.paused);
+      const audioNeedsClick = (mode === 'text' && audioAvailable && !paused && audioEl.paused);
+      hint.style.display = (videoNeedsClick || audioNeedsClick) ? 'block' : 'none';
     }
 
     function showText() {
@@ -351,17 +357,21 @@
       contentEl.style.display = 'block';
       const st = document.getElementById('scrollingText');
       if (st) st.style.animationPlayState = paused ? 'paused' : 'running';
+      startTextAudio();              // play the TTS narration (synced), if available
       updateSoundHint();
     }
 
-    // Size the scroll to the actual text: start just below the screen, end fully above it,
-    // at a constant pixel speed — so long texts don't begin far off-screen and arrive late.
+    // Size the scroll to the actual text: start just below the screen, end fully above it.
+    // Duration follows the narration when available (forcedDur), else a constant pixel speed,
+    // so long texts don't begin far off-screen and arrive late, and text+audio stay in sync.
     const SCROLL_SPEED_PX_PER_SEC = 45;
-    function setupScroll(el) {
+    function setupScroll(el, forcedDur) {
       const screen = document.getElementById('screen');
       const screenH = (screen ? screen.clientHeight : 331);
       const textH = el.scrollHeight || screenH;
-      const dur = Math.max(18, (screenH + textH) / SCROLL_SPEED_PX_PER_SEC);
+      const dur = (forcedDur && isFinite(forcedDur) && forcedDur > 1)
+        ? forcedDur
+        : Math.max(18, (screenH + textH) / SCROLL_SPEED_PX_PER_SEC);
       el.style.setProperty('--scroll-start', screenH + 'px');   // start just below the screen
       el.style.setProperty('--scroll-end', (-textH) + 'px');    // end fully above the screen
       el.style.setProperty('--scroll-dur', dur + 's');
@@ -370,6 +380,19 @@
       void el.offsetHeight;            // force reflow
       el.style.animation = '';         // fall back to the stylesheet rule (with the vars)
       el.style.animationPlayState = paused ? 'paused' : 'running';
+    }
+
+    // TTS narration synced to the scroll. Needs a user gesture for sound (like the video);
+    // the document click handler restarts it if the browser blocked autoplay.
+    function startTextAudio() {
+      const st = document.getElementById('scrollingText');
+      if (!audioAvailable || !currentAudioUrl) return;
+      if (audioEl.getAttribute('src') !== currentAudioUrl) audioEl.src = currentAudioUrl;
+      audioEl.muted = false;
+      if (paused) { audioEl.pause(); return; }
+      try { audioEl.currentTime = 0; } catch (e) {}
+      if (st && audioEl.duration && isFinite(audioEl.duration)) setupScroll(st, audioEl.duration);
+      audioEl.play().catch(() => {});   // may be blocked until the first click
     }
 
     // Play preferring SOUND. Only fall back to muted if the browser actually blocks
@@ -393,12 +416,17 @@
     function showVideo(url) {
       if (!url) return;
       mode = 'video';
+      stopTextAudio();                                 // narration belongs to text mode only
       if (videoEl.getAttribute('src') !== url) videoEl.src = url;
       try { videoEl.currentTime = 0; } catch (e) {}   // restart from the top each time
       videoEl.style.display = 'block';
       contentEl.style.display = 'none';
       if (paused) { videoEl.pause(); updateSoundHint(); return; }
       playPreferSound();
+    }
+
+    function stopTextAudio() {
+      try { audioEl.pause(); } catch (e) {}
     }
 
     // Apply the current pause state to whichever mode is showing (button3).
@@ -408,19 +436,22 @@
       } else {
         const st = document.getElementById('scrollingText');
         if (st) st.style.animationPlayState = paused ? 'paused' : 'running';
+        if (paused) stopTextAudio(); else startTextAudio();
       }
       updateSoundHint();
     }
 
-    // EVERY click is a user gesture: unlock sound on the playing video (works repeatedly,
-    // so a muted auto-start can always be turned on by clicking anywhere).
+    // EVERY click is a user gesture: unlock sound on the currently playing media (works
+    // repeatedly, so a blocked/muted auto-start can always be turned on by clicking anywhere).
     document.addEventListener('click', () => {
       userInteracted = true;
       if (mode === 'video' && !paused && videoEl.muted) {
         videoEl.muted = false;
         videoEl.play().catch(() => {});
-        updateSoundHint();
+      } else if (mode === 'text' && !paused && audioAvailable && audioEl.paused) {
+        startTextAudio();
       }
+      updateSoundHint();
     }, true);
     videoEl.addEventListener('playing', updateSoundHint);
     // If the proxied MP4 can't load, fall back to scrolling text instead of a black screen.
@@ -431,14 +462,29 @@
     });
 
     // ---- video <-> text loop ----
-    // When the video ends, switch to scrolling text; after one full text scroll cycle,
-    // switch back to the video. Repeats. (No-ops while paused or when no video exists.)
+    // Video ends -> scrolling text (with narration); the narration (or one full scroll when
+    // there is no narration) ends -> back to video. Repeats. No-ops while paused / no video.
     videoEl.addEventListener('ended', () => {
       if (!paused && videoAvailable) showText();
     });
+    audioEl.addEventListener('ended', () => {
+      if (!paused && mode === 'text' && videoAvailable && currentVideoUrl) showVideo(currentVideoUrl);
+    });
+    // When the narration's length is known, match the scroll to it and restart both together
+    // so the text finishes scrolling exactly as the narration finishes.
+    audioEl.addEventListener('loadedmetadata', () => {
+      const st = document.getElementById('scrollingText');
+      if (mode === 'text' && !paused && st && audioEl.duration && isFinite(audioEl.duration)) {
+        setupScroll(st, audioEl.duration);
+        try { audioEl.currentTime = 0; } catch (e) {}
+        audioEl.play().catch(() => {});
+      }
+    });
+    audioEl.addEventListener('error', () => { audioAvailable = false; updateSoundHint(); });
+    // Fallback when there is NO narration: switch back to video after one full text scroll.
     document.addEventListener('animationiteration', (e) => {
       if (e.target && e.target.id === 'scrollingText'
-          && mode === 'text' && !paused && videoAvailable && currentVideoUrl) {
+          && mode === 'text' && !paused && videoAvailable && currentVideoUrl && !audioAvailable) {
         showVideo(currentVideoUrl);
       }
     });
@@ -447,38 +493,38 @@
       try {
         const url = `/genbox-video-status?date=${(date || new Date()).toISOString()}`;
         const r = await fetch(url);
-        if (!r.ok) return { status: 'absent', video_url: '' };
+        if (!r.ok) return { status: 'absent', audio_status: 'absent' };
         return await r.json();
       } catch (e) {
-        return { status: 'absent', video_url: '' };
+        return { status: 'absent', audio_status: 'absent' };
       }
     }
 
-    // Poll the status endpoint; the first poll lazily starts background generation.
+    // Poll the status endpoint; the first poll lazily starts background generation. The
+    // narration (audio) is usually ready well before the video, so handle them separately.
     function startStatusPolling(date) {
       clearInterval(statusPollTimer);
-      videoAvailable = false;
-      currentVideoUrl = '';
+      videoAvailable = false; currentVideoUrl = '';
+      audioAvailable = false; currentAudioUrl = '';
+      stopTextAudio();
       const pollDate = date ? new Date(date) : new Date();
+      const terminal = (s) => ['ready', 'disabled', 'absent', 'failed'].includes(s || 'absent');
       const poll = async () => {
         const s = await fetchVideoStatus(pollDate);
-        if (s.status === 'ready' && s.video_url) {
-          clearInterval(statusPollTimer);
-          videoAvailable = true;
-          // Play via the same-origin proxy so it works even if the blob container is private.
-          currentVideoUrl = `/genbox-video?date=${pollDate.toISOString()}`;
-          // Auto-switch to video (the default mode) once it's ready, for the current day.
-          // If the user hasn't clicked yet it plays muted with a "click for sound" hint.
-          if (sameDay(pollDate, currentDate)) {
-            showVideo(currentVideoUrl);
-          }
-        } else if (s.status === 'generating') {
-          // keep polling
-        } else {
-          // absent | disabled | failed -> no video for this day
-          clearInterval(statusPollTimer);
-          videoAvailable = false;
+        // Narration ready (fast) -> enable it, and start it if we're showing text now.
+        if (s.audio_status === 'ready' && s.audio_url && !audioAvailable) {
+          audioAvailable = true;
+          currentAudioUrl = `/genbox-audio?date=${pollDate.toISOString()}`;
+          if (mode === 'text' && sameDay(pollDate, currentDate)) startTextAudio();
+          updateSoundHint();
         }
+        // Video ready (slow) -> auto-switch to it (the default mode) for the current day.
+        if (s.status === 'ready' && s.video_url && !videoAvailable) {
+          videoAvailable = true;
+          currentVideoUrl = `/genbox-video?date=${pollDate.toISOString()}`;
+          if (sameDay(pollDate, currentDate)) showVideo(currentVideoUrl);
+        }
+        if (terminal(s.status) && terminal(s.audio_status)) clearInterval(statusPollTimer);
       };
       poll();
       statusPollTimer = setInterval(poll, 4000);
