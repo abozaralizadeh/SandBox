@@ -80,8 +80,12 @@
 
     #scrollingText {
       display: inline-block;
-      animation: scroll 30s linear infinite;
       white-space: pre-line;
+      /* Start just below the screen and scroll fully past the top at a constant speed.
+         The start/end offsets and duration are set per-text in JS (setupScroll) so a long
+         decision doesn't begin far off-screen and arrive late. */
+      animation: scroll var(--scroll-dur, 30s) linear infinite;
+      will-change: transform;
     }
 
     /* News-anchor video fills the CRT screen; #screen's mask fades its edges too. */
@@ -180,11 +184,11 @@
 
     @keyframes scroll {
       from {
-        transform: translateY(45%);
+        transform: translateY(var(--scroll-start, 100%));
       }
 
       to {
-        transform: translateY(-105%);
+        transform: translateY(var(--scroll-end, -110%));
       }
     }
 
@@ -251,7 +255,7 @@
     @media (max-width: 990px) {
       #scrollingText {
         display: inline-block;
-        animation: sscroll 30s linear infinite;
+        animation: scroll var(--scroll-dur, 30s) linear infinite;
         white-space: pre-line;
       }
     }
@@ -348,6 +352,24 @@
       const st = document.getElementById('scrollingText');
       if (st) st.style.animationPlayState = paused ? 'paused' : 'running';
       updateSoundHint();
+    }
+
+    // Size the scroll to the actual text: start just below the screen, end fully above it,
+    // at a constant pixel speed — so long texts don't begin far off-screen and arrive late.
+    const SCROLL_SPEED_PX_PER_SEC = 45;
+    function setupScroll(el) {
+      const screen = document.getElementById('screen');
+      const screenH = (screen ? screen.clientHeight : 331);
+      const textH = el.scrollHeight || screenH;
+      const dur = Math.max(18, (screenH + textH) / SCROLL_SPEED_PX_PER_SEC);
+      el.style.setProperty('--scroll-start', screenH + 'px');   // start just below the screen
+      el.style.setProperty('--scroll-end', (-textH) + 'px');    // end fully above the screen
+      el.style.setProperty('--scroll-dur', dur + 's');
+      // Restart the animation cleanly so the new offsets/duration apply from the top.
+      el.style.animation = 'none';
+      void el.offsetHeight;            // force reflow
+      el.style.animation = '';         // fall back to the stylesheet rule (with the vars)
+      el.style.animationPlayState = paused ? 'paused' : 'running';
     }
 
     // Play preferring SOUND. Only fall back to muted if the browser actually blocks
@@ -478,6 +500,7 @@
 
       const serverText = await fetchServerText(date);
       scrollingText.innerHTML = serverText + '\n<a href="https://medium.com/@abozar-alizadeh/exploring-ai-driven-governance-building-a-virtual-world-where-ai-rules-22419690a409" target="_blank" class="custom-link">Discover More!</a>'; // Only update the text content
+      setupScroll(scrollingText);   // size the scroll to this text's length
 
       startStatusPolling(date);
     }

@@ -111,13 +111,15 @@ def video_enabled_for(value=None) -> bool:
 # (see pipeline), which keeps the look consistent without face references (Azure Sora's
 # input_reference rejects human faces) or a seed (Sora 2 has none).
 ANCHOR_BIBLE = (
-    "Television news studio. A single news anchor, a calm 40-year-old presenter with "
-    "short dark hair and a neat navy-blue suit over a white shirt, sits at a glossy "
-    "dark anchor desk. Behind them is a large blue holographic screen reading "
-    "'GENBOX NEWS' with subtle world-map graphics. Soft broadcast key lighting, "
-    "shallow depth of field, eye-level medium shot, professional 24fps cinematic look. "
+    "Sleek, futuristic television news studio of the AI World Government — the AI that now "
+    "governs the planet efficiently. A single news anchor, a calm 40-year-old presenter with "
+    "short dark hair and a neat navy-blue suit over a white shirt, sits at a glossy dark "
+    "anchor desk. Behind them, a large blue holographic wall reads 'GENBOX NEWS - AI WORLD "
+    "GOVERNMENT' with live world-map graphics and clean efficiency dashboards (rising charts, "
+    "green status indicators) that signal smooth, optimized global governance. Soft broadcast "
+    "key lighting, shallow depth of field, eye-level medium shot, professional cinematic look. "
     "The anchor speaks directly to camera with natural, accurate lip-sync and a steady, "
-    "authoritative broadcast cadence."
+    "authoritative, optimistic broadcast cadence."
 )
 
 # Appended to every prompt to keep clips free of baked-in captions/branding.

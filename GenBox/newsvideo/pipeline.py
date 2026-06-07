@@ -19,6 +19,14 @@ from GenBox.newsvideo.producer_agent import produce_shot_list
 
 logger = logging.getLogger("GenBoxVideo.pipeline")
 
+# Appended to every speaking clip so the line ends cleanly inside the clip's duration
+# instead of being cut off mid-word at the hard cut.
+_HOLD_TAIL = (
+    "Pace the delivery so the speaker finishes the sentence about half a second before the "
+    "clip ends, then stops talking and holds a calm, natural closing expression — do not cut "
+    "off a word and do not start another sentence."
+)
+
 
 def _talking_head_prompt(shot: dict) -> str:
     """Prompt for the FIRST clip of an on-camera speaker. The studio anchor uses the fixed
@@ -28,14 +36,15 @@ def _talking_head_prompt(shot: dict) -> str:
     else:
         desc = shot.get("speaker_description") or "A person speaking to camera at a relevant location."
         base = (
-            f"{desc} Broadcast news footage, eye-level medium shot; the speaker talks "
-            f"directly to camera with natural, accurate lip-sync."
+            f"{desc} On-location report for the AI World Government's news channel, eye-level "
+            f"medium shot; the speaker talks directly to camera with natural, accurate lip-sync."
         )
     return (
         f"{base}\n"
         f"Shot: {shot['visual']}\n"
         f"Spoken dialogue (say exactly this, nothing else):\n"
         f"\"{shot['dialogue']}\"\n"
+        f"{_HOLD_TAIL}\n"
         f"{config.BROLL_NEGATIVE}"
     )
 
@@ -54,17 +63,22 @@ def _remix_prompt(shot: dict) -> str:
         f"Shot: {shot['visual']}\n"
         f"Spoken dialogue (say exactly this, nothing else):\n"
         f"\"{shot['dialogue']}\"\n"
+        f"{_HOLD_TAIL}\n"
         f"{config.BROLL_NEGATIVE}"
     )
 
 
 def _broll_prompt(shot: dict) -> str:
-    voiceover = (
-        f"Voiceover: \"{shot['dialogue']}\"" if shot.get("dialogue")
-        else "Ambient sound only, no narration."
-    )
+    if shot.get("dialogue"):
+        voiceover = (
+            f"Calm voiceover: \"{shot['dialogue']}\" — finish the line about half a second "
+            f"before the clip ends, then let ambient sound carry to the cut."
+        )
+    else:
+        voiceover = "Ambient sound only, no narration."
     return (
-        f"Broadcast b-roll, documentary style. {shot['visual']}.\n"
+        f"Broadcast b-roll for the AI World Government's news channel, documentary style. "
+        f"{shot['visual']}.\n"
         f"{voiceover}\n"
         f"No people speaking on camera, no human faces in close-up. "
         f"{config.BROLL_NEGATIVE}"
