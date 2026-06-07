@@ -57,7 +57,7 @@ flowchart TD
 
     %% ── Reteller ─────────────────────────────────────────────────────────
     subgraph TRANS ["🗣️  Reteller   ×2 languages   (sequential: IT → FA)"]
-        T_resp["Responsibility\n─────────────────────────\n• RETELLS the episode natively over the\n  shared images — not a translation\n• Full creative freedom: may split, merge,\n  drop or re-pace lines per panel\n• Faithful to the fixed art + the plot\n  (every beat must still land somewhere)\n• Also LETTERS: places each text box per\n  panel via a 9-zone anchor (+ optional tail)\n• Dialogue: spoken register per character;\n  captions/narration: literary register\n• Maintains arc glossary for consistent\n  names, places & coined terms\n• Outputs updated_glossary every run\n• No tools — pure JSON-in / JSON-out"]
+        T_resp["Responsibility\n─────────────────────────\n• RETELLS the episode natively over the\n  shared images — not a translation\n• Full creative freedom over WORDS & pacing:\n  may split, merge, drop or re-pace lines\n• Faithful to the fixed art + the plot\n  (every beat must still land somewhere)\n• Writes per-panel dialogue/caption/sfx;\n  box POSITIONS are fixed (same as English,\n  caption top / bubbles bottom, RTL-aware)\n• Dialogue: spoken register per character;\n  captions/narration: literary register\n• Maintains arc glossary for consistent\n  names, places & coined terms\n• Outputs updated_glossary every run\n• No tools — pure JSON-in / JSON-out"]
     end
 
     TOON -->|"panels manifest (intent ref)\n+ Director plan\n+ Storyteller script\n+ arc glossary\n+ lang story outline"| TRANS
@@ -126,4 +126,4 @@ flowchart TD
 | **prev_episode_images** = last ep. panels + first ep. panels | Last episode for immediate continuity; first episode as the character-introduction visual anchor |
 | **OutlineAdapter** runs on ep. 1 only | Adapts the outline once per arc; the Reteller reads it every episode for consistent story context |
 | Retellings run **sequentially** (IT → FA) | Avoids race conditions on glossary writes to the Arcs Table |
-| **Reteller** retells natively + letters per language | Fragment-by-fragment translation forced English's text architecture onto every language; retelling lets each language restructure dialogue/captions and place its own boxes to fit native text + reading direction |
+| **Reteller** retells natively per language | Fragment-by-fragment translation forced English's text architecture onto every language; retelling lets each language restructure dialogue/captions to read natively. Box POSITIONS stay fixed (caption top, bubbles bottom, RTL-aware) — same as English — only the words change |
