@@ -308,6 +308,8 @@
     let audioAvailable = false;   // a ready TTS narration exists for currentDate
     let currentAudioUrl = '';
     let statusPollTimer = null;
+    const NARRATION_RATE = 1.3;   // play the narration faster (pitch preserved); also speeds
+                                  // up already-cached audio with no regeneration needed
     const videoEl = document.getElementById('tvVideo');
     const audioEl = document.getElementById('tvAudio');
     const contentEl = document.getElementById('content');
@@ -382,6 +384,22 @@
       el.style.animationPlayState = paused ? 'paused' : 'running';
     }
 
+    // Faster playback without the chipmunk effect (browsers preserve pitch by default).
+    function applyNarrationRate() {
+      try {
+        audioEl.preservesPitch = true;
+        audioEl.mozPreservesPitch = true;
+        audioEl.webkitPreservesPitch = true;
+        audioEl.playbackRate = NARRATION_RATE;
+      } catch (e) {}
+    }
+
+    // The on-screen length of the narration after the playback-rate speed-up.
+    function effectiveAudioDuration() {
+      const r = audioEl.playbackRate || 1;
+      return (audioEl.duration && isFinite(audioEl.duration)) ? (audioEl.duration / r) : null;
+    }
+
     // TTS narration synced to the scroll. Needs a user gesture for sound (like the video);
     // the document click handler restarts it if the browser blocked autoplay.
     function startTextAudio() {
@@ -389,10 +407,12 @@
       if (!audioAvailable || !currentAudioUrl) return;
       if (audioEl.getAttribute('src') !== currentAudioUrl) audioEl.src = currentAudioUrl;
       audioEl.muted = false;
+      applyNarrationRate();
       if (paused) { audioEl.pause(); return; }
       try { audioEl.currentTime = 0; } catch (e) {}
-      if (st && audioEl.duration && isFinite(audioEl.duration)) setupScroll(st, audioEl.duration);
-      audioEl.play().catch(() => {});   // may be blocked until the first click
+      const eff = effectiveAudioDuration();
+      if (st && eff) setupScroll(st, eff);     // scroll matches the sped-up narration
+      audioEl.play().catch(() => {});           // may be blocked until the first click
     }
 
     // Play preferring SOUND. Only fall back to muted if the browser actually blocks
@@ -474,8 +494,10 @@
     // so the text finishes scrolling exactly as the narration finishes.
     audioEl.addEventListener('loadedmetadata', () => {
       const st = document.getElementById('scrollingText');
-      if (mode === 'text' && !paused && st && audioEl.duration && isFinite(audioEl.duration)) {
-        setupScroll(st, audioEl.duration);
+      applyNarrationRate();
+      const eff = effectiveAudioDuration();
+      if (mode === 'text' && !paused && st && eff) {
+        setupScroll(st, eff);
         try { audioEl.currentTime = 0; } catch (e) {}
         audioEl.play().catch(() => {});
       }

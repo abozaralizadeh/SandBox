@@ -68,11 +68,15 @@ TTS_MODEL = (os.getenv("AZURE_OPENAI_MODEL_TTS") or "").strip()        # tts dep
 TTS_VOICE = os.getenv("GENBOX_TTS_VOICE", "onyx")                      # deep, authoritative
 TTS_FORMAT = os.getenv("GENBOX_TTS_FORMAT", "mp3")
 TTS_MAX_CHARS = int(os.getenv("GENBOX_TTS_MAX_CHARS", "4000"))         # API input cap guard
+# Native API speed for NEW audio (tts-1 family). Default 1.0 because the frontend speeds up
+# playback (pitch-preserved) for ALL audio incl. already-cached clips; raise this only if you
+# prefer native speed-up and set the frontend NARRATION_RATE back to 1.0 to avoid compounding.
+TTS_SPEED = float(os.getenv("GENBOX_TTS_SPEED", "1.0"))
 # Tone hint (honored by gpt-4o-mini-tts; ignored by tts-1 — sent best-effort).
 TTS_INSTRUCTIONS = os.getenv(
     "GENBOX_TTS_INSTRUCTIONS",
-    "Speak as a calm, authoritative government spokesperson formally addressing the public "
-    "about a new program — measured pace, clear diction, confident and reassuring.",
+    "Speak as a confident government spokesperson briefing the public about a new program: "
+    "clear diction, authoritative and reassuring, at an efficient, steady pace.",
 )
 
 
