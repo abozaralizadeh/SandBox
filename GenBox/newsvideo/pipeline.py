@@ -16,6 +16,7 @@ import httpx
 from GenBox.azurestorage import upload_video_bytes_to_blob
 from GenBox.newsvideo import config, mux, sora_client
 from GenBox.newsvideo.producer_agent import produce_shot_list
+from GenBox.newsvideo.tracing import traceable
 
 logger = logging.getLogger("GenBoxVideo.pipeline")
 
@@ -121,6 +122,7 @@ def _speaker_key(shot: dict) -> str:
     return (shot.get("speaker") or shot["type"]).lower()
 
 
+@traceable(run_type="chain", name="GenBox Build Video")
 async def build_news_video(decision_text: str, flat_date: str):
     """Produce one merged MP4 for this date, upload to blob. Returns (blob_url, clip_count)."""
     shot_list = await produce_shot_list(decision_text)

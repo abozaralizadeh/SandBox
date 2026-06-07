@@ -13,6 +13,7 @@ import httpx
 from GenBox.azurestorage import upload_audio_bytes_to_blob
 from GenBox.newsvideo import config
 from GenBox.newsvideo.sora_client import next_resource, _headers, _host
+from GenBox.newsvideo.tracing import traceable, summarize_bytes_output
 
 logger = logging.getLogger("GenBoxVideo.tts")
 
@@ -34,6 +35,7 @@ def _is_instructions_rejection(exc: httpx.HTTPStatusError) -> bool:
         return False
 
 
+@traceable(run_type="tool", name="tts.synthesize_speech", process_outputs=summarize_bytes_output)
 async def synthesize_speech(text: str, voice: str = None) -> bytes:
     """Synthesize ``text`` to speech bytes on a round-robin-selected resource.
 
@@ -68,6 +70,7 @@ async def synthesize_speech(text: str, voice: str = None) -> bytes:
         return resp.content
 
 
+@traceable(run_type="chain", name="GenBox Build Audio")
 async def build_news_audio(text: str, flat_date: str) -> str:
     """Synthesize the narration and upload it to the video blob container. Returns the URL."""
     audio = await synthesize_speech(text)

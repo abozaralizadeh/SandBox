@@ -170,10 +170,10 @@ def set_video_meta(flat_date: str, **fields):
     table_client.upsert_entity(entity=entity, mode=UpdateMode.MERGE)
 
 
-def try_acquire_video_lock(flat_date: str) -> bool:
-    """Single-flight lock so only one worker generates a given date's video."""
+def _try_acquire_lock(partition: str, flat_date: str) -> bool:
+    """Single-flight lock (per partition) so only one worker generates a given date."""
     entity = {
-        "PartitionKey": "video_lock",
+        "PartitionKey": partition,
         "RowKey": flat_date,
         "started_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -182,14 +182,14 @@ def try_acquire_video_lock(flat_date: str) -> bool:
         return True
     except ResourceExistsError:
         try:
-            existing = table_client.get_entity("video_lock", flat_date)
+            existing = table_client.get_entity(partition, flat_date)
             started = datetime.fromisoformat(existing["started_at"])
             age = (datetime.now(timezone.utc) - started).total_seconds()
         except Exception:
             return False
         if age > _VIDEO_LOCK_TTL:
             try:
-                table_client.delete_entity("video_lock", flat_date)
+                table_client.delete_entity(partition, flat_date)
                 table_client.create_entity(entity=entity)
                 return True
             except Exception:
@@ -197,8 +197,24 @@ def try_acquire_video_lock(flat_date: str) -> bool:
         return False
 
 
-def release_video_lock(flat_date: str):
+def _release_lock(partition: str, flat_date: str):
     try:
-        table_client.delete_entity("video_lock", flat_date)
+        table_client.delete_entity(partition, flat_date)
     except Exception:
         pass
+
+
+def try_acquire_video_lock(flat_date: str) -> bool:
+    return _try_acquire_lock("video_lock", flat_date)
+
+
+def release_video_lock(flat_date: str):
+    _release_lock("video_lock", flat_date)
+
+
+def try_acquire_audio_lock(flat_date: str) -> bool:
+    return _try_acquire_lock("audio_lock", flat_date)
+
+
+def release_audio_lock(flat_date: str):
+    _release_lock("audio_lock", flat_date)

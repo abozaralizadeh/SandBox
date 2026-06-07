@@ -1,6 +1,7 @@
 import os, json
 from dotenv import load_dotenv
 import requests
+from langsmith import traceable
 from GenBox.azurestorage import get_last_n_rows, get_row, insert_history
 from utils import get_flat_date, get_readable_date
 
@@ -10,6 +11,7 @@ API_KEY = os.getenv('AZURE_OPENAI_API_KEY')
 ENDPOINT = os.getenv('OAIENDPOINT')
 HISTORY_LEN = os.getenv('HISTORY_LEN')
 
+@traceable(run_type="chain", name="GenBox Decision")
 def get_llm_response(date=None):
 
   headers = {

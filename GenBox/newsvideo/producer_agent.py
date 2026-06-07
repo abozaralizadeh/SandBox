@@ -16,8 +16,10 @@ from agents import Agent, ModelSettings, OpenAIResponsesModel, Runner, WebSearch
 
 set_tracing_disabled(True)
 from openai import AsyncAzureOpenAI
+from langsmith.wrappers import wrap_openai
 
 from GenBox.newsvideo import config
+from GenBox.newsvideo.tracing import traceable
 
 load_dotenv()
 logger = logging.getLogger("GenBoxVideo.producer")
@@ -91,12 +93,13 @@ Return EXACTLY this JSON shape:
 
 
 def _build_openai_client() -> AsyncAzureOpenAI:
-    return AsyncAzureOpenAI(
+    client = AsyncAzureOpenAI(
         api_key=os.environ["AZURE_OPENAI_API_KEY"],
         api_version=os.environ.get("AZURE_OPENAI_API_VERSION", "2025-04-01-preview"),
         azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
         azure_deployment=os.environ.get("AZURE_OPENAI_MODEL", "gpt-4o"),
     )
+    return wrap_openai(client)   # trace the producer's LLM calls in LangSmith
 
 
 def _extract_json(raw: str) -> dict:
@@ -187,6 +190,7 @@ def _validate_shot_list(data: dict) -> dict:
     return {"title": title[:80], "shots": shots}
 
 
+@traceable(run_type="chain", name="GenBox Producer")
 async def produce_shot_list(decision_text: str) -> dict:
     """Run the producer agent and return a validated shot list dict."""
     client = _build_openai_client()

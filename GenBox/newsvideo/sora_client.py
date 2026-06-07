@@ -24,6 +24,7 @@ import threading
 import httpx
 
 from GenBox.newsvideo import config
+from GenBox.newsvideo.tracing import traceable, redact_resource_inputs, summarize_clip_output
 
 logger = logging.getLogger("GenBoxVideo.sora")
 
@@ -148,6 +149,8 @@ async def download_video_bytes(resource: dict, job_id: str) -> bytes:
         return resp.content
 
 
+@traceable(run_type="tool", name="sora.create_clip",
+           process_inputs=redact_resource_inputs, process_outputs=summarize_clip_output)
 async def create_clip(resource: dict, prompt: str, seconds: int,
                       ref_image_bytes: bytes = None) -> tuple:
     """Create -> poll -> download a fresh clip on ``resource``. Returns (mp4_bytes, job_id).
@@ -160,6 +163,8 @@ async def create_clip(resource: dict, prompt: str, seconds: int,
     return await download_video_bytes(resource, job_id), job_id
 
 
+@traceable(run_type="tool", name="sora.remix_clip",
+           process_inputs=redact_resource_inputs, process_outputs=summarize_clip_output)
 async def remix_clip(resource: dict, base_job_id: str, prompt: str, seconds: int) -> tuple:
     """Remix -> poll -> download on the base clip's resource. Returns (mp4_bytes, job_id)."""
     logger.info("remix_clip of %s on resource %s", base_job_id, _host(resource))
