@@ -392,8 +392,16 @@
       const dd = points.map(p => p.drawdownPct == null ? 0 : -Number(p.drawdownPct));
       const last = idx.length ? idx[idx.length - 1] : INDEX_BASE;
       const upColor = last >= INDEX_BASE ? '#00e6a8' : '#ff3b5c';
+      const realCount = idx.filter(v => v != null).length;
+      const sparse = realCount < 2;   // a line needs >= 2 points — show the lone dot + a hint instead of a blank chart
       equityChart.setOption({
         backgroundColor: 'transparent',
+        graphic: sparse ? [{
+          type: 'text', left: 'center', top: 4, silent: true,
+          style: { text: realCount === 0 ? 'No equity history yet — appears after the first daily close'
+                                          : 'Building history — the curve appears after the next daily close',
+                   fill: 'rgba(138,160,180,0.6)', fontFamily: 'JetBrains Mono', fontSize: 11 }
+        }] : [],
         grid: { left: 44, right: 50, top: 18, bottom: 26 },
         tooltip: { trigger: 'axis', backgroundColor: 'rgba(10,14,20,0.95)', borderColor: 'rgba(120,160,200,0.2)',
           textStyle: { color: '#e6edf3', fontFamily: 'JetBrains Mono', fontSize: 11 },
@@ -406,7 +414,9 @@
         series: [
           { name: 'drawdown', type: 'line', yAxisIndex: 1, data: dd, smooth: true, symbol: 'none',
             lineStyle: { width: 0 }, areaStyle: { color: 'rgba(255,59,92,0.10)' }, z: 1 },
-          { name: 'index', type: 'line', data: idx, smooth: true, symbol: 'none', connectNulls: true, z: 3,
+          { name: 'index', type: 'line', data: idx, smooth: true, symbol: sparse ? 'circle' : 'none',
+            symbolSize: sparse ? 7 : 0, showSymbol: sparse, itemStyle: { color: upColor, shadowColor: upColor, shadowBlur: 10 },
+            connectNulls: true, z: 3,
             lineStyle: { width: 2.4, color: upColor, shadowColor: upColor, shadowBlur: 14 },
             areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
               { offset: 0, color: last >= INDEX_BASE ? 'rgba(0,230,168,0.34)' : 'rgba(255,59,92,0.34)' },
