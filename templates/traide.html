@@ -221,6 +221,38 @@
     .vstat .vrow { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 0.76rem; color: var(--text-2); padding: 2px 0; }
     .vstat .vrow b { color: var(--text); }
 
+    /* ── open positions — live TP/SL bracket ── */
+    .pos { background: var(--s2); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; margin-bottom: 10px; }
+    .pos:last-child { margin-bottom: 0; }
+    .pos-top { display: flex; align-items: center; gap: 9px; }
+    .pos-top .sym-cell { font-weight: 700; font-family: var(--mono); font-size: 0.9rem; }
+    .pos-top .tags { display: inline-flex; gap: 5px; }
+    .pos-ret { margin-left: auto; font-family: var(--mono); font-weight: 700; font-size: 1.06rem; }
+    .pos-px { font-family: var(--mono); font-size: 0.7rem; color: var(--text-3); margin-top: 6px; display: flex; gap: 9px; flex-wrap: wrap; }
+    .pos-px b { color: var(--text-2); font-weight: 600; }
+    .bracket { position: relative; height: 8px; margin: 17px 3px 7px; border-radius: 6px;
+      background: linear-gradient(90deg, rgba(255,59,92,0.55), rgba(255,176,32,0.30) 50%, rgba(0,230,168,0.6)); }
+    .bracket .entry-tick { position: absolute; top: -3px; width: 2px; height: 14px; background: var(--text); opacity: 0.5; transform: translateX(-1px); }
+    .bracket .mark-dot { position: absolute; top: 50%; width: 13px; height: 13px; border-radius: 50%; transform: translate(-50%, -50%);
+      border: 2px solid var(--s0); box-shadow: 0 0 10px currentColor; animation: pulse 1.8s infinite; }
+    .bracket .mark-dot.up { background: var(--up); color: var(--up); }
+    .bracket .mark-dot.down { background: var(--down); color: var(--down); }
+    .bracket .mark-dot.flat { background: var(--text-2); color: var(--text-2); }
+    @keyframes pulse { 0%,100% { box-shadow: 0 0 5px currentColor; } 50% { box-shadow: 0 0 14px currentColor; } }
+    .bracket-lbl { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 0.66rem; }
+    .bracket-lbl .sl { color: var(--down); } .bracket-lbl .tp { color: var(--up); }
+    .pos-stops1 { font-family: var(--mono); font-size: 0.7rem; color: var(--text-2); margin-top: 9px; display: flex; gap: 9px; align-items: center; flex-wrap: wrap; }
+    .pos-stops1 .sl { color: var(--down); } .pos-stops1 .tp { color: var(--up); } .pos-stops1 .mono-x { color: var(--text-3); }
+
+    /* ── research / notes — scroll + per-item meta ── */
+    #researchBox { max-height: 384px; overflow-y: auto; padding-right: 4px; }
+    #notesBox { max-height: 200px; overflow-y: auto; padding-right: 4px; }
+    #researchBox::-webkit-scrollbar, #notesBox::-webkit-scrollbar { width: 7px; }
+    #researchBox::-webkit-scrollbar-thumb, #notesBox::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 6px; }
+    .note .acts { margin: 8px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
+    .note .acts li { font-family: var(--mono); font-size: 0.68rem; color: var(--text-2); line-height: 1.34; padding-left: 14px; position: relative; }
+    .note .acts li::before { content: '▸'; position: absolute; left: 0; color: var(--up); opacity: 0.7; }
+
     footer { text-align: center; margin-top: 30px; color: var(--text-3); font-size: 0.74rem; }
     footer a { color: var(--text-2); text-decoration: none; } footer a:hover { color: var(--up); }
 
@@ -461,23 +493,40 @@
 
     function renderTrades(trades) {
       trades = (trades || []).slice().reverse(); // oldest→newest left→right
+      // TP/SL triggers carry no model confidence (it's always 0), so bar height comes from the
+      // realized return: $ PnL when disclosed, else the ROE % parsed from the close, else a unit
+      // block so the win/loss sequence is still readable.
       const hasUsd = trades.some(t => typeof t.pnl === 'number');
+      const hasRoe = trades.some(t => typeof t.roePct === 'number');
+      const isWin = t => t.win === true || (typeof t.pnl === 'number' && t.pnl > 0);
+      const magOf = t => {
+        if (hasUsd && typeof t.pnl === 'number') return Math.abs(t.pnl);
+        if (typeof t.roePct === 'number') return Math.abs(t.roePct);
+        return 1;   // no magnitude on this row (e.g. pre-roePct close) — unit block keeps win/loss readable
+      };
       const x = trades.map((t, i) => t.symbol ? t.symbol.replace('-USDT', '') : ('#' + i));
       const data = trades.map(t => {
-        const win = t.win === true || (typeof t.pnl === 'number' && t.pnl > 0);
-        const val = hasUsd ? Math.abs(Number(t.pnl || 0)) : (Number(t.confidence || 0.5));
-        return { value: win ? val : -val, itemStyle: { color: win ? '#00e6a8' : '#ff3b5c',
+        const win = isWin(t), v = magOf(t);
+        return { value: win ? v : -v, itemStyle: { color: win ? '#00e6a8' : '#ff3b5c',
           shadowColor: win ? 'rgba(0,230,168,0.4)' : 'rgba(255,59,92,0.4)', shadowBlur: 8, borderRadius: [3, 3, 0, 0] } };
       });
+      const fmtMag = v => hasUsd ? Math.abs(v).toFixed(0) : (hasRoe ? Math.abs(v).toFixed(1) + '%' : '');
       tradesChart.setOption({
         backgroundColor: 'transparent',
-        grid: { left: 36, right: 14, top: 14, bottom: 36 },
+        grid: { left: 40, right: 14, top: 14, bottom: 36 },
         tooltip: { trigger: 'axis', backgroundColor: 'rgba(10,14,20,0.95)', borderColor: 'rgba(120,160,200,0.2)',
           textStyle: { color: '#e6edf3', fontFamily: 'JetBrains Mono', fontSize: 11 },
-          formatter: p => { const t = trades[p[0].dataIndex]; const win = t.win === true || (typeof t.pnl === 'number' && t.pnl > 0);
-            return `${esc(t.symbol||'')}<br/>${win ? '<b style="color:#00e6a8">WIN</b>' : '<b style="color:#ff3b5c">LOSS</b>'}` + (hasUsd ? ` · ${Number(t.pnl).toFixed(2)}` : ` · conf ${(Number(t.confidence||0)).toFixed(2)}`); } },
+          formatter: p => {
+            const t = trades[p[0].dataIndex], win = isWin(t);
+            let s = `${esc(t.symbol||'')}<br/>${win ? '<b style="color:#00e6a8">WIN</b>' : '<b style="color:#ff3b5c">LOSS</b>'}`;
+            if (hasUsd && typeof t.pnl === 'number') s += ` · ${Number(t.pnl).toFixed(2)}`;
+            else if (typeof t.roePct === 'number') s += ` · ROE ${t.roePct >= 0 ? '+' : ''}${Number(t.roePct).toFixed(2)}%`;
+            if (t.closeType) s += `<br/><span style="color:#8aa0b4">${esc(String(t.closeType).replace(/_/g,' ').toLowerCase())}</span>`;
+            s += `<br/><span style="color:#50637a">${relTime(t.ts)}</span>`;
+            return s;
+          } },
         xAxis: { type: 'category', data: x, ...AXIS, axisLabel: { ...AXIS.axisLabel, interval: 0, rotate: x.length > 10 ? 40 : 0, fontSize: 9 } },
-        yAxis: { type: 'value', ...AXIS, axisLabel: { ...AXIS.axisLabel, formatter: v => hasUsd ? Math.abs(v).toFixed(0) : Math.abs(v).toFixed(1) } },
+        yAxis: { type: 'value', ...AXIS, axisLabel: { ...AXIS.axisLabel, formatter: fmtMag } },
         series: [{ type: 'bar', data, barMaxWidth: 22 }]
       });
     }
@@ -485,15 +534,47 @@
     function renderPositions(positions) {
       const box = el('positionsBox');
       if (!positions || !positions.length) { box.innerHTML = '<div class="empty">No open positions</div>'; return; }
-      let rows = positions.map(p => `
-        <tr>
-          <td class="sym"><span class="sym-cell">${coinIcon(p.symbol, 16)}${esc((p.symbol||'').replace('-USDT',''))}</span></td>
-          <td><span class="tag ${p.side === 'long' ? 'long' : 'short'}">${esc(p.side||'')}</span> <span class="tag ${p.venue === 'futures' ? 'futures' : 'spot'}">${esc(p.venue||'')}</span></td>
-          <td>${p.avgEntry == null ? '—' : Number(p.avgEntry).toPrecision(5)}</td>
-          <td>${p.currentPrice == null ? '—' : Number(p.currentPrice).toPrecision(5)}</td>
-          <td class="${cls(p.returnPct)}">${fmtPct(p.returnPct)}</td>
-        </tr>`).join('');
-      box.innerHTML = `<table><thead><tr><th>Symbol</th><th>Side</th><th>Entry</th><th>Mark</th><th>Return</th></tr></thead><tbody>${rows}</tbody></table>`;
+      const px = v => (v == null || isNaN(v)) ? '—' : Number(v).toPrecision(6);
+      box.innerHTML = positions.map(p => {
+        const sym = esc((p.symbol || '').replace('-USDT', ''));
+        const mark = Number(p.currentPrice), entry = Number(p.avgEntry);
+        const tp = p.tpPrice != null ? Number(p.tpPrice) : null;
+        const sl = p.slPrice != null ? Number(p.slPrice) : null;
+        const moveTo = v => (v != null && mark) ? ((v / mark - 1) * 100) : null;  // signed % the price must move to hit the trigger
+
+        let brk;
+        if (tp != null && sl != null && tp !== sl && mark) {
+          // Map SL→0% (left) and TP→100% (right); works for both long (sl<tp) and short (tp<sl).
+          const span = tp - sl, clamp = x => Math.max(0, Math.min(100, x));
+          const prog = clamp((mark - sl) / span * 100);
+          const entryProg = (entry && !isNaN(entry)) ? clamp((entry - sl) / span * 100) : null;
+          brk = `<div class="bracket">
+              ${entryProg != null ? `<div class="entry-tick" style="left:${entryProg}%" title="entry ${px(entry)}"></div>` : ''}
+              <div class="mark-dot ${cls(p.returnPct)}" style="left:${prog}%" title="mark ${px(mark)}"></div>
+            </div>
+            <div class="bracket-lbl">
+              <span class="sl">SL ${px(sl)} · ${fmtPct(moveTo(sl))}</span>
+              <span class="tp">TP ${px(tp)} · ${fmtPct(moveTo(tp))}</span>
+            </div>`;
+        } else if (tp != null || sl != null) {
+          const parts = [];
+          if (sl != null) parts.push(`<span class="sl">SL ${px(sl)} · ${fmtPct(moveTo(sl))}</span>`);
+          if (tp != null) parts.push(`<span class="tp">TP ${px(tp)} · ${fmtPct(moveTo(tp))}</span>`);
+          brk = `<div class="pos-stops1">${parts.join('<span class="mono-x">·</span>')}</div>`;
+        } else {
+          brk = `<div class="pos-stops1"><span class="mono-x">no active TP/SL</span></div>`;
+        }
+
+        return `<div class="pos">
+          <div class="pos-top">
+            <span class="sym-cell">${coinIcon(p.symbol, 18)}${sym}</span>
+            <span class="tags"><span class="tag ${p.side === 'long' ? 'long' : 'short'}">${esc(p.side || '')}</span><span class="tag ${p.venue === 'futures' ? 'futures' : 'spot'}">${esc(p.venue || '')}</span></span>
+            <span class="pos-ret ${cls(p.returnPct)}">${fmtPct(p.returnPct)}</span>
+          </div>
+          <div class="pos-px"><span>entry <b>${px(entry)}</b></span><span>mark <b>${px(mark)}</b></span>${p.lastTs ? `<span>· ${relTime(p.lastTs)}</span>` : ''}</div>
+          ${brk}
+        </div>`;
+      }).join('');
     }
 
     function renderFeed(feed) {
@@ -523,10 +604,21 @@
       research = research || {};
       const plans = research.plans || [], triggers = research.triggers || [], sentiments = research.sentiments || [];
       let html = '';
-      plans.forEach(p => { html += `<div class="note"><div class="ttl">${esc(p.title||'Research note')}</div><div class="body">${esc(p.summary||'')}</div></div>`; });
+      plans.forEach(p => {
+        const who = esc(p.author || 'Research Agent');
+        const when = p.ts ? ` · ${relTime(p.ts)}` : '';
+        const acts = (p.actions || []).filter(Boolean);
+        html += `<div class="note">
+          <div class="who">${who}${when}</div>
+          <div class="ttl">${esc(p.title||'Research note')}</div>
+          <div class="body">${esc(p.summary||'')}</div>
+          ${acts.length ? `<ul class="acts">${acts.map(a => `<li>${esc(a)}</li>`).join('')}</ul>` : ''}
+        </div>`;
+      });
       if (triggers.length) {
         html += `<div class="note"><div class="who">Watching</div><div class="chips">` +
-          triggers.map(t => `<span class="chip">${coinIcon(t.symbol, 13)}${esc((t.symbol||'').replace('-USDT',''))} · ${esc(t.direction||'')}</span>`).join('') + `</div></div>`;
+          triggers.map(t => { const tip = [t.rationale, t.targetPrice != null ? 'target ' + t.targetPrice : '', t.stopPrice != null ? 'stop ' + t.stopPrice : ''].filter(Boolean).join(' · ');
+            return `<span class="chip"${tip ? ` title="${esc(tip)}"` : ''}>${coinIcon(t.symbol, 13)}${esc((t.symbol||'').replace('-USDT',''))} · ${esc(t.direction||'')}</span>`; }).join('') + `</div></div>`;
       }
       if (sentiments.length) {
         html += `<div class="note"><div class="who">Sentiment</div><div class="chips">` +
@@ -541,7 +633,8 @@
       notes = notes || {};
       const all = [...(notes.permanent || []).map(n => ({ ...n, kind: 'permanent' })), ...(notes.temporary || []).map(n => ({ ...n, kind: 'temporary' }))];
       if (!all.length) { box.innerHTML = '<div class="empty">No supervisor notes</div>'; return; }
-      box.innerHTML = all.map(n => `<div class="note"><div class="who">${esc(n.author || 'Supervisor')} · ${n.kind}</div><div class="body">${esc(n.content||'')}</div></div>`).join('');
+      all.sort((a, b) => (b.ts || 0) - (a.ts || 0));
+      box.innerHTML = all.map(n => `<div class="note"><div class="who">${esc(n.author || 'Supervisor')} · ${n.kind}${n.ts ? ` · ${relTime(n.ts)}` : ''}</div><div class="body">${esc(n.content||'')}</div></div>`).join('');
     }
 
     function renderVenue(kpis) {
@@ -607,7 +700,7 @@
         renderKpis(s);
         renderDonut(s.kpis);
         renderVenue(s.kpis);
-        renderTrades(s.trades);
+        if (!window._tradesLoaded) { renderTrades(s.trades); }   // fast seed; loadTrades() pulls fuller history
         renderPositions(s.positions);
         renderFeed(s.feed);
         renderResearch(s.research);
@@ -617,6 +710,16 @@
         if (!window._equityLoaded) { renderEquity(s.equityPoints); }
         else if (window._lastEquityPoints) { renderEquity(window._lastEquityPoints); }
       } catch (e) { console.warn('live load failed', e); }
+    }
+
+    async function loadTrades() {
+      try {
+        const r = await fetch('/traide/trades?limit=40');
+        const j = await r.json();
+        window._lastTrades = j.items || [];
+        renderTrades(window._lastTrades);
+        window._tradesLoaded = true;
+      } catch (e) { console.warn('trades load failed', e); }
     }
 
     async function loadEquity(period) {
@@ -651,8 +754,10 @@
       });
       loadLive();
       loadEquity('all');
+      loadTrades();
       setInterval(loadLive, 30000);                          // live snapshot: every 30s
       setInterval(() => loadEquity(currentPeriod), 60000);   // equity curve: every 60s
+      setInterval(loadTrades, 60000);                        // trade outcomes: every 60s
     });
   </script>
 </body>
