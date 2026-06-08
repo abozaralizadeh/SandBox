@@ -28,6 +28,7 @@ table_name = os.getenv("traide_table_name", "traidedashboard")
 PK_EQUITY = "equity"
 PK_DECISION = "decision"
 PK_TRADE = "trade"
+PK_PLAN = "plan"
 PK_META = "meta"
 
 _VALID_PERIODS = {"daily", "weekly", "monthly", "alltime"}
@@ -141,6 +142,32 @@ def get_decision_feed(limit: int = 30) -> list:
 def get_closed_trades(limit: int = 100) -> list:
     """Most recent closed-trade outcomes, newest first."""
     return _query_data_partition(PK_TRADE, limit)
+
+
+def get_plans(limit: int = 40, start_day=None) -> list:
+    """Durable research plans, newest first. Accumulates past the producer's local cap, so this
+    spans several days. `start_day` (epoch day) bounds how far back to read."""
+    if _table_client is None:
+        return []
+    try:
+        filt = f"PartitionKey eq '{PK_PLAN}'"
+        if start_day is not None:
+            filt += f" and day ge {int(start_day)}"
+        rows = _table_client.query_entities(query_filter=filt, results_per_page=1000)
+        items = []
+        for r in rows:
+            raw = r.get("data")
+            if not raw:
+                continue
+            try:
+                items.append(json.loads(raw))
+            except (TypeError, ValueError):
+                continue
+        items.sort(key=lambda d: d.get("ts", 0), reverse=True)
+        return items[: max(1, int(limit))]
+    except Exception as exc:
+        print(f"[TrAIde] get_plans error: {exc}")
+        return []
 
 
 def get_meta() -> dict:

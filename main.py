@@ -29,6 +29,7 @@ from TrAIde.azurestorage import (
     get_equity_series as traide_get_equity_series,
     get_decision_feed as traide_get_decision_feed,
     get_closed_trades as traide_get_closed_trades,
+    get_plans as traide_get_plans,
 )
 
 app = Flask(__name__)
@@ -380,6 +381,23 @@ def traide_trades():
     except ValueError:
         limit = 100
     return jsonify({"items": traide_get_closed_trades(limit)})
+
+
+@app.route('/traide/plans', methods=['GET'])
+def traide_plans():
+    if not _traide_guard():
+        return jsonify({"error": "forbidden"}), 403
+    import time as _time
+    try:
+        limit = max(1, min(int(request.args.get('limit', 40)), 100))
+    except ValueError:
+        limit = 40
+    try:
+        days = max(1, min(int(request.args.get('days', 3)), 14))
+    except ValueError:
+        days = 3
+    start = int(_time.time() // 86400) - days + 1   # inclusive window of the last `days` days
+    return jsonify({"items": traide_get_plans(limit, start_day=start)})
 
 
 @app.route('/')

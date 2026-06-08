@@ -244,17 +244,22 @@
     .pos-stops1 { font-family: var(--mono); font-size: 0.7rem; color: var(--text-2); margin-top: 9px; display: flex; gap: 9px; align-items: center; flex-wrap: wrap; }
     .pos-stops1 .sl { color: var(--down); } .pos-stops1 .tp { color: var(--up); } .pos-stops1 .mono-x { color: var(--text-3); }
 
-    /* ── research / notes — scroll + per-item meta ── */
-    #researchBox { max-height: 384px; overflow-y: auto; padding-right: 4px; }
+    /* ── research / notes — only plan messages scroll; sentiment/watch-list pinned below ── */
+    #researchPlans { max-height: 320px; overflow-y: auto; padding-right: 4px; }
+    #researchPinned { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+    #researchPinned:empty { margin-top: 0; padding-top: 0; border-top: 0; }
+    #researchPinned .note { margin-bottom: 8px; } #researchPinned .note:last-child { margin-bottom: 0; }
     #notesBox { max-height: 200px; overflow-y: auto; padding-right: 4px; }
-    #researchBox::-webkit-scrollbar, #notesBox::-webkit-scrollbar { width: 7px; }
-    #researchBox::-webkit-scrollbar-thumb, #notesBox::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 6px; }
+    #researchPlans::-webkit-scrollbar, #notesBox::-webkit-scrollbar { width: 7px; }
+    #researchPlans::-webkit-scrollbar-thumb, #notesBox::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 6px; }
     .note .acts { margin: 8px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
     .note .acts li { font-family: var(--mono); font-size: 0.68rem; color: var(--text-2); line-height: 1.34; padding-left: 14px; position: relative; }
     .note .acts li::before { content: '▸'; position: absolute; left: 0; color: var(--up); opacity: 0.7; }
 
     footer { text-align: center; margin-top: 30px; color: var(--text-3); font-size: 0.74rem; }
     footer a { color: var(--text-2); text-decoration: none; } footer a:hover { color: var(--up); }
+    footer .gh-link { display: inline-flex; align-items: center; gap: 5px; vertical-align: middle; }
+    footer .copyright { margin-top: 8px; color: var(--text-3); font-family: var(--mono); font-size: 0.68rem; letter-spacing: 0.2px; }
 
     @media (max-width: 900px) {
       .kpis { grid-template-columns: repeat(2, 1fr); }
@@ -343,7 +348,8 @@
       <div>
         <div class="panel">
           <div class="panel-head"><div class="panel-title t-cyan"><span class="tick"></span> Research agent</div></div>
-          <div id="researchBox"><div class="empty">No research notes yet</div></div>
+          <div id="researchPlans"><div class="empty">No research notes yet</div></div>
+          <div id="researchPinned"></div>
         </div>
         <div class="panel">
           <div class="panel-head"><div class="panel-title t-violet"><span class="tick"></span> Supervisor notes</div></div>
@@ -354,7 +360,12 @@
 
     <footer>
       Read-only spectator view · No account balances, sizes, or identities are ever shown ·
-      <a href="/">SandBoxes.live</a>
+      <a href="/">SandBoxes.live</a> ·
+      <a href="https://github.com/abozaralizadeh/trAIde" target="_blank" rel="noopener noreferrer" class="gh-link">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 012-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        GitHub
+      </a>
+      <div class="copyright">© 2026 Abozar Alizadeh · trAIde. All rights reserved.</div>
     </footer>
   </div>
 
@@ -600,21 +611,32 @@
     }
 
     function renderResearch(research) {
-      const box = el('researchBox');
       research = research || {};
-      const plans = research.plans || [], triggers = research.triggers || [], sentiments = research.sentiments || [];
-      let html = '';
-      plans.forEach(p => {
+      renderResearchPinned(research);   // watch-list + sentiment — always visible, outside the scroll
+      // Plan messages come from the durable /traide/plans endpoint (several days). Seed from the
+      // snapshot's tail on first paint so the panel isn't empty before that fetch resolves.
+      if (!window._plansLoaded) { renderResearchPlans(research.plans || []); }
+    }
+
+    function renderResearchPlans(plans) {
+      const box = el('researchPlans');
+      if (!plans || !plans.length) { box.innerHTML = '<div class="empty">No research notes yet</div>'; return; }
+      box.innerHTML = plans.map(p => {
         const who = esc(p.author || 'Research Agent');
         const when = p.ts ? ` · ${relTime(p.ts)}` : '';
         const acts = (p.actions || []).filter(Boolean);
-        html += `<div class="note">
+        return `<div class="note">
           <div class="who">${who}${when}</div>
           <div class="ttl">${esc(p.title||'Research note')}</div>
           <div class="body">${esc(p.summary||'')}</div>
           ${acts.length ? `<ul class="acts">${acts.map(a => `<li>${esc(a)}</li>`).join('')}</ul>` : ''}
         </div>`;
-      });
+      }).join('');
+    }
+
+    function renderResearchPinned(research) {
+      const triggers = research.triggers || [], sentiments = research.sentiments || [];
+      let html = '';
       if (triggers.length) {
         html += `<div class="note"><div class="who">Watching</div><div class="chips">` +
           triggers.map(t => { const tip = [t.rationale, t.targetPrice != null ? 'target ' + t.targetPrice : '', t.stopPrice != null ? 'stop ' + t.stopPrice : ''].filter(Boolean).join(' · ');
@@ -625,7 +647,7 @@
           sentiments.map(s => { const sc = Number(s.score || 0); const c = sc > 0 ? 'var(--up)' : (sc < 0 ? 'var(--down)' : 'var(--text-2)');
             return `<span class="chip" style="color:${c}">${coinIcon(s.symbol, 13)}${esc((s.symbol||'').replace('-USDT',''))} ${sc>0?'+':''}${sc.toFixed(2)}</span>`; }).join('') + `</div></div>`;
       }
-      box.innerHTML = html || '<div class="empty">No research notes yet</div>';
+      el('researchPinned').innerHTML = html;
     }
 
     function renderNotes(notes) {
@@ -722,6 +744,17 @@
       } catch (e) { console.warn('trades load failed', e); }
     }
 
+    async function loadResearch() {
+      try {
+        const r = await fetch('/traide/plans?days=3&limit=40');   // durable multi-day research history
+        const j = await r.json();
+        const items = j.items || [];
+        // Only take over the panel once the durable partition has data; otherwise keep the
+        // snapshot seed so the scroll isn't blanked before the producer first populates it.
+        if (items.length) { renderResearchPlans(items); window._plansLoaded = true; }
+      } catch (e) { console.warn('plans load failed', e); }
+    }
+
     async function loadEquity(period) {
       try {
         currentPeriod = period;
@@ -737,7 +770,7 @@
       el('modePill').className = 'pill muted';
       el('modePill').innerHTML = '<span class="dot" style="background:var(--amber)"></span> warming up';
       el('updatedPill').textContent = 'no data yet';
-      ['feedBox','positionsBox','researchBox','notesBox'].forEach(id => {
+      ['feedBox','positionsBox','researchPlans','notesBox'].forEach(id => {
         el(id).innerHTML = '<div class="empty">Agents warming up… data appears once the bot publishes its first snapshot.</div>';
       });
       renderEquity([]); renderDonut({}); renderTrades([]);
@@ -755,9 +788,11 @@
       loadLive();
       loadEquity('all');
       loadTrades();
+      loadResearch();
       setInterval(loadLive, 30000);                          // live snapshot: every 30s
       setInterval(() => loadEquity(currentPeriod), 60000);   // equity curve: every 60s
       setInterval(loadTrades, 60000);                        // trade outcomes: every 60s
+      setInterval(loadResearch, 90000);                      // research history: every 90s
     });
   </script>
 </body>
