@@ -386,7 +386,17 @@
     }
 
     function renderEquity(points) {
-      points = points || [];
+      points = (points || []).slice();   // copy — we may splice today's point without mutating the caller
+      // The chart loads from the durable equity table, but the headline drawdown comes from the
+      // live snapshot. A concurrent publish can leave today's table row stale, so reconcile the
+      // last point with the live `equityToday` (same day) to keep the curve and the KPIs in sync.
+      const lt = window._liveToday;
+      if (lt && lt.indexClose != null && lt.day != null) {
+        const lastDay = points.length ? Number(points[points.length - 1].day) : null;
+        const tp = { day: Number(lt.day), indexClose: lt.indexClose, drawdownPct: lt.drawdownPct };
+        if (lastDay === Number(lt.day)) points[points.length - 1] = tp;
+        else if (lastDay == null || Number(lt.day) > lastDay) points.push(tp);
+      }
       const x = points.map(p => dayToLabel(p.day));
       const idx = points.map(p => p.indexClose == null ? null : Number(p.indexClose));
       const dd = points.map(p => p.drawdownPct == null ? 0 : -Number(p.drawdownPct));
@@ -553,7 +563,8 @@
       const wins = k.wins || 0, losses = k.losses || 0, total = wins + losses;
       const wr = total ? (wins / total * 100) : (k.winRate != null ? k.winRate * 100 : 0);
       el('kWin').innerHTML = total ? `<span class="${wr>=50?'up':'down'}">${wr.toFixed(0)}%</span>` : '—';
-      el('kWinSub').textContent = `${wins}W / ${losses}L`;
+      const be = k.breakeven || 0;
+      el('kWinSub').textContent = `${wins}W / ${losses}L` + (be ? ` · ${be} BE` : '');
 
       const pts = s.equityPoints || [];
       const lastIdx = pts.length ? Number(pts[pts.length - 1].indexClose) : INDEX_BASE;
@@ -587,6 +598,11 @@
         const r = await fetch('/traide/live', { headers: { 'X-Requested-With': 'fetch' } });
         const s = await r.json();
         if (!s || !s.generatedTs) { showEmpty(); return; }
+        // Authoritative latest equity point, used to keep the curve in sync with the headline.
+        const et = s.equityToday;
+        window._liveToday = (et && et.indexClose != null)
+          ? { day: et.day, indexClose: Number(et.indexClose), drawdownPct: Number(et.drawdownPct) || 0 }
+          : null;
         renderHero(s);
         renderKpis(s);
         renderDonut(s.kpis);
@@ -596,8 +612,10 @@
         renderFeed(s.feed);
         renderResearch(s.research);
         renderNotes(s.notes);
-        // equity uses its own period endpoint; seed with snapshot tail on first load
+        // equity uses its own period endpoint; seed with snapshot tail on first load, and on later
+        // refreshes re-apply the latest live point onto the already-loaded curve so they stay in sync
         if (!window._equityLoaded) { renderEquity(s.equityPoints); }
+        else if (window._lastEquityPoints) { renderEquity(window._lastEquityPoints); }
       } catch (e) { console.warn('live load failed', e); }
     }
 
@@ -606,7 +624,8 @@
         currentPeriod = period;
         const r = await fetch('/traide/equity?period=' + encodeURIComponent(period));
         const j = await r.json();
-        renderEquity(j.points || []);
+        window._lastEquityPoints = j.points || [];
+        renderEquity(window._lastEquityPoints);
         window._equityLoaded = true;
       } catch (e) { console.warn('equity load failed', e); }
     }
