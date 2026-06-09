@@ -591,6 +591,16 @@
       try { audioEl.pause(); } catch (e) {}
     }
 
+    // Resume the narration from where it was paused (button3) WITHOUT restarting it from the
+    // top. If it was never started for this channel, fall back to startTextAudio (which sets up).
+    function resumeTextAudio() {
+      if (!textRevealed || !audioAvailable || !currentAudioUrl) return;
+      if (audioEl.getAttribute('src') !== currentAudioUrl) { startTextAudio(); return; }
+      audioEl.muted = false;
+      applyNarrationRate();
+      audioEl.play().catch(() => {});   // continue from the current position, no rewind
+    }
+
     // Apply the current pause state to whichever mode is showing (button3).
     function applyPause() {
       if (mode === 'video') {
@@ -598,7 +608,7 @@
       } else {
         const st = document.getElementById('scrollingText');
         if (st) st.style.animationPlayState = paused ? 'paused' : 'running';
-        if (paused) stopTextAudio(); else startTextAudio();
+        if (paused) stopTextAudio(); else resumeTextAudio();
       }
       updateSoundHint();
     }
@@ -714,8 +724,14 @@
       // video has played through (video is offered/auto-switched when ready).
       paused = false;
       textRevealed = false;
-      stopTvStatic();               // clear any no-signal static from the previous channel
-      contentEl.classList.remove('no-signal');
+      // Hide the current text INSTANTLY (no fade) before fetching the next channel, so
+      // switching channels never flashes the old, now-unstyled text. The static background
+      // is kept until the new channel's state is known (set in the branches below), avoiding
+      // a bare left-aligned flash. The fade-in transition is restored right after.
+      contentEl.style.transition = 'none';
+      contentEl.style.opacity = '0';
+      void contentEl.offsetHeight;   // commit the instant hide
+      contentEl.style.transition = '';
       showText();
       const contentDiv = document.getElementById('content');
       let scrollingText = document.getElementById('scrollingText');
@@ -752,6 +768,9 @@
         return;
       }
 
+      // Real content -> clear any leftover no-signal static/centering from the previous channel.
+      stopTvStatic();
+      contentEl.classList.remove('no-signal');
       scrollingText.innerHTML = titleHTML + serverText + discoverLink; // Only update the text content
       setupScroll(scrollingText);   // size the scroll to this text's length
 
