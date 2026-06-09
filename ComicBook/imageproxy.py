@@ -25,10 +25,30 @@ from ComicBook.azurestorage import (
     upload_blob_bytes,
 )
 
-# Widths offered in the srcset. 480/768 cover phones; 1280 keeps desktop + retina
-# crisp without shipping the full 1536px original.
-ALLOWED_WIDTHS = (480, 768, 1280)
-_WEBP_QUALITY = 80
+# Widths offered in the srcset, up to the originals' native widths (square/tall are
+# 1024 wide, wide panels 1536) so the browser never has to upscale a too-small WebP.
+# `ensure_webp_variant` never upscales, so e.g. w=1536 of a 1024px square just yields
+# the 1024px source — the sharpest available for that panel.
+ALLOWED_WIDTHS = (512, 768, 1024, 1536)
+_WEBP_QUALITY = 82
+
+# `sizes` = the panel's real CSS display width, so the browser (× devicePixelRatio)
+# picks a high-enough srcset entry. Desktop: .comic-page is ~912px wide inner (max-width
+# 960 − 2×24 padding); a 2-col grid makes square/tall panels ~451px and wide panels span
+# the full ~912px. Mobile: every panel is full-width (single column).
+_PANEL_SIZES = {
+    "wide":   "(max-width: 600px) 96vw, 912px",
+    "square": "(max-width: 600px) 96vw, 451px",
+    "tall":   "(max-width: 600px) 96vw, 451px",
+}
+_DEFAULT_SIZES = _PANEL_SIZES["square"]
+
+# Match a panel's wrapper + its <img> together, so we know the panel's size class.
+_PANEL_IMG_RE = re.compile(
+    r'(<div class="panel panel-(square|wide|tall)"[^>]*>)\s*<img\s+src="([^"]+?\.png)"([^>]*)>',
+    re.IGNORECASE,
+)
+# Fallback for any panel image not caught above (unexpected wrapper).
 _IMG_RE = re.compile(r'<img\s+src="([^"]+?\.png)"([^>]*)>', re.IGNORECASE)
 
 
@@ -81,27 +101,42 @@ def ensure_webp_variant(original_url: str, width: int) -> str | None:
         return None
 
 
+def _img_tag(url: str, rest: str, sizes: str) -> str:
+    enc = quote(url, safe="")
+    srcset = ", ".join(f"/cbimg?u={enc}&w={w} {w}w" for w in ALLOWED_WIDTHS)
+    return (
+        f'<img src="/cbimg?u={enc}&w=1024" srcset="{srcset}" sizes="{sizes}" '
+        f'data-full="{url}" decoding="async"{rest}>'
+    )
+
+
 def rewrite_comic_images(html: str) -> str:
     """Point panel <img> tags at the /cbimg WebP proxy with a responsive srcset.
 
-    Only images inside our blob container are rewritten; anything else is left as
-    is. The original PNG URL is preserved in `data-full` so the click-to-zoom modal
-    can still show full resolution on demand.
+    `sizes` is set from each panel's size class so the browser picks a high-enough
+    resolution (wide panels are ~2× the width of square/tall ones on desktop — getting
+    this wrong is what made them upscale-blurry). Only images inside our blob container
+    are rewritten; the original PNG URL is kept in `data-full` for full-res zoom.
     """
     if not html:
         return html
     prefix = _container_prefix()
 
-    def repl(match: re.Match) -> str:
+    def panel_repl(match: re.Match) -> str:
+        div, size, url, rest = match.group(1), match.group(2).lower(), match.group(3), match.group(4)
+        if not url.startswith(prefix):
+            return match.group(0)
+        return div + _img_tag(url, rest, _PANEL_SIZES.get(size, _DEFAULT_SIZES))
+
+    def img_repl(match: re.Match) -> str:
         url, rest = match.group(1), match.group(2)
         if not url.startswith(prefix):
             return match.group(0)
-        enc = quote(url, safe="")
-        srcset = ", ".join(f"/cbimg?u={enc}&w={w} {w}w" for w in ALLOWED_WIDTHS)
-        sizes = "(max-width: 600px) 96vw, 480px"
-        return (
-            f'<img src="/cbimg?u={enc}&w=1280" srcset="{srcset}" sizes="{sizes}" '
-            f'data-full="{url}" decoding="async"{rest}>'
-        )
+        return _img_tag(url, rest, _DEFAULT_SIZES)
 
-    return _IMG_RE.sub(repl, html)
+    # Panel-aware pass first (gives wide panels their wider `sizes`); then a generic pass
+    # for any leftover raw PNG <img> (already-rewritten tags no longer end in .png, so they
+    # won't re-match).
+    html = _PANEL_IMG_RE.sub(panel_repl, html)
+    html = _IMG_RE.sub(img_repl, html)
+    return html
