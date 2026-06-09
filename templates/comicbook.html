@@ -453,8 +453,13 @@
             cursor: pointer;
             backdrop-filter: blur(10px);
             -webkit-backdrop-filter: blur(10px);
+            /* Swallow touch gestures so a drag doesn't scroll the blurred page behind it. */
+            touch-action: none;
+            overscroll-behavior: contain;
         }
         .modal-overlay.open { display: flex; animation: modal-bg 0.2s ease; }
+        /* While a photo is full-screen, freeze the page underneath so touch can't scroll it. */
+        body.modal-open { overflow: hidden; touch-action: none; }
         @keyframes modal-bg { from{opacity:0} to{opacity:1} }
 
         .modal-content {
@@ -550,18 +555,17 @@
         #comicContent .comic-page[dir=rtl] .caption-box { transform-origin: top center; }
 
         /* Image wrapper added at runtime by restructurePanels(). On desktop it's transparent
-           (display:contents), so the panel layout is byte-for-byte unchanged; it only exists
-           to give the SFX a positioning context that is the photo itself. The SFX is pinned to
-           the bottom-left of the art — where it used to render — and stays ON the art even when
-           (on mobile) the dialogue reflows below the photo. */
+           (display:contents), so the panel layout is byte-for-byte unchanged; it only exists to
+           give the SFX a positioning context (the photo) on mobile. On desktop the SFX rides in
+           the bottom .panel-overlay, flex-stacked UNDER the dialogue — its server-emitted home —
+           so it can never land on a caption (top) or a speech bubble (bottom). On mobile the
+           dialogue reflows into a block below the photo, so restructurePanels lifts the SFX onto
+           the art (see the @600 rule) to keep it on the image. */
         #comicContent .panel-art { display: contents; }
-        #comicContent .sfx {
-            position: absolute;
-            bottom: 8px;
-            left: 12px;
-            z-index: 5;
-            pointer-events: none;
-        }
+        #comicContent .sfx { pointer-events: none; }
+        /* An SFX-only panel's overlay goes empty once the SFX is lifted onto the art (mobile);
+           hide it so its gradient strip doesn't show. */
+        #comicContent .panel-overlay:empty { display: none; }
 
         /* ─────────────────────────────────────────────────────
            Responsive
@@ -597,6 +601,14 @@
                 width: 100%;
                 height: auto;                /* natural aspect — the whole image, large */
                 object-fit: contain;
+            }
+            /* On mobile the SFX is lifted onto the photo (restructurePanels) and pinned to its
+               bottom-left; the dialogue lives in its own block below, so nothing collides. */
+            #comicContent .sfx {
+                position: absolute;
+                bottom: 8px;
+                left: 12px;
+                z-index: 5;
             }
             #comicContent .caption-overlay {
                 order: 0;
@@ -844,11 +856,17 @@
             loadComic();
         }
 
-        // After the comic HTML is injected, lift each panel's image into a .panel-art wrapper
-        // (a positioning context) and move any SFX onto that art. This keeps the sound effects
-        // ON the photo even on mobile, where the dialogue reflows into a block BELOW the image.
-        // Idempotent and retroactive — runs on whatever HTML the server returns.
+        // After the comic HTML is injected, lift each panel's image into a .panel-art wrapper (a
+        // positioning context). The SFX then lives in one of two homes depending on viewport:
+        //  • mobile  — moved ONTO the art, so it stays on the photo while the dialogue reflows
+        //              into a block below it.
+        //  • desktop — left in (or returned to) the bottom .panel-overlay, flex-stacked under the
+        //              dialogue (its server-emitted home), so it never covers a caption or bubble.
+        // Idempotent and breakpoint-aware — finds the SFX wherever it currently is, so it's safe
+        // to re-run on resize across the breakpoint.
+        const mobileMq = window.matchMedia("(max-width: 600px)");
         function restructurePanels() {
+            const onPhoto = mobileMq.matches;
             content.querySelectorAll(".panel").forEach(panel => {
                 let art = panel.querySelector(":scope > .panel-art");
                 const img = panel.querySelector(":scope > img");
@@ -858,11 +876,14 @@
                     panel.insertBefore(art, img);
                     art.appendChild(img);
                 }
-                if (art) panel.querySelectorAll(".sfx").forEach(sfx => art.appendChild(sfx));
-                // Drop a dialogue overlay left empty after pulling out an SFX-only panel's sfx.
-                panel.querySelectorAll(".panel-overlay").forEach(ov => { if (!ov.children.length) ov.remove(); });
+                const overlay = panel.querySelector(":scope > .panel-overlay");
+                panel.querySelectorAll(".sfx").forEach(sfx => {
+                    if (onPhoto && art) art.appendChild(sfx);
+                    else if (overlay) overlay.appendChild(sfx);
+                });
             });
         }
+        mobileMq.addEventListener("change", restructurePanels);
 
         async function loadComic() {
             const dt = isoFromDateInput(datePicker.value);
@@ -920,11 +941,12 @@
         });
 
         // Modal
-        function openModal(src)  { modalImg.src = src; imgModal.classList.add("open"); }
-        function closeModal()    { imgModal.classList.remove("open"); modalImg.src = ""; }
+        function openModal(src)  { modalImg.src = src; imgModal.classList.add("open"); document.body.classList.add("modal-open"); }
+        function closeModal()    { imgModal.classList.remove("open"); modalImg.src = ""; document.body.classList.remove("modal-open"); }
         modalClose.addEventListener("click", e => { e.stopPropagation(); closeModal(); });
+        // Once a photo is full-screen, a click ANYWHERE — the backdrop or the image itself —
+        // closes it. (The overlay covers the whole viewport, so every click lands on it.)
         imgModal.addEventListener("click", closeModal);
-        imgModal.querySelector(".modal-content").addEventListener("click", e => e.stopPropagation());
 
         charSheetLink.addEventListener("click", () => { const s = charSheetLink.dataset.src; if (s) openModal(s); });
         content.addEventListener("click", e => {
