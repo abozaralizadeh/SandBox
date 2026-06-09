@@ -342,12 +342,77 @@
     .home-button:hover {
       color: rgb(52, 52, 52);
     }
+
+    /* Top-right "?" help button — vintage warm/amber, subtle (no neon). */
+    .help-button {
+      position: fixed;
+      top: 12px;
+      right: 14px;
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      background: rgba(40, 30, 20, 0.7);
+      color: #d9b48a;
+      border: 1px solid #8a6d4a;
+      font-family: Georgia, 'Times New Roman', serif;
+      font-size: 16px;
+      font-weight: bold;
+      line-height: 1;
+      cursor: pointer;
+      z-index: 1000;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+      transition: background 0.2s ease, color 0.2s ease;
+    }
+
+    .help-button:hover {
+      background: rgba(70, 52, 33, 0.85);
+      color: #f0d6b0;
+    }
+
+    /* When help is active, each knob ratchets a full 360° in six 60° "clicks". The wave is
+       staggered per knob via --wave-delay. Uses a CSS var for the base rotation so the spin
+       starts/ends seamlessly on top of each knob's existing rotation. */
+    @keyframes knobRatchet {
+      from { transform: rotate(var(--base-rot, 0deg)); }
+      to   { transform: rotate(calc(var(--base-rot, 0deg) + 360deg)); }
+    }
+
+    #tv.help-on > button {
+      animation: knobRatchet 0.66s steps(6) var(--wave-delay, 0s) 1 both;
+    }
+
+    /* Function labels to the RIGHT of each knob during help — vintage, small (positioned in
+       viewport coords by JS from each knob's box, so the TV scale/rotation never offsets them). */
+    .knob-help-label {
+      position: fixed;
+      z-index: 1001;
+      transform: translateY(-50%);
+      background: rgba(38, 28, 18, 0.9);
+      color: #d9b48a;
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+      letter-spacing: 0.3px;
+      white-space: nowrap;
+      padding: 4px 9px;
+      border: 1px solid #6e553a;
+      border-radius: 4px;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.4s ease, transform 0.4s ease;
+    }
+
+    .knob-help-label.show {
+      opacity: 1;
+      transform: translateY(-50%) translateX(10px);
+    }
   </style>
 </head>
 
 <body>
 
   <a href="/" class="home-button">H⌂me</a>
+  <button id="helpButton" class="help-button" title="How does this work?">?</button>
 
   <div id="tv">
     <div id="screen">
@@ -724,14 +789,16 @@
       // video has played through (video is offered/auto-switched when ready).
       paused = false;
       textRevealed = false;
+      stopTextAudio();               // silence the previous channel's narration immediately
       // Hide the current text INSTANTLY (no fade) before fetching the next channel, so
-      // switching channels never flashes the old, now-unstyled text. The static background
-      // is kept until the new channel's state is known (set in the branches below), avoiding
-      // a bare left-aligned flash. The fade-in transition is restored right after.
+      // switching channels never flashes the old, now-unstyled text. The fade-in transition
+      // is restored right after. We also drop the static here so changing between two empty
+      // channels shows a brief black gap (the new static reappears once the channel resolves).
       contentEl.style.transition = 'none';
       contentEl.style.opacity = '0';
       void contentEl.offsetHeight;   // commit the instant hide
       contentEl.style.transition = '';
+      stopTvStatic();
       showText();
       const contentDiv = document.getElementById('content');
       let scrollingText = document.getElementById('scrollingText');
@@ -841,12 +908,68 @@
       }
     });
 
+    // ---- "?" help: shine the knobs and label what each one does for a few seconds ----
+    const helpButton = document.getElementById('helpButton');
+    const tvEl = document.getElementById('tv');
+    const helpItems = [
+      { el: button1, text: '‹ Previous day' },
+      { el: button2, text: 'Next day ›' },
+      { el: button3, text: 'Pause / Resume' },
+      { el: button4, text: 'Text ⇄ Video' },
+    ];
+    // Build the labels once, hidden, in viewport coords.
+    const helpLabels = helpItems.map(it => {
+      const d = document.createElement('div');
+      d.className = 'knob-help-label';
+      d.textContent = it.text;
+      document.body.appendChild(d);
+      return d;
+    });
+    let helpTimer = null;
+
+    function positionHelpLabels() {
+      helpItems.forEach((it, i) => {
+        const r = it.el.getBoundingClientRect();
+        const lbl = helpLabels[i];
+        lbl.style.top = (r.top + r.height / 2) + 'px';
+        lbl.style.left = r.right + 'px';       // label sits just to the RIGHT of the knob
+      });
+    }
+
+    function showHelp() {
+      positionHelpLabels();
+      // Seed each knob's base rotation (so the spin is seamless) and its wave delay (top first).
+      const bases = [rotationAngle1, rotationAngle2, rotationAngle3, rotationAngle4];
+      helpItems.forEach((it, i) => {
+        it.el.style.setProperty('--base-rot', bases[i] + 'deg');
+        it.el.style.setProperty('--wave-delay', (i * 0.18) + 's');
+      });
+      // Restart the ratchet animation cleanly even on a repeat click.
+      tvEl.classList.remove('help-on');
+      void tvEl.offsetWidth;                   // force reflow
+      tvEl.classList.add('help-on');
+      // Reveal labels in the same top-to-bottom wave.
+      helpLabels.forEach((l, i) => setTimeout(() => l.classList.add('show'), i * 180));
+      clearTimeout(helpTimer);
+      helpTimer = setTimeout(hideHelp, 6500);  // auto-dismiss after a few seconds
+    }
+
+    function hideHelp() {
+      tvEl.classList.remove('help-on');
+      helpLabels.forEach(l => l.classList.remove('show'));
+    }
+
+    helpButton.addEventListener('click', () => { userInteracted = true; showHelp(); });
+
     displayServerText();
   </script>
 
 </body>
 <footer style="position: fixed; bottom: 10px; left: 0; right: 0; color: #ffffff4c; padding: 10px; text-align: center;">
-  <p>Copyright (c) 2024 Abozar Alizadeh</p>
+  <p>Copyright (c) 2026 Abozar Alizadeh ·
+    <a href="https://github.com/abozaralizadeh/SandBox" target="_blank" rel="noopener"
+       style="color: #ffffff80; text-decoration: none;">GitHub</a>
+  </p>
 </footer>
 
 </html>
