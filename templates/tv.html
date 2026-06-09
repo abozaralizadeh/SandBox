@@ -78,6 +78,24 @@
       mask-composite: intersect;
     }
 
+    /* Big station title that leads the scroll, centered on the screen and moving
+       up together with the decision text (it lives inside #scrollingText). */
+    .tv-title {
+      display: block;
+      text-align: center;
+      font-weight: bold;
+      font-size: 26px;
+      line-height: 1.15;
+      margin: 0 0 16px;
+      white-space: normal;
+      text-shadow: 0 0 6px rgba(0, 255, 0, 0.7);
+    }
+
+    /* The text starts transparent on page load and fades in once the video has finished. */
+    #content {
+      transition: opacity 0.6s ease;
+    }
+
     #scrollingText {
       display: inline-block;
       white-space: pre-line;
@@ -99,9 +117,10 @@
       border-radius: 75px;
       background: #000;
 
-      /* Fade the video's edges into the screen, matching the scrolling text. */
-      -webkit-mask-image: radial-gradient(ellipse 80% 80% at center, rgba(0, 0, 0, 1) 55%, rgba(0, 0, 0, 0) 100%);
-      mask-image: radial-gradient(ellipse 80% 80% at center, rgba(0, 0, 0, 1) 55%, rgba(0, 0, 0, 0) 100%);
+      /* Fade the video's edges into the screen, matching the scrolling text.
+         Wider, softer falloff: stays solid only to ~38% then fades fully out at the border. */
+      -webkit-mask-image: radial-gradient(ellipse 78% 78% at center, rgba(0, 0, 0, 1) 38%, rgba(0, 0, 0, 0) 100%);
+      mask-image: radial-gradient(ellipse 78% 78% at center, rgba(0, 0, 0, 1) 38%, rgba(0, 0, 0, 0) 100%);
       -webkit-mask-size: cover;
       mask-size: cover;
     }
@@ -301,6 +320,7 @@
 
     // ---- text / video mode state ----
     let mode = 'text';            // 'text' | 'video'
+    let textRevealed = false;     // hide the scrolling text until the first video has finished
     let videoAvailable = false;   // a ready video exists for currentDate
     let userInteracted = false;   // gate unmuted autoplay behind a user gesture
     let paused = false;           // button3: pause BOTH video and scrolling text
@@ -347,8 +367,10 @@
     function updateSoundHint() {
       const hint = document.getElementById('soundHint');
       if (!hint) return;
+      // Once the user has clicked anywhere, sound is unlocked for the page -> never nag again.
+      if (userInteracted) { hint.style.display = 'none'; return; }
       const videoNeedsClick = (mode === 'video' && videoEl.muted && !videoEl.paused);
-      const audioNeedsClick = (mode === 'text' && audioAvailable && !paused && audioEl.paused);
+      const audioNeedsClick = (mode === 'text' && textRevealed && audioAvailable && !paused && audioEl.paused);
       hint.style.display = (videoNeedsClick || audioNeedsClick) ? 'block' : 'none';
     }
 
@@ -357,10 +379,22 @@
       try { videoEl.pause(); } catch (e) {}
       videoEl.style.display = 'none';
       contentEl.style.display = 'block';
+      contentEl.style.opacity = textRevealed ? '1' : '0';   // stay invisible until the video finishes
       const st = document.getElementById('scrollingText');
       if (st) st.style.animationPlayState = paused ? 'paused' : 'running';
-      startTextAudio();              // play the TTS narration (synced), if available
+      // Reset the scroll to the title-centered top exactly once, so the text fades in at the
+      // top instead of at a stale position (which looked like a flicker/jump). With narration,
+      // startTextAudio sizes + restarts the scroll to the audio; without it, we do it here.
+      if (st && textRevealed && !audioAvailable) setupScroll(st);
+      startTextAudio();              // play the TTS narration (synced), if available + revealed
       updateSoundHint();
+    }
+
+    // Reveal the scrolling text. The actual scroll reset / narration start is handled by the
+    // showText() call that always follows, so there is a single, jump-free start.
+    function revealText() {
+      textRevealed = true;
+      contentEl.style.opacity = '1';
     }
 
     // Size the scroll to the actual text: start just below the screen, end fully above it.
@@ -371,10 +405,16 @@
       const screen = document.getElementById('screen');
       const screenH = (screen ? screen.clientHeight : 331);
       const textH = el.scrollHeight || screenH;
+      // Start with the station title centered in the screen (visible from second 0), then
+      // scroll the whole block up so the decision text follows immediately behind it.
+      const title = el.querySelector('.tv-title');
+      const startOffset = title
+        ? Math.max(0, (screenH - title.offsetHeight) / 2)
+        : screenH;                                              // no title -> start just below the screen
       const dur = (forcedDur && isFinite(forcedDur) && forcedDur > 1)
         ? forcedDur
-        : Math.max(18, (screenH + textH) / SCROLL_SPEED_PX_PER_SEC);
-      el.style.setProperty('--scroll-start', screenH + 'px');   // start just below the screen
+        : Math.max(18, (startOffset + textH) / SCROLL_SPEED_PX_PER_SEC);
+      el.style.setProperty('--scroll-start', startOffset + 'px'); // title centered at the top of the scroll
       el.style.setProperty('--scroll-end', (-textH) + 'px');    // end fully above the screen
       el.style.setProperty('--scroll-dur', dur + 's');
       // Restart the animation cleanly so the new offsets/duration apply from the top.
@@ -404,14 +444,22 @@
     // the document click handler restarts it if the browser blocked autoplay.
     function startTextAudio() {
       const st = document.getElementById('scrollingText');
+      if (!textRevealed) return;                  // narration waits until the text is revealed (after the video)
       if (!audioAvailable || !currentAudioUrl) return;
       if (audioEl.getAttribute('src') !== currentAudioUrl) audioEl.src = currentAudioUrl;
       audioEl.muted = false;
       applyNarrationRate();
       if (paused) { audioEl.pause(); return; }
-      try { audioEl.currentTime = 0; } catch (e) {}
+      // If the duration isn't known yet (freshly set src), hold the scroll pinned at the top
+      // and let the loadedmetadata handler start audio + scroll together exactly once. Pinning
+      // (rather than letting it run) avoids a scroll-then-snap-back flicker when metadata lands.
       const eff = effectiveAudioDuration();
-      if (st && eff) setupScroll(st, eff);     // scroll matches the sped-up narration
+      if (!eff) {
+        if (st) { setupScroll(st); st.style.animationPlayState = 'paused'; }
+        return;
+      }
+      try { audioEl.currentTime = 0; } catch (e) {}
+      if (st) setupScroll(st, eff);             // scroll matches the sped-up narration
       audioEl.play().catch(() => {});           // may be blocked until the first click
     }
 
@@ -478,6 +526,7 @@
     videoEl.addEventListener('error', () => {
       console.error('TV video failed to load:', videoEl.error);
       videoAvailable = false;
+      revealText();                 // no usable video -> don't leave the screen blank
       showText();
     });
 
@@ -485,7 +534,7 @@
     // Video ends -> scrolling text (with narration); the narration (or one full scroll when
     // there is no narration) ends -> back to video. Repeats. No-ops while paused / no video.
     videoEl.addEventListener('ended', () => {
-      if (!paused && videoAvailable) showText();
+      if (!paused && videoAvailable) { revealText(); showText(); }
     });
     audioEl.addEventListener('ended', () => {
       if (!paused && mode === 'text' && videoAvailable && currentVideoUrl) showVideo(currentVideoUrl);
@@ -496,7 +545,9 @@
       const st = document.getElementById('scrollingText');
       applyNarrationRate();
       const eff = effectiveAudioDuration();
-      if (mode === 'text' && !paused && st && eff) {
+      // Only act as the deferred starter (audio paused); don't restart a narration that
+      // startTextAudio already began, which would play it twice.
+      if (mode === 'text' && !paused && textRevealed && st && eff && audioEl.paused) {
         setupScroll(st, eff);
         try { audioEl.currentTime = 0; } catch (e) {}
         audioEl.play().catch(() => {});
@@ -537,6 +588,11 @@
         if (s.audio_status === 'ready' && s.audio_url && !audioAvailable) {
           audioAvailable = true;
           currentAudioUrl = `/genbox-audio?date=${pollDate.toISOString()}`;
+          // Preload now (even while hidden) so the duration is known by reveal time and the
+          // scroll syncs to the narration immediately, without a restart/jump.
+          if (sameDay(pollDate, currentDate) && audioEl.getAttribute('src') !== currentAudioUrl) {
+            audioEl.src = currentAudioUrl;
+          }
           if (mode === 'text' && sameDay(pollDate, currentDate)) startTextAudio();
           updateSoundHint();
         }
@@ -546,6 +602,13 @@
           currentVideoUrl = `/genbox-video?date=${pollDate.toISOString()}`;
           if (sameDay(pollDate, currentDate)) showVideo(currentVideoUrl);
         }
+        // No video will play for this day -> reveal the text (and its narration) instead of
+        // staying blank. Guarded by !textRevealed so it runs once, not every poll.
+        if (terminal(s.status) && s.status !== 'ready' && !videoAvailable && !textRevealed
+            && mode === 'text' && sameDay(pollDate, currentDate)) {
+          revealText();
+          showText();
+        }
         if (terminal(s.status) && terminal(s.audio_status)) clearInterval(statusPollTimer);
       };
       poll();
@@ -553,8 +616,10 @@
     }
 
     async function displayServerText(date = null) {
-      // Each day (re)load starts on text, unpaused; video is offered/auto-switched when ready.
+      // Each day (re)load starts on text, unpaused, with the text hidden until that day's
+      // video has played through (video is offered/auto-switched when ready).
       paused = false;
+      textRevealed = false;
       showText();
       const contentDiv = document.getElementById('content');
       let scrollingText = document.getElementById('scrollingText');
@@ -567,7 +632,8 @@
       }
 
       const serverText = await fetchServerText(date);
-      scrollingText.innerHTML = serverText + '\n<a href="https://medium.com/@abozar-alizadeh/exploring-ai-driven-governance-building-a-virtual-world-where-ai-rules-22419690a409" target="_blank" class="custom-link">Discover More!</a>'; // Only update the text content
+      const titleHTML = '<div class="tv-title">International<br>Artificial Intelligence<br>Government</div>';
+      scrollingText.innerHTML = titleHTML + serverText + '\n<a href="https://medium.com/@abozar-alizadeh/exploring-ai-driven-governance-building-a-virtual-world-where-ai-rules-22419690a409" target="_blank" class="custom-link">Discover More!</a>'; // Only update the text content
       setupScroll(scrollingText);   // size the scroll to this text's length
 
       startStatusPolling(date);
@@ -632,6 +698,7 @@
         }
         // No video for this day yet -> stay on text (graceful fallback).
       } else {
+        revealText();   // explicit request to see the text -> reveal it (with narration)
         showText();
       }
     });
