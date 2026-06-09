@@ -128,16 +128,23 @@ def comicbookcontent():
 
 @app.route('/cbimg', methods=['GET'])
 def cbimg():
-    """Resized-WebP proxy for ComicBook panel images. Lazily transcodes + caches a
-    derivative in blob storage, then redirects the browser to it. Only serves images
-    from our own container (open-relay guard)."""
+    """Full-resolution WebP proxy for ComicBook panel images. Lazily transcodes + caches
+    a derivative in blob storage, then redirects the browser to it. Serves native size at
+    high quality by default; `w` (downscale) and `q` (quality) are optional overrides.
+    Only serves images from our own container (open-relay guard)."""
     u = request.args.get('u', '')
+    w_arg = request.args.get('w')
+    q_arg = request.args.get('q')
     try:
-        w = int(request.args.get('w', '768'))
+        w = int(w_arg) if w_arg else None
     except ValueError:
-        w = 768
+        w = None
+    try:
+        q = int(q_arg) if q_arg else 92
+    except ValueError:
+        q = 92
 
-    target = ensure_webp_variant(u, w)
+    target = ensure_webp_variant(u, w, q)
     if not target:
         # Transcode failed (or unknown width) but the source is still ours: fall back
         # to the original PNG so the panel renders. Reject anything outside our container.
