@@ -9,28 +9,12 @@
         })(window, document, "clarity", "script", "wov9qpoj0m");
     </script>
     <meta charset="UTF-8">
+    <!-- Mobile uses its native device width so the comic reflows to a SINGLE column:
+         one big photo per row, with compact text boxes sitting over the art (tuned in
+         the @media (max-width: 600px) block below). This replaces the earlier
+         "desktop composition scaled to fit" approach, which left the 2-column art too
+         small and the speech bubbles oversized over each photo. -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <script>
-        /* Mobile: show the comic in its full DESKTOP composition (2-column, art and
-           text positioned exactly as designed) scaled to fit the screen, with native
-           pinch-zoom to read — instead of the single-column mobile reflow that made
-           text cover the art and speech bubbles overlap.
-
-           The comic's only responsive breakpoint is @media (max-width: 600px); forcing
-           the layout viewport to 640 keeps us just above it, so the desktop layout is
-           used, and the device then scales that 640px-wide page down to fit the phone.
-           Tweak the 640 below to taste: smaller = less zoom needed / smaller text,
-           larger = more "true desktop" but more pinch-zoom to read. */
-        (function () {
-            try {
-                var w = window.innerWidth || document.documentElement.clientWidth || 0;
-                if (w > 0 && w <= 600) {
-                    var vp = document.querySelector('meta[name="viewport"]');
-                    if (vp) vp.setAttribute('content', 'width=640');
-                }
-            } catch (e) {}
-        })();
-    </script>
     <title>ComicBook — Daily AI Comics</title>
     <link rel="icon" type="image/png" href="/static/faviconCB.png">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -565,6 +549,20 @@
         }
         #comicContent .comic-page[dir=rtl] .caption-box { transform-origin: top center; }
 
+        /* Image wrapper added at runtime by restructurePanels(). On desktop it's transparent
+           (display:contents), so the panel layout is byte-for-byte unchanged; it only exists
+           to give the SFX a positioning context that is the photo itself. The SFX is pinned to
+           the bottom-left of the art — where it used to render — and stays ON the art even when
+           (on mobile) the dialogue reflows below the photo. */
+        #comicContent .panel-art { display: contents; }
+        #comicContent .sfx {
+            position: absolute;
+            bottom: 8px;
+            left: 12px;
+            z-index: 5;
+            pointer-events: none;
+        }
+
         /* ─────────────────────────────────────────────────────
            Responsive
         ───────────────────────────────────────────────────── */
@@ -578,10 +576,66 @@
             #comicContainer { padding: 16px 10px; }
         }
         @media (max-width: 600px) {
+            /* Mobile reading layout: each panel is a dark card matching the moody art. The
+               photo shows in full (uncropped, full width); the caption + dialogue read in a
+               clean block BELOW it (never overlaid) so no text covers the art and no bubble is
+               clipped, however wordy the panel is. SFX stays overlaid ON the photo (it's art,
+               not dialogue). (The agents.py @600 rule already drops .comic-panels to one column.)
+               Flex `order` stacks the children: caption (0) → photo (1) → dialogue (2). */
+            #comicContent .panel {
+                display: flex;
+                flex-direction: column;
+                overflow: visible;           /* let the card grow with its text; never clip */
+                background: #14141f;         /* dark card to match the comic art */
+            }
+            #comicContent .panel-art {
+                display: block;              /* real positioning box (overrides display:contents) */
+                position: relative;
+                order: 1;                    /* photo sits between caption (0) and dialogue (2) */
+            }
+            #comicContent .panel img {
+                width: 100%;
+                height: auto;                /* natural aspect — the whole image, large */
+                object-fit: contain;
+            }
+            #comicContent .caption-overlay {
+                order: 0;
+                position: static;
+                padding: 10px 12px;
+                pointer-events: auto;
+            }
+            #comicContent .panel-overlay {
+                order: 2;
+                position: static;
+                background: none;            /* drop the dark gradient — not over the art now */
+                padding: 10px 12px 12px;
+                gap: 5px;
+            }
+            /* Full-size, readable text — no shrink-then-tap-to-enlarge dance needed. */
+            #comicContent .caption-box {
+                font-size: 0.82em;
+                max-width: 100%;
+                padding: 7px 12px;
+            }
+            #comicContent .speech-bubble {
+                font-size: 0.82em;
+                max-width: 100%;
+                padding: 6px 12px;
+            }
+            /* Tapping a box no longer resizes it (it's already full-size in the flow). */
             #comicContent .speech-bubble:hover,
-            #comicContent .speech-bubble:active { font-size: 0.92em; }
+            #comicContent .speech-bubble:active {
+                font-size: 0.82em;
+                padding: 6px 12px;
+                border-width: 1px;
+                border-radius: 14px;
+                box-shadow: 1px 1px 0 rgba(0,0,0,0.15);
+            }
             #comicContent .caption-box:hover,
-            #comicContent .caption-box:active { font-size: 0.78em; }
+            #comicContent .caption-box:active {
+                font-size: 0.82em;
+                padding: 7px 12px;
+            }
         }
     </style>
 </head>
@@ -790,6 +844,26 @@
             loadComic();
         }
 
+        // After the comic HTML is injected, lift each panel's image into a .panel-art wrapper
+        // (a positioning context) and move any SFX onto that art. This keeps the sound effects
+        // ON the photo even on mobile, where the dialogue reflows into a block BELOW the image.
+        // Idempotent and retroactive — runs on whatever HTML the server returns.
+        function restructurePanels() {
+            content.querySelectorAll(".panel").forEach(panel => {
+                let art = panel.querySelector(":scope > .panel-art");
+                const img = panel.querySelector(":scope > img");
+                if (!art && img) {
+                    art = document.createElement("div");
+                    art.className = "panel-art";
+                    panel.insertBefore(art, img);
+                    art.appendChild(img);
+                }
+                if (art) panel.querySelectorAll(".sfx").forEach(sfx => art.appendChild(sfx));
+                // Drop a dialogue overlay left empty after pulling out an SFX-only panel's sfx.
+                panel.querySelectorAll(".panel-overlay").forEach(ov => { if (!ov.children.length) ov.remove(); });
+            });
+        }
+
         async function loadComic() {
             const dt = isoFromDateInput(datePicker.value);
             let url = dt ? `/comicbookcontent?dt=${encodeURIComponent(dt)}` : "/comicbookcontent";
@@ -806,6 +880,7 @@
                 const arcId    = res.headers.get("Arc-Id") || "";
                 const timestamp = res.headers.get("Timestamp") || "";
                 content.innerHTML = text;
+                restructurePanels();
 
                 if (arcId) currentArcId = arcId;
                 if (datePicker.value) {
