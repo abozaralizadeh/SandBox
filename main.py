@@ -6,11 +6,12 @@ import os
 
 from dotenv import load_dotenv
 load_dotenv()
-from flask import Flask, jsonify, make_response, request, render_template, Response
+from flask import Flask, jsonify, make_response, request, render_template, Response, redirect
 from AIBlog.prompt import *
 from TomorrowNews.prompt import *
 from ComicBook.prompt import get_comicbook
 from ComicBook.azurestorage import get_episode_index, get_arc_list
+from ComicBook.imageproxy import ensure_webp_variant, blob_name_if_ours, rewrite_comic_images
 from GenBox.prompt import get_llm_response
 from GenBox.video import ensure_generation_started, video_status
 from GenBox.azurestorage import (
@@ -117,12 +118,36 @@ def comicbookcontent():
             except Exception:
                 parsed_date = None
         comic_html, dt, arc_id = get_comicbook(parsed_date, lang=lang)
-        response = make_response(comic_html)
+        response = make_response(rewrite_comic_images(comic_html))
         response.headers['Timestamp'] = dt
         response.headers['Arc-Id'] = arc_id or ""
         return response
     else:
         return "404 Not Found", 404
+
+
+@app.route('/cbimg', methods=['GET'])
+def cbimg():
+    """Resized-WebP proxy for ComicBook panel images. Lazily transcodes + caches a
+    derivative in blob storage, then redirects the browser to it. Only serves images
+    from our own container (open-relay guard)."""
+    u = request.args.get('u', '')
+    try:
+        w = int(request.args.get('w', '768'))
+    except ValueError:
+        w = 768
+
+    target = ensure_webp_variant(u, w)
+    if not target:
+        # Transcode failed (or unknown width) but the source is still ours: fall back
+        # to the original PNG so the panel renders. Reject anything outside our container.
+        target = u if blob_name_if_ours(u) else None
+    if not target:
+        return "Not found", 404
+
+    response = redirect(target, code=302)
+    response.headers['Cache-Control'] = 'public, max-age=31536000, immutable'
+    return response
 
 @app.route('/comicbookindex', methods=['GET'])
 def comicbookindex():

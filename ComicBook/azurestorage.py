@@ -71,6 +71,35 @@ def upload_image_bytes_to_blob(image_bytes: bytes) -> str:
     return blob_client.url
 
 
+def get_blob_container_url() -> str:
+    """Public base URL of the ComicBook blob container (no trailing slash)."""
+    return container_client.url.rstrip("/")
+
+
+def blob_exists(blob_name: str) -> bool:
+    try:
+        return container_client.get_blob_client(blob_name).exists()
+    except Exception:
+        return False
+
+
+def download_blob_bytes(blob_name: str) -> bytes:
+    return container_client.get_blob_client(blob_name).download_blob().readall()
+
+
+def upload_blob_bytes(blob_name: str, data: bytes, content_type: str) -> str:
+    """Upload raw bytes with an explicit content-type; return the blob's public URL."""
+    from azure.storage.blob import ContentSettings
+    _ensure_container()
+    blob_client = container_client.get_blob_client(blob_name)
+    blob_client.upload_blob(
+        BytesIO(data),
+        overwrite=True,
+        content_settings=ContentSettings(content_type=content_type),
+    )
+    return blob_client.url
+
+
 def _should_offload_to_blob(html_content: str) -> bool:
     return bool(html_content) and len(html_content) > MAX_TABLE_PROPERTY_CHARS
 

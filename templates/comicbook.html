@@ -958,7 +958,10 @@
             if (e.target.closest(".speech-bubble, .caption-box")) return;
             const panel = e.target.closest(".panel");
             const img = panel && panel.querySelector("img");
-            if (img?.src) openModal(img.src);
+            // Zoom shows the full-resolution original (data-full, set by the WebP proxy
+            // rewrite) when present, falling back to the displayed src.
+            const full = img && (img.dataset.full || img.src);
+            if (full) openModal(full);
         });
 
         // Nav buttons
