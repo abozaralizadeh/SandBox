@@ -10,6 +10,27 @@
     </script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script>
+        /* Mobile: show the comic in its full DESKTOP composition (2-column, art and
+           text positioned exactly as designed) scaled to fit the screen, with native
+           pinch-zoom to read — instead of the single-column mobile reflow that made
+           text cover the art and speech bubbles overlap.
+
+           The comic's only responsive breakpoint is @media (max-width: 600px); forcing
+           the layout viewport to 640 keeps us just above it, so the desktop layout is
+           used, and the device then scales that 640px-wide page down to fit the phone.
+           Tweak the 640 below to taste: smaller = less zoom needed / smaller text,
+           larger = more "true desktop" but more pinch-zoom to read. */
+        (function () {
+            try {
+                var w = window.innerWidth || document.documentElement.clientWidth || 0;
+                if (w > 0 && w <= 600) {
+                    var vp = document.querySelector('meta[name="viewport"]');
+                    if (vp) vp.setAttribute('content', 'width=640');
+                }
+            } catch (e) {}
+        })();
+    </script>
     <title>ComicBook — Daily AI Comics</title>
     <link rel="icon" type="image/png" href="/static/faviconCB.png">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -831,7 +852,17 @@
         imgModal.querySelector(".modal-content").addEventListener("click", e => e.stopPropagation());
 
         charSheetLink.addEventListener("click", () => { const s = charSheetLink.dataset.src; if (s) openModal(s); });
-        content.addEventListener("click", e => { const img = e.target.closest(".panel img"); if (img?.src) openModal(img.src); });
+        content.addEventListener("click", e => {
+            // Tapping an actual text box (a speech bubble or caption) reads it — that must
+            // NOT open the image. A tap anywhere else on the panel — the artwork itself OR
+            // the transparent overlay area around the text — opens it full-screen. (The
+            // overlay containers stretch across the image, so we resolve to the panel's
+            // own <img> rather than requiring the tap to land directly on the image.)
+            if (e.target.closest(".speech-bubble, .caption-box")) return;
+            const panel = e.target.closest(".panel");
+            const img = panel && panel.querySelector("img");
+            if (img?.src) openModal(img.src);
+        });
 
         // Nav buttons
         btnPrev.addEventListener("click", () => { const i = findEpisodeIdx(currentDate); if (i > 0) navigateTo(episodeIndex[i-1].date); });
