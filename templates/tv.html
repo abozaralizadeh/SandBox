@@ -91,9 +91,56 @@
       text-shadow: 0 0 6px rgba(0, 255, 0, 0.7);
     }
 
-    /* The text starts transparent on page load and fades in once the video has finished. */
+    /* The text starts transparent on page load and fades in once the video has finished.
+       It sits above the no-signal TV static / scanlines. */
     #content {
+      position: relative;
+      z-index: 2;
       transition: opacity 0.6s ease;
+    }
+
+    /* No-signal screen: fill the CRT and center the title + message in the middle of the
+       screen (normal channels keep the body text shrink-wrapped/left for readability). */
+    #content.no-signal {
+      width: 100%;
+      text-align: center;
+    }
+
+    /* No-signal TV static + scanlines, shown behind the text when a channel has no content. */
+    #tvStatic {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      border-radius: 75px;
+      display: none;
+      opacity: 0;
+      transition: opacity 0.4s ease;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    #tvScanlines {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      border-radius: 75px;
+      display: none;
+      opacity: 0;
+      transition: opacity 0.4s ease;
+      pointer-events: none;
+      z-index: 1;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(0, 0, 0, 0.22) 2px,
+        rgba(0, 0, 0, 0.22) 4px
+      );
+      mix-blend-mode: multiply;
     }
 
     #scrollingText {
@@ -304,6 +351,8 @@
 
   <div id="tv">
     <div id="screen">
+      <canvas id="tvStatic"></canvas>
+      <div id="tvScanlines"></div>
       <p id="content"></p>
       <video id="tvVideo" playsinline preload="auto" style="display:none"></video>
       <audio id="tvAudio" preload="auto"></audio>
@@ -333,6 +382,50 @@
     const videoEl = document.getElementById('tvVideo');
     const audioEl = document.getElementById('tvAudio');
     const contentEl = document.getElementById('content');
+
+    // ---- no-signal TV static (shown behind the text when a channel has no content) ----
+    const staticCanvas = document.getElementById('tvStatic');
+    const scanlinesEl = document.getElementById('tvScanlines');
+    const _noiseOff = document.createElement('canvas');
+    _noiseOff.width = 160; _noiseOff.height = 120;
+    const _noiseCtx = _noiseOff.getContext('2d');
+    let staticAnim = null;
+
+    function startTvStatic() {
+      if (staticAnim) return;                       // already running
+      const screen = document.getElementById('screen');
+      staticCanvas.width = screen.clientWidth;
+      staticCanvas.height = screen.clientHeight;
+      const ctx = staticCanvas.getContext('2d');
+      staticCanvas.style.display = 'block';
+      scanlinesEl.style.display = 'block';
+      requestAnimationFrame(() => {
+        staticCanvas.style.opacity = '1';
+        scanlinesEl.style.opacity = '1';
+      });
+      function draw() {
+        const id = _noiseCtx.createImageData(_noiseOff.width, _noiseOff.height), d = id.data;
+        for (let i = 0; i < d.length; i += 4) {
+          const v = Math.random() * 200;            // grayscale noise
+          d[i] = d[i + 1] = d[i + 2] = v; d[i + 3] = 255;
+        }
+        _noiseCtx.putImageData(id, 0, 0);
+        ctx.imageSmoothingEnabled = false;          // blocky, TV-like upscale
+        ctx.drawImage(_noiseOff, 0, 0, staticCanvas.width, staticCanvas.height);
+        staticAnim = requestAnimationFrame(draw);
+      }
+      draw();
+    }
+
+    function stopTvStatic() {
+      if (staticAnim) { cancelAnimationFrame(staticAnim); staticAnim = null; }
+      staticCanvas.style.opacity = '0';
+      scanlinesEl.style.opacity = '0';
+      staticCanvas.style.display = 'none';
+      scanlinesEl.style.display = 'none';
+      const ctx = staticCanvas.getContext('2d');
+      if (ctx) ctx.clearRect(0, 0, staticCanvas.width, staticCanvas.height);
+    }
 
     function getContent(date = null) {
       const url = date ? `/get-string?date=${date.toISOString()}` : '/get-string';
@@ -484,6 +577,7 @@
     function showVideo(url) {
       if (!url) return;
       mode = 'video';
+      stopTvStatic();                                  // a channel with a video is never "no signal"
       stopTextAudio();                                 // narration belongs to text mode only
       if (videoEl.getAttribute('src') !== url) videoEl.src = url;
       try { videoEl.currentTime = 0; } catch (e) {}   // restart from the top each time
@@ -620,6 +714,8 @@
       // video has played through (video is offered/auto-switched when ready).
       paused = false;
       textRevealed = false;
+      stopTvStatic();               // clear any no-signal static from the previous channel
+      contentEl.classList.remove('no-signal');
       showText();
       const contentDiv = document.getElementById('content');
       let scrollingText = document.getElementById('scrollingText');
@@ -633,7 +729,30 @@
 
       const serverText = await fetchServerText(date);
       const titleHTML = '<div class="tv-title">International<br>Artificial Intelligence<br>Government</div>';
-      scrollingText.innerHTML = titleHTML + serverText + '\n<a href="https://medium.com/@abozar-alizadeh/exploring-ai-driven-governance-building-a-virtual-world-where-ai-rules-22419690a409" target="_blank" class="custom-link">Discover More!</a>'; // Only update the text content
+      const discoverLink = '\n<a href="https://abozar-alizadeh.medium.com/giving-the-ai-government-a-face-and-a-voice-building-genboxs-self-producing-newsroom-db7f57b9e1c7" target="_blank" class="custom-link">Discover More!</a>';
+      const clean = (serverText || '').trim();
+      const noContent = !clean || clean === 'Error fetching content';
+
+      if (noContent) {
+        // No signal on this channel -> roll TV static behind a "no content" message and show
+        // it immediately (there is nothing to wait for / no video on an empty channel).
+        // Keep the date + "Discover More!" at the end, like a normal channel.
+        startTvStatic();
+        contentEl.classList.add('no-signal');   // center the title + message in the screen
+        const readableDate = (date ? new Date(date) : new Date())
+          .toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+        scrollingText.innerHTML = titleHTML
+          + '\n📡 No content found on this channel.\nKeep turning the dial to change the channel…'
+          + '\n\n' + readableDate
+          + discoverLink;
+        textRevealed = true;
+        contentEl.style.opacity = '1';
+        setupScroll(scrollingText);
+        startStatusPolling(date);
+        return;
+      }
+
+      scrollingText.innerHTML = titleHTML + serverText + discoverLink; // Only update the text content
       setupScroll(scrollingText);   // size the scroll to this text's length
 
       startStatusPolling(date);

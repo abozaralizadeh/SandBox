@@ -11,6 +11,19 @@ API_KEY = os.getenv('AZURE_OPENAI_API_KEY')
 ENDPOINT = os.getenv('OAIENDPOINT')
 HISTORY_LEN = os.getenv('HISTORY_LEN')
 
+def _extract_output(row):
+    """Return the decision's 'output' text from a history row, or '' when the row is missing,
+    its content is not valid JSON, or it has no usable 'output' (so callers can treat any
+    broken/empty row as 'no content' instead of crashing)."""
+    if not row:
+        return ""
+    try:
+        data = json.loads((row.get("content") or "").strip().replace("\n", " "))
+        return (data.get("output") or "").strip()
+    except Exception:
+        return ""
+
+
 @traceable(run_type="chain", name="GenBox Decision")
 def get_llm_response(date=None):
 
@@ -101,18 +114,21 @@ Consider implementing a new taxation policy focused on environmental sustainabil
       date_row = get_row("assistant", get_flat_date(date))
       if date_row:
           print("date row exists")
-          response = json.loads(date_row["content"].strip().replace("\n", " "))
-          return f"{response['output']}\n\n{get_readable_date(date)}"
+          output = _extract_output(date_row)
+          # Row exists but is empty/malformed -> no content (frontend shows TV static).
+          return f"{output}\n\n{get_readable_date(date)}" if output else ""
       elif get_flat_date(date) != get_flat_date():
-          return f"\n\n\n{get_readable_date(date)}"
+          # No row for this past/other day -> no content.
+          return ""
           
 
   todays_row = get_row("assistant", get_flat_date())
 
   if todays_row:
       print("todays row already exists")
-      response = json.loads(todays_row["content"].strip().replace("\n", " "))
-      return f"{response['output']}\n\n{get_readable_date()}"
+      output = _extract_output(todays_row)
+      # Today's row exists but is empty/malformed -> no content (don't crash / re-generate).
+      return f"{output}\n\n{get_readable_date()}" if output else ""
 
   last_n_rows = get_last_n_rows(int(HISTORY_LEN))
   last_n_prompts = [
@@ -155,5 +171,12 @@ Consider implementing a new taxation policy focused on environmental sustainabil
       role = response.json()["choices"][0]["message"]["role"]
 
       insert_history(role, content)
-      response = json.loads(content)
-      return f"{response['output']}\n\n{get_readable_date()}"
+      try:
+          output = (json.loads(content).get("output") or "").strip()
+      except Exception:
+          output = ""
+      if output:
+          return f"{output}\n\n{get_readable_date()}"
+
+  # Nothing usable to show (no/failed generation) -> no content.
+  return ""

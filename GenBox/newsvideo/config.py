@@ -78,6 +78,12 @@ TTS_INSTRUCTIONS = os.getenv(
     "Speak as a confident government spokesperson briefing the public about a new program: "
     "clear diction, authoritative and reassuring, at an efficient, steady pace.",
 )
+# Spoken station-title intro read before the daily decision (matches the on-screen title in
+# templates/tv.html). The narration becomes: [lead silence][title][gap silence][decision].
+# Set GENBOX_TTS_TITLE empty to disable the intro.
+TTS_TITLE = os.getenv("GENBOX_TTS_TITLE", "International Artificial Intelligence Government")
+TTS_TITLE_LEAD_SILENCE = float(os.getenv("GENBOX_TTS_TITLE_LEAD_SILENCE", "0.5"))  # before the title
+TTS_TITLE_GAP_SILENCE = float(os.getenv("GENBOX_TTS_TITLE_GAP_SILENCE", "0.5"))    # title -> decision
 
 
 def tts_enabled_for(value=None) -> bool:

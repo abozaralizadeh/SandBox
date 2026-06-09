@@ -11,7 +11,7 @@ import logging
 import httpx
 
 from GenBox.azurestorage import upload_audio_bytes_to_blob
-from GenBox.newsvideo import config
+from GenBox.newsvideo import config, mux
 from GenBox.newsvideo.sora_client import next_resource, _headers, _host
 from GenBox.newsvideo.tracing import traceable, summarize_bytes_output
 
@@ -83,8 +83,30 @@ async def synthesize_speech(text: str, voice: str = None) -> bytes:
 
 @traceable(run_type="chain", name="GenBox Build Audio")
 async def build_news_audio(text: str, flat_date: str) -> str:
-    """Synthesize the narration and upload it to the video blob container. Returns the URL."""
-    audio = await synthesize_speech(text)
+    """Synthesize the narration and upload it to the video blob container. Returns the URL.
+
+    The narration opens with the spoken station title (config.TTS_TITLE) padded by short
+    silences, then the daily decision:
+        [lead silence][title][gap silence][decision]
+    If the title intro fails, it falls back to body-only narration.
+    """
+    body_audio = await synthesize_speech(text)
+    audio = body_audio
+    if config.TTS_TITLE:
+        try:
+            title_audio = await synthesize_speech(config.TTS_TITLE)
+            audio = await asyncio.to_thread(
+                mux.concat_audio_with_gaps,
+                [title_audio, body_audio],
+                config.TTS_TITLE_GAP_SILENCE,   # gap_seconds: title -> decision
+                config.TTS_TITLE_LEAD_SILENCE,  # lead_seconds: before the title
+                0.0,                            # trail_seconds: none
+                config.TTS_FORMAT,
+            )
+        except Exception:
+            logger.exception("GenBox title intro synth/concat failed for %s; "
+                             "using body-only narration", flat_date)
+            audio = body_audio
     url = await asyncio.to_thread(upload_audio_bytes_to_blob, audio, flat_date, config.TTS_FORMAT)
     logger.info("build_news_audio %s: %d bytes -> %s", flat_date, len(audio), url)
     return url
