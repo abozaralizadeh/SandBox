@@ -24,9 +24,32 @@ def _extract_output(row):
         return ""
 
 
-@traceable(run_type="chain", name="GenBox Decision")
 def get_llm_response(date=None):
+  if date:
+      date_row = get_row("assistant", get_flat_date(date))
+      if date_row:
+          print("date row exists")
+          output = _extract_output(date_row)
+          # Row exists but is empty/malformed -> no content (frontend shows TV static).
+          return f"{output}\n\n{get_readable_date(date)}" if output else ""
+      elif get_flat_date(date) != get_flat_date():
+          # No row for this past/other day -> no content.
+          return ""
 
+  todays_row = get_row("assistant", get_flat_date())
+
+  if todays_row:
+      print("todays row already exists")
+      output = _extract_output(todays_row)
+      # Today's row exists but is empty/malformed -> no content (don't crash / re-generate).
+      return f"{output}\n\n{get_readable_date()}" if output else ""
+
+  # Cache miss — call the LLM (only this path emits a LangSmith trace).
+  return _call_llm_decision()
+
+
+@traceable(run_type="chain", name="GenBox Decision")
+def _call_llm_decision():
   headers = {
       "Content-Type": "application/json",
       "api-key": API_KEY,
@@ -54,9 +77,9 @@ def get_llm_response(date=None):
         "content": [
           {
             "type": "text",
-            "text": 
+            "text":
 """
-You are an autonomous AI tasked with governing the world. 
+You are an autonomous AI tasked with governing the world.
 Make a daily high-level decision for a world regarding economy, society, environment, or global politics. Each decision must be realistic, impactful, and reflect ethical, social, and long-term outcomes.
 
 **Considerations:**
@@ -110,26 +133,6 @@ Consider implementing a new taxation policy focused on environmental sustainabil
     "max_completion_tokens": 2000
   }
 
-  if date:
-      date_row = get_row("assistant", get_flat_date(date))
-      if date_row:
-          print("date row exists")
-          output = _extract_output(date_row)
-          # Row exists but is empty/malformed -> no content (frontend shows TV static).
-          return f"{output}\n\n{get_readable_date(date)}" if output else ""
-      elif get_flat_date(date) != get_flat_date():
-          # No row for this past/other day -> no content.
-          return ""
-          
-
-  todays_row = get_row("assistant", get_flat_date())
-
-  if todays_row:
-      print("todays row already exists")
-      output = _extract_output(todays_row)
-      # Today's row exists but is empty/malformed -> no content (don't crash / re-generate).
-      return f"{output}\n\n{get_readable_date()}" if output else ""
-
   last_n_rows = get_last_n_rows(int(HISTORY_LEN))
   last_n_prompts = [
             {"role": "assistant", "content": [{ "text":  json.loads(row["content"].strip().replace("\n", " "))["output"], "type": "text"}]}
@@ -139,7 +142,7 @@ Consider implementing a new taxation policy focused on environmental sustainabil
   if len(last_n_rows):
       try:
           last_row = last_n_rows[-1]
-          text = json.loads(last_row["content"].strip().replace("\n", " "))["prompt"] 
+          text = json.loads(last_row["content"].strip().replace("\n", " "))["prompt"]
           #context = json.loads(last_row["content"])["context"] + f"\n\n{get_readable_date()}"
           context = f"{get_readable_date()}"
           content = [{ "text": text, "type": "text"}, {"text": f" context: {context}", "type": "text"}]
