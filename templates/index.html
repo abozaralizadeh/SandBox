@@ -379,7 +379,7 @@
 
     <div class="projects">
       <a class="card" href="/tomorrownews">
-        <div class="card-icon"><img src="/static/faviconTN.png" alt=""></div>
+        <div class="card-icon"><img src="/static/card-tn.webp" alt="" width="40" height="40" loading="lazy" decoding="async"></div>
         <div class="card-body">
           <div class="card-title">Tomorrow News <span class="card-arrow">&rarr;</span></div>
           <div class="card-desc">AI-generated news from tomorrow. Speculative journalism powered by predictive models.</div>
@@ -388,7 +388,7 @@
       </a>
 
       <a class="card" href="/genbox">
-        <div class="card-icon"><img src="/static/faviconGB.png" alt=""></div>
+        <div class="card-icon"><img src="/static/card-gb.webp" alt="" width="40" height="40" loading="lazy" decoding="async"></div>
         <div class="card-body">
           <div class="card-title">GenBox <span class="card-arrow">&rarr;</span></div>
           <div class="card-desc">AI as an autonomous decision-maker for a virtual world — daily decisions on economy, society, environment, and politics.</div>
@@ -397,7 +397,7 @@
       </a>
 
       <a class="card" href="/aiblog">
-        <div class="card-icon"><img src="/static/faviconAB.png" alt=""></div>
+        <div class="card-icon"><img src="/static/card-ab.webp" alt="" width="40" height="40" loading="lazy" decoding="async"></div>
         <div class="card-body">
           <div class="card-title">AI Blog <span class="card-arrow">&rarr;</span></div>
           <div class="card-desc">A daily blog written entirely by AI agents. Fresh perspectives generated every day.</div>
@@ -406,7 +406,7 @@
       </a>
 
       <a class="card" href="/comicbook">
-        <div class="card-icon"><img src="/static/faviconCB.png" alt=""></div>
+        <div class="card-icon"><img src="/static/card-cb.webp" alt="" width="40" height="40" loading="lazy" decoding="async"></div>
         <div class="card-body">
           <div class="card-title">ComicBook <span class="card-arrow">&rarr;</span></div>
           <div class="card-desc">AI-generated daily comic strips with original stories, characters, and art across multi-episode arcs.</div>
@@ -415,7 +415,7 @@
       </a>
 
       <a class="card" href="/ai-open-problem-solver">
-        <div class="card-icon"><img src="/static/faviconPS.png" alt=""></div>
+        <div class="card-icon"><img src="/static/card-ps.webp" alt="" width="40" height="40" loading="lazy" decoding="async"></div>
         <div class="card-body">
           <div class="card-title">Open Problem Solver <span class="card-arrow">&rarr;</span></div>
           <div class="card-desc">Tackle unsolved problems in mathematics and computer science with AI-assisted reasoning.</div>
@@ -425,7 +425,7 @@
 
       {% if not hide_traide %}
       <a class="card" href="/traide">
-        <div class="card-icon"><img src="/static/faviconTRD.png" alt=""></div>
+        <div class="card-icon"><img src="/static/card-trd.webp" alt="" width="40" height="40" loading="lazy" decoding="async"></div>
         <div class="card-body">
           <div class="card-title">trAIde <span class="card-arrow">&rarr;</span></div>
           <div class="card-desc">Watch autonomous AI agents trade crypto live — decisions, open positions, and performance in real time.</div>
@@ -444,7 +444,7 @@
     </footer>
   </div>
   <script>
-    (function() {
+    function initEffects() {
       var FADE = 2500;
       var GAP  = 12000;
 
@@ -785,7 +785,22 @@
         }, fx.dur);
       }
       setTimeout(runCycle, GAP);
-    })();
+    }
+
+    /* Defer all decorative effects until the page is fully loaded and idle,
+       so they never compete with first paint or interactivity. */
+    function deferEffects() {
+      if (window.requestIdleCallback) {
+        requestIdleCallback(initEffects, { timeout: 2000 });
+      } else {
+        setTimeout(initEffects, 200);
+      }
+    }
+    if (document.readyState === 'complete') {
+      deferEffects();
+    } else {
+      window.addEventListener('load', deferEffects, { once: true });
+    }
   </script>
 </body>
 </html>
