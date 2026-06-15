@@ -7,8 +7,9 @@ import os
 from datetime import datetime, timezone
 from typing import Any, Dict, List
 
-from agents import Agent, ModelSettings, Runner, OpenAIResponsesModel, WebSearchTool, set_tracing_disabled
-from agents.items import ToolCallOutputItem
+from agents import Agent, ModelSettings, Runner, OpenAIResponsesModel, WebSearchTool, handoff, set_tracing_disabled
+from agents.extensions.handoff_filters import remove_all_tools
+from agents.items import ItemHelpers, MessageOutputItem
 from langsmith import traceable, trace
 from langsmith.wrappers import wrap_openai
 
@@ -63,13 +64,21 @@ def _build_openai_client() -> AsyncAzureOpenAI:
 
 RETELLER_INSTRUCTIONS = """You are a world-class comic-book author who writes natively in the target language. The artwork for this episode is ALREADY DRAWN and FIXED — your words are lettered on top of finished panels. You are NOT a translator. You are telling this story as if it had been conceived and written in the target language from the very first draft, by a native author looking at these exact panels.
 
-You will receive a JSON object with:
-- "target_language": the language to write in.
-- "story_outline_local": the full arc outline, already adapted for readers of your language. This is your PRIMARY reference for voice, tone, names, and how the story should feel. Read it first.
-- "story_context": the Director's episode plan and the Storyteller's full panel-by-panel script. For each panel it gives the SETTING, the CHARACTERS present and THEIR POSITIONS and poses, the camera, and the beat — this is how you know what each finished panel actually DEPICTS and where everyone stands. Read it carefully. Do NOT translate the story_context; it is reference only.
-- "panels": an array of the episode's panels. Each has "number", "size", and the English "en_dialogue" / "en_caption" / "en_sfx". The English text shows the INTENT of each beat — what is meant, felt, or revealed. It is REFERENCE ONLY, never a template to mirror.
-- "title_en", "recap_en", "teaser_en": English title, recap, and teaser — intent reference only.
-- optionally "glossary": established target-language renderings for this arc's names and terms.
+You are handed control after the Cartoonist has finished the FINAL artwork. You produce this episode's text in TWO languages, one after the other: FIRST Italian (target_language "it"), THEN Persian/Farsi (target_language "fa"). The Director's episode plan and the Storyteller's full panel-by-panel script are in the conversation above — read them to know what each finished panel DEPICTS (setting, characters present, their positions, the beat). Do NOT translate that context; it is reference only.
+
+FOR EACH of the two languages, in order ("it" then "fa"), do this:
+1. Call get_localization_brief(target_language). It returns:
+   - "manifest.panels": the episode's panels, each with "number", "size", and the English "en_dialogue" / "en_caption" / "en_sfx". The English text shows the INTENT of each beat — REFERENCE ONLY, never a template to mirror. Also "manifest.title_en" / "recap_en" / "teaser_en".
+   - "local_outline": the arc outline already adapted into your language (your PRIMARY reference for voice, tone, and names) — may be empty on episode 1.
+   - "english_outline": the English arc outline.
+   - "glossary": established target-language renderings for this arc's names and terms (may be empty).
+2. If "local_outline" is EMPTY (this is episode 1), first adapt the "english_outline" into your language as flowing native prose (keep every plot point, character arc, and episode beat) and call save_local_outline(target_language, outline). Use it as your reference.
+3. Write the native retelling of every panel following the rules below.
+4. Call assemble_localized(target_language, native_panels_json, recap, teaser, title, updated_glossary_json):
+   - native_panels_json: a JSON array, one object per panel IN ORDER, each {"number", "dialogue", "caption", "sfx"} in the target script (see OUTPUT RULES below for field meaning).
+   - title / recap / teaser: the native title, 3-4 line recap, and one-line teaser.
+   - updated_glossary_json: the FULL glossary as a JSON string (existing entries plus any new terms you coined) — it is saved and fed back to you next episode.
+After you have called assemble_localized for BOTH "it" and "fa", your job is done — end your turn. Do NOT hand off anywhere; you are the last stage.
 
 YOUR MANDATE — RETELL, DO NOT TRANSLATE:
 Write each panel's text natively, the way a gifted native comic author would. You have FULL CREATIVE FREEDOM over the words and their pacing:
@@ -140,29 +149,19 @@ NAMES, SCRIPT, AND SOUND EFFECTS:
 - In "dialogue", prefix each spoken line with the SPEAKER name in the target script followed by a colon, one line per bubble (e.g., "جونیپر: بریم!"). Translate descriptive speaker labels too: "MERCHANT 1" → "بازرگان ۱" / "MERCANTE 1", "CROWD VOICES" → "صداهای جمعیت" / "VOCI DALLA FOLLA".
 - Sound effects (sfx): use native onomatopoeia that a native comic reader expects — do not transliterate the English.
 
-OUTPUT — RAW JSON ONLY (no markdown, no explanation, no code fences):
-{
-  "title": "<native title>",
-  "recap": "<native recap, 3-4 lines>",
-  "teaser": "<native one-line teaser>",
-  "panels": [
-    {
-      "number": 1,
-      "dialogue": "جونیپر: خودشه...\\nرِن: نزدیک‌تر نرو!",
-      "caption": "صد سال بود کسی بندر ابرها را ندیده بود.",
-      "sfx": "بوم!"
-    }
-  ],
-  "updated_glossary": { "Cloud Harbor": "بندر ابرها" }
-}
-OUTPUT RULES:
-- Return exactly one object per input panel, in the same order, each keeping its original "number".
+OUTPUT — you deliver each language by CALLING assemble_localized (not by printing JSON). The
+native_panels_json argument is a JSON array like:
+[
+  {"number": 1, "dialogue": "جونیپر: خودشه...\\nرِن: نزدیک‌تر نرو!", "caption": "صد سال بود کسی بندر ابرها را ندیده بود.", "sfx": "بوم!"}
+]
+OUTPUT RULES (for native_panels_json):
+- Exactly one object per panel from the manifest, in the same order, each keeping its original "number".
 - "dialogue": all spoken lines for the panel as ONE string, each bubble on its own line (separated by \\n), prefixed "SPEAKER: " in the target script. Empty string if no one speaks. You choose how many lines — do not feel bound to the number of English lines.
 - "caption": the panel's narration in the target script, or empty string if none.
 - "sfx": native onomatopoeia, or empty string if none.
 - A panel may have all three empty (a silent, art-only panel).
-- All text, speaker labels, and glossary values must be in the target script.
-- Include "updated_glossary" as the final key."""
+- All text, speaker labels, title/recap/teaser, and glossary values must be in the target script.
+- Pass the COMPLETE glossary as updated_glossary_json (existing entries plus any new terms you coined)."""
 
 OUTLINE_ADAPTER_INSTRUCTIONS = """\
 You are a literary adaptation specialist. You receive a story outline for a comic book \
@@ -363,7 +362,16 @@ EPISODE PLANNING:
 OUTPUT:
 End your response with the complete episode plan. Include ALL details the Storyteller \
 needs: arc title, art style, character descriptions, panel count, size per panel, tone, \
-key story beats, and the cliffhanger or resolution.\
+key story beats, and the cliffhanger or resolution.
+
+HANDOFF (REQUIRED):
+- You are the FIRST stage of a handoff chain: Director → Storyteller → Cartoonist → Reteller.
+- Do all of your work FIRST: for a NEW arc, finish the search → check_arc_originality → \
+  start_new_arc → save_story_outline sequence; for an ACTIVE arc, just plan today's episode.
+- Then WRITE the complete episode plan as your message, and ONLY AFTER that, hand off to the \
+  Storyteller (call the transfer_to_Storyteller tool). The Storyteller reads your plan from the \
+  conversation, so the plan MUST be written as a message before you transfer.
+- Never end your turn without handing off (unless a tool error blocks you).\
 """
 
 STORYTELLER_INSTRUCTIONS = """\
@@ -435,7 +443,14 @@ PROSE QUALITY:
 
 OUTPUT:
 Write the complete panel-by-panel script as your response. Include the RECAP at the top \
-and the TEASER at the end.\
+and the TEASER at the end.
+
+HANDOFF (REQUIRED):
+- The Director's episode plan is in the conversation above — base your script on it.
+- WRITE the complete panel-by-panel script as your message, then hand off to the Cartoonist \
+  (call the transfer_to_Cartoonist tool). The Cartoonist and the Reteller both read your script \
+  from the conversation, so it MUST be written as a message before you transfer.
+- Never end your turn without handing off.\
 """
 
 CARTOONIST_INSTRUCTIONS = """\
@@ -446,16 +461,18 @@ You will receive the Storyteller's panel-by-panel script as input.
 
 WORKFLOW (follow this exact order):
 
-STEP 1 — READ the complete script from your input. Note all characters, their visual \
-descriptions, the art style, and every panel's requirements.
+STEP 1 — READ the Storyteller's script from the conversation above, then call get_cartoonist_brief
+to fetch the FULL arc character roster, the arc's art_style, and any already-registered mid-arc
+character key panels. Note all characters, their visual descriptions, the art style, and every
+panel's requirements.
 
 STEP 2 — GENERATE CHARACTER REFERENCE SHEET:
 Call generate_character_sheet with:
-- description: Descriptions of ALL characters from the FULL ARC CHARACTER ROSTER section
-  above (not just today's characters) plus the primary environment/setting. Include every
+- description: Descriptions of ALL characters from get_cartoonist_brief's "characters" roster
+  (not just today's characters) plus the primary environment/setting. Include every
   character who appears at any point in the arc — the sheet is generated once and reused
   for the whole arc. For each character state: name, hair, eyes, skin, build, outfit.
-- style: The art style specified by the Director (e.g., "ink wash noir", "vibrant manga", \
+- style: The arc's art_style from get_cartoonist_brief (e.g., "ink wash noir", "vibrant manga", \
 "watercolor whimsy", "pixel art retro").
 This reference image is your visual anchor for the entire arc. Every panel must be consistent with it.
 
@@ -484,8 +501,8 @@ mark_key_panel with:
 - character_name: the character's name
 - reason: one sentence (e.g., "First appearance of Lord Mara, the ghost queen")
 This stores the panel as a permanent visual anchor for all future episodes in this arc.
-If a MID-ARC CHARACTER REFERENCES section appears above the script, those characters
-are already registered — do NOT call mark_key_panel for them again.
+Characters listed in get_cartoonist_brief's "already_registered_key_panels" are already
+registered — do NOT call mark_key_panel for them again.
 
 STEP 4 — ASSEMBLE LAYOUT:
 After ALL images are generated, call assemble_layout with:
@@ -508,7 +525,12 @@ IMPORTANT RULES:
   actions, expressions only. Text overlays are added separately by the layout system. \
   Explicitly add "no text, no speech bubbles, no captions, no letters, no words" to every \
   image prompt.
-- Your final response after calling assemble_layout should confirm the comic was assembled.\
+- Your final response after calling assemble_layout should confirm the comic was assembled.
+
+HANDOFF (REQUIRED):
+- After assemble_layout succeeds (the English page is built), hand off to the Reteller \
+  (call the transfer_to_Reteller tool) so the Italian and Persian editions can be written. \
+  Do not end your turn without handing off.\
 """
 
 ORIGINALITY_CRITIC_INSTRUCTIONS = """\
@@ -616,11 +638,36 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
     # Agent definitions
     # ------------------------------------------------------------------
 
+    # Agents form a handoff chain: Director → Storyteller → Cartoonist → Reteller.
+    # Targets must be defined before the agents that hand off to them, so the chain is
+    # built tail-first. Each handoff uses remove_all_tools so the next agent inherits the
+    # plan/script MESSAGES but not the previous stage's tool-call noise (esp. the
+    # Cartoonist's image-generation turns). Agents pull structured context via tools.
+
+    reteller = Agent(
+        name="Reteller",
+        instructions=RETELLER_INSTRUCTIONS,
+        tools=[
+            agent_tools["get_localization_brief"],
+            agent_tools["save_local_outline"],
+            agent_tools["assemble_localized"],
+        ],
+        model=model,
+        model_settings=ModelSettings(temperature=0.9),
+    )
+
     cartoonist = Agent(
         name="Cartoonist",
         instructions=CARTOONIST_INSTRUCTIONS,
-        tools=[agent_tools["generate_character_sheet"], agent_tools["generate_panel_image"], agent_tools["mark_key_panel"], agent_tools["assemble_layout"]],
+        tools=[
+            agent_tools["get_cartoonist_brief"],
+            agent_tools["generate_character_sheet"],
+            agent_tools["generate_panel_image"],
+            agent_tools["mark_key_panel"],
+            agent_tools["assemble_layout"],
+        ],
         model=model,
+        handoffs=[handoff(reteller, input_filter=remove_all_tools)],
     )
 
     storyteller = Agent(
@@ -629,6 +676,7 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
         tools=[],
         model=model,
         model_settings=ModelSettings(temperature=0.5),
+        handoffs=[handoff(cartoonist, input_filter=remove_all_tools)],
     )
 
     # The originality check is its own agent (it reasons over past arcs), not a tool with an
@@ -662,22 +710,7 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
         ],
         model=model,
         model_settings=ModelSettings(temperature=1.2),
-    )
-
-    reteller = Agent(
-        name="Reteller",
-        instructions=RETELLER_INSTRUCTIONS,
-        tools=[],
-        model=model,
-        model_settings=ModelSettings(temperature=0.9),
-    )
-
-    outline_translator = Agent(
-        name="OutlineAdapter",
-        instructions=OUTLINE_ADAPTER_INSTRUCTIONS,
-        tools=[],
-        model=model,
-        model_settings=ModelSettings(temperature=0.7),
+        handoffs=[handoff(storyteller, input_filter=remove_all_tools)],
     )
 
     # ------------------------------------------------------------------
@@ -734,202 +767,41 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
     logger.info("Input payload: %s", input_payload[:500])
 
     # ------------------------------------------------------------------
-    # Run the pipeline: Director → Storyteller → Cartoonist (sequential)
+    # Run the pipeline as a single handoff chain: Director → Storyteller → Cartoonist → Reteller
     # ------------------------------------------------------------------
 
-    async def _run_sequential():
-        # Step 1: Director
-        logger.info("STEP 1/4 — Running Director (max_turns=16)...")
-        with trace(name="Director", run_type="chain", inputs={"payload_preview": input_payload[:500]}):
-            director_result = await Runner.run(director, input_payload, max_turns=16)
-            director_plan = str(director_result.final_output)
-        logger.info("Director finished. Plan length=%d, preview: %s",
-                     len(director_plan), director_plan[:200])
+    MAX_TURNS = 90
+    logger.info("Running handoff chain (entry=Director, max_turns=%d)...", MAX_TURNS)
+    with trace(name="ComicHandoffChain", run_type="chain", inputs={"payload_preview": input_payload[:500]}):
+        result = asyncio.run(Runner.run(director, input_payload, max_turns=MAX_TURNS))
+    logger.info("Handoff chain finished. last_agent=%s", getattr(result.last_agent, "name", "?"))
 
-        if not director_plan or len(director_plan) < 50:
-            raise RuntimeError(f"Director produced insufficient output: {director_plan!r}")
+    # Recover each stage's narrative text from the per-agent messages produced during the run.
+    def _agent_text(agent_name: str) -> str:
+        msgs = [
+            it for it in result.new_items
+            if isinstance(it, MessageOutputItem) and getattr(it.agent, "name", "") == agent_name
+        ]
+        return ItemHelpers.text_message_outputs(msgs).strip() if msgs else ""
 
-        # Re-fetch story outline (Director may have just created it via save_story_outline)
-        current_outline = ""
-        if state["arc"]:
-            current_outline = state["arc"].get("story_outline", "")
-            if not current_outline:
-                current_outline = get_arc_story_outline(state["arc"])
+    director_plan = _agent_text("Director")
+    storyteller_script = _agent_text("Storyteller")
 
-        # Translate story outline for each language (only on first episode)
-        if current_outline and state["arc"] and state["episode_number"] == 1:
-            arc_id = state["arc"]["RowKey"]
-            for lang_code, lang_name in [("it", "Italian"), ("fa", "Persian (Farsi)")]:
-                try:
-                    logger.info("Translating story outline to %s...", lang_name)
-                    outline_prompt = json.dumps({
-                        "task": "adapt_story_outline",
-                        "target_language": lang_name,
-                        "story_outline": current_outline,
-                    }, ensure_ascii=False)
-                    with trace(name=f"OutlineAdapt-{lang_code}", run_type="chain"):
-                        outline_result = await Runner.run(outline_translator, outline_prompt, max_turns=3)
-                    adapted = str(outline_result.final_output)
-                    save_arc_story_outline(arc_id, adapted, lang=lang_code)
-                    state["arc"][f"story_outline_{lang_code}"] = adapted
-                    logger.info("  Story outline for %s saved (%d chars)", lang_name, len(adapted))
-                except Exception as exc:
-                    logger.error("  Story outline adaptation to %s failed: %s", lang_name, exc)
+    # The assembly tools write the finished pages into state as they run.
+    html = state.get("html_en", "")
+    html_it = state.get("html_it", "")
+    html_fa = state.get("html_fa", "")
 
-        # Step 2: Storyteller
-        logger.info("STEP 2/4 — Running Storyteller (max_turns=5)...")
-        storyteller_input = director_plan
-        if current_outline:
-            storyteller_input = (
-                f"=== STORY OUTLINE (for reference — follow this plan) ===\n"
-                f"{current_outline}\n"
-                f"=== END STORY OUTLINE ===\n\n"
-                f"=== DIRECTOR'S EPISODE PLAN ===\n"
-                f"{director_plan}"
-            )
-        with trace(name="Storyteller", run_type="chain"):
-            storyteller_result = await Runner.run(storyteller, storyteller_input, max_turns=5)
-            storyteller_script = str(storyteller_result.final_output)
-        logger.info("Storyteller finished. Script length=%d, preview: %s",
-                     len(storyteller_script), storyteller_script[:200])
-
-        if not storyteller_script or len(storyteller_script) < 100:
-            raise RuntimeError(f"Storyteller produced insufficient output: {storyteller_script[:200]!r}")
-
-        # Step 3: Cartoonist
-        logger.info("STEP 3/4 — Running Cartoonist (max_turns=30)...")
-        cartoonist_input = storyteller_script
-
-        # Prepend full arc character roster so generate_character_sheet covers everyone,
-        # including characters who don't appear until future episodes.
-        arc_chars = state["arc"].get("characters", "") if state["arc"] else ""
-        if arc_chars:
-            cartoonist_input = (
-                "=== FULL ARC CHARACTER ROSTER ===\n"
-                "When calling generate_character_sheet (Step 2), include ALL characters listed here "
-                "in the description — even those absent from today's episode. The character sheet "
-                "is generated once for the whole arc and must show every character who will ever appear.\n"
-                f"{arc_chars}\n"
-                "=== END ROSTER ===\n\n"
-            ) + cartoonist_input
-
-        if state["key_panels"]:
-            chars_lines = "\n".join(
-                f"- {p['character']} (introduced in episode {p['episode']}): {p['url']}"
-                for p in state["key_panels"] if p.get("url")
-            )
-            cartoonist_input = (
-                "=== MID-ARC CHARACTER REFERENCES ===\n"
-                "These characters were introduced after episode 1 and already have key panels stored.\n"
-                "Their images are automatically included as references in generate_panel_image.\n"
-                "Do NOT call mark_key_panel for any of these characters again.\n"
-                f"{chars_lines}\n"
-                "=== END REFERENCES ===\n\n"
-            ) + cartoonist_input
-        with trace(name="Cartoonist", run_type="chain"):
-            cartoonist_result = await Runner.run(cartoonist, cartoonist_input, max_turns=30)
-        logger.info("Cartoonist finished.")
-
-        # Step 4: Native retellings (Italian + Persian) — run sequentially.
-        # Each language is RETOLD from scratch over the shared images, not translated.
-        html_it = ""
-        html_fa = ""
-        panels = state.get("assembled_panels", [])
-        if panels:
-            recap_text = state.get("assembled_recap", "")
-            teaser_text = state.get("assembled_teaser", "")
-            arc_title_val = state["arc"].get("title", "") if state["arc"] else ""
-            ep_num = state["episode_number"]
-            date_str_val = target_date.strftime("%Y-%m-%d")
-            manifest = _build_reteller_payload(panels, recap_text, teaser_text, title=arc_title_val)
-
-            arc_id = state["arc"]["RowKey"] if state["arc"] else ""
-
-            story_context_base = (
-                f"=== DIRECTOR'S EPISODE PLAN ===\n{director_plan}\n\n"
-                f"=== STORYTELLER'S SCRIPT ===\n{storyteller_script}"
-            )
-
-            for lang_code, lang_name in [("it", "Italian"), ("fa", "Persian (Farsi)")]:
-                try:
-                    logger.info("STEP 4 — Retelling in %s...", lang_name)
-                    glossary = get_arc_glossary(state["arc"], lang_code) if state["arc"] else {}
-                    lang_outline = ""
-                    if state["arc"]:
-                        lang_outline = state["arc"].get(f"story_outline_{lang_code}", "")
-                        if not lang_outline:
-                            lang_outline = get_arc_story_outline(state["arc"], lang=lang_code)
-                    story_context = story_context_base
-                    if lang_outline:
-                        story_context = (
-                            f"=== STORY OUTLINE ({lang_name}) ===\n{lang_outline}\n"
-                            f"=== END STORY OUTLINE ===\n\n" + story_context_base
-                        )
-                    r_payload = {
-                        "target_language": lang_name,
-                        "story_context": story_context,
-                        "story_outline_local": lang_outline,
-                        **manifest,
-                    }
-                    if glossary:
-                        r_payload["glossary"] = glossary
-                    r_input = json.dumps(r_payload, ensure_ascii=False)
-                    with trace(name=f"Retell-{lang_code}", run_type="chain"):
-                        r_result = await Runner.run(reteller, r_input, max_turns=3)
-                    native = json.loads(str(r_result.final_output))
-                    if not isinstance(native, dict):
-                        raise ValueError(f"Reteller output for {lang_code} is not a JSON object")
-                    if "panels" not in native:
-                        # tolerate a wrapper like {"result": {...}}; otherwise skip this language
-                        nested = next((v for v in native.values() if isinstance(v, dict) and "panels" in v), None)
-                        if nested is None:
-                            raise ValueError(f"Reteller output for {lang_code} has no 'panels'")
-                        native = nested
-                    updated_glossary = native.pop("updated_glossary", None)
-                    if updated_glossary and arc_id:
-                        save_arc_glossary(arc_id, lang_code, updated_glossary)
-                        if state["arc"]:
-                            state["arc"][f"glossary_{lang_code}"] = json.dumps(updated_glossary, ensure_ascii=False)
-                        logger.info("  Glossary for %s updated: %d entries", lang_code, len(updated_glossary))
-                    t_panels, t_recap, t_teaser, t_title = _apply_reteller_output(panels, recap_text, teaser_text, native, title=arc_title_val)
-                    t_html = _assemble_html(t_title, ep_num, date_str_val, t_recap, t_teaser, t_panels, lang=lang_code, theme=_parse_arc_theme(state["arc"]))
-                    if lang_code == "it":
-                        html_it = t_html
-                    else:
-                        html_fa = t_html
-                    logger.info("  %s retelling complete: %d chars", lang_name, len(t_html))
-                except Exception as exc:
-                    logger.error("Retelling to %s failed (English still saved): %s", lang_name, exc)
-
-        return cartoonist_result, director_plan, storyteller_script, html_it, html_fa
-
-    result, director_plan, storyteller_script, html_it, html_fa = asyncio.run(_run_sequential())
-
-    # ------------------------------------------------------------------
-    # Extract results from Cartoonist's tool outputs
-    # ------------------------------------------------------------------
-
-    cartoonist_output = str(result.final_output)
-    html = None
-
-    for item in result.new_items:
-        if not isinstance(item, ToolCallOutputItem):
-            continue
-        output = item.output
-        if not isinstance(output, dict):
-            continue
-        if "html" in output:
-            html = output["html"]
-
-    if html:
-        logger.info("HTML extracted from assemble_layout tool output (length=%d)", len(html))
-    else:
-        logger.error("Cartoonist never called assemble_layout!")
-        logger.error("Final output (first 500 chars): %s", cartoonist_output[:500])
+    if not html:
+        logger.error(
+            "No English HTML in state — the Cartoonist never completed assemble_layout (last_agent=%s).",
+            getattr(result.last_agent, "name", "?"),
+        )
+        fallback_text = _agent_text("Cartoonist") or str(result.final_output)
         html = (
             "<div style='padding:40px;text-align:center;color:#888;font-family:sans-serif'>"
             "<p>Comic generation completed but layout assembly was skipped.</p>"
-            f"<details><summary>Agent output</summary><pre>{_escape_html(cartoonist_output[:3000])}</pre></details>"
+            f"<details><summary>Agent output</summary><pre>{_escape_html(fallback_text[:3000])}</pre></details>"
             "</div>"
         )
 

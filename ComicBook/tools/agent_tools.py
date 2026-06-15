@@ -9,15 +9,20 @@ from agents.tool import function_tool
 
 from ComicBook.azurestorage import (
     close_arc as _storage_close_arc,
+    get_arc_glossary,
+    get_arc_story_outline,
     get_recent_arc_summaries,
     get_recent_episodes,
+    save_arc_glossary,
     save_arc_story_outline,
     save_key_panel,
     start_new_arc as _storage_start_new_arc,
     update_arc_metadata,
 )
 from ComicBook.helpers import (
+    _apply_reteller_output,
     _assemble_html,
+    _build_reteller_payload,
     _normalize,
     _parse_arc_theme,
     _summarize_episodes,
@@ -341,8 +346,123 @@ def build_comic_tools(state: Dict[str, Any], target_date: datetime) -> Dict[str,
         state["assembled_panels"] = panels
         state["assembled_recap"] = recap
         state["assembled_teaser"] = teaser
+        state["html_en"] = html
         logger.info("  -> Layout assembled, HTML length=%d", len(html))
-        return {"status": "success", "html": html, "panel_count": len(panels)}
+        return {"status": "success", "panel_count": len(panels)}
+
+    # ------------------------------------------------------------------
+    # Cartoonist / Reteller briefs and localized assembly (read shared state;
+    # used by the handoff chain so downstream agents pull what they need)
+    # ------------------------------------------------------------------
+
+    @function_tool
+    async def get_cartoonist_brief() -> Dict[str, Any]:
+        """Return the FULL arc character roster, the arc's art style, and any mid-arc character key
+        panels already registered. Call this first so the character sheet covers every character who
+        appears at any point in the arc, and so you do not re-mark already-registered characters."""
+        logger.info("TOOL get_cartoonist_brief called")
+        a = state["arc"]
+        registered = [
+            {"character": p.get("character", ""), "episode": p.get("episode", ""), "url": p.get("url", "")}
+            for p in state.get("key_panels", []) if p.get("url")
+        ]
+        return {
+            "characters": a.get("characters", "") if a else "",
+            "art_style": a.get("art_style", "") if a else "",
+            "already_registered_key_panels": registered,
+        }
+
+    @function_tool
+    async def get_localization_brief(target_language: str) -> Dict[str, Any]:
+        """For a target language ('it' or 'fa'), return the FIXED-panel manifest (panel numbers,
+        sizes, and the English dialogue/caption/sfx as INTENT reference only), the English story
+        outline, any existing localized outline, and the arc glossary. Call this BEFORE writing the
+        native retelling for that language."""
+        lang = "it" if str(target_language).lower().startswith("it") else "fa"
+        logger.info("TOOL get_localization_brief called (lang=%s)", lang)
+        a = state["arc"]
+        panels = state.get("assembled_panels", [])
+        manifest = _build_reteller_payload(
+            panels,
+            state.get("assembled_recap", ""),
+            state.get("assembled_teaser", ""),
+            title=(a.get("title", "") if a else ""),
+        )
+        local_outline = ""
+        english_outline = ""
+        glossary: Dict[str, Any] = {}
+        if a:
+            local_outline = a.get(f"story_outline_{lang}", "") or get_arc_story_outline(a, lang=lang)
+            english_outline = get_arc_story_outline(a)
+            glossary = get_arc_glossary(a, lang)
+        return {
+            "lang_code": lang,
+            "manifest": manifest,
+            "english_outline": english_outline,
+            "local_outline": local_outline,
+            "glossary": glossary,
+        }
+
+    @function_tool
+    async def save_local_outline(target_language: str, outline: str) -> Dict[str, Any]:
+        """Save the story outline adapted into the target language. Do this on episode 1 only, when
+        get_localization_brief shows no existing local_outline."""
+        lang = "it" if str(target_language).lower().startswith("it") else "fa"
+        logger.info("TOOL save_local_outline called (lang=%s, len=%d)", lang, len(outline))
+        a = state["arc"]
+        if not a:
+            return {"error": "No active arc"}
+        save_arc_story_outline(a["RowKey"], outline, lang=lang)
+        a[f"story_outline_{lang}"] = outline
+        return {"status": "saved", "lang": lang, "length": len(outline)}
+
+    @function_tool
+    async def assemble_localized(
+        target_language: str,
+        native_panels_json: str,
+        recap: str,
+        teaser: str,
+        title: str,
+        updated_glossary_json: str = "",
+    ) -> Dict[str, Any]:
+        """Assemble and store the localized comic page from your native retelling.
+        native_panels_json is a JSON array of {"number","dialogue","caption","sfx"} in the target
+        script — it is mapped onto the FIXED English panel images (you do not change images/positions).
+        updated_glossary_json is the full glossary JSON to persist for future episodes."""
+        lang = "it" if str(target_language).lower().startswith("it") else "fa"
+        logger.info("TOOL assemble_localized called (lang=%s)", lang)
+        a = state["arc"]
+        panels = state.get("assembled_panels", [])
+        if not panels:
+            return {"error": "No assembled English panels to localize"}
+        try:
+            native_panels = json.loads(native_panels_json)
+        except (json.JSONDecodeError, TypeError) as exc:
+            return {"error": f"Invalid native_panels_json: {exc}"}
+        if updated_glossary_json:
+            try:
+                ug = json.loads(updated_glossary_json)
+                if ug and a:
+                    save_arc_glossary(a["RowKey"], lang, ug)
+                    a[f"glossary_{lang}"] = json.dumps(ug, ensure_ascii=False)
+                    logger.info("  -> Glossary for %s updated: %d entries", lang, len(ug))
+            except (json.JSONDecodeError, TypeError) as exc:
+                logger.warning("  -> invalid updated_glossary_json for %s: %s", lang, exc)
+        native = {"title": title, "recap": recap, "teaser": teaser, "panels": native_panels}
+        t_panels, t_recap, t_teaser, t_title = _apply_reteller_output(
+            panels,
+            state.get("assembled_recap", ""),
+            state.get("assembled_teaser", ""),
+            native,
+            title=(a.get("title", "") if a else title),
+        )
+        html = _assemble_html(
+            t_title, state["episode_number"], target_date.strftime("%Y-%m-%d"),
+            t_recap, t_teaser, t_panels, lang=lang, theme=_parse_arc_theme(a),
+        )
+        state[f"html_{lang}"] = html
+        logger.info("  -> Localized (%s) HTML assembled: %d chars", lang, len(html))
+        return {"status": "success", "lang": lang, "panel_count": len(t_panels)}
 
     return {
         "get_arc_status": get_arc_status,
@@ -354,4 +474,8 @@ def build_comic_tools(state: Dict[str, Any], target_date: datetime) -> Dict[str,
         "generate_panel_image": generate_panel_image,
         "mark_key_panel": mark_key_panel,
         "assemble_layout": assemble_layout,
+        "get_cartoonist_brief": get_cartoonist_brief,
+        "get_localization_brief": get_localization_brief,
+        "save_local_outline": save_local_outline,
+        "assemble_localized": assemble_localized,
     }
