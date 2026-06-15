@@ -70,6 +70,12 @@ def _summarize_episodes(episodes: list) -> str:
     return "\n".join(lines)
 
 
+def _normalize(s: str) -> str:
+    """Lowercase, drop punctuation, collapse whitespace — for fuzzy art_style/genre collision checks."""
+    import re
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9\s]", " ", (s or "").lower())).strip()
+
+
 def _extract_panel_images(html: str) -> list[str]:
     """Extract panel image URLs from episode HTML content."""
     import re
@@ -511,12 +517,25 @@ YOUR CREATIVE MANDATE:
 
 ARC LIFECYCLE:
 1. First, call get_arc_status to check if there's an active story arc.
-2. If NO active arc exists:
-   - Review the "past_arcs" list returned by get_arc_status — it contains the title, logline,
-     genre, and art_style of the last 10 arcs. You MUST NOT repeat or closely resemble any of them.
-     Pick a different genre, different setting, different character archetypes, and a different art style.
-   - Invent a completely fresh, creative story premise.
-   - Choose an unexpected genre/tone combination.
+2. If NO active arc exists — FOLLOW THIS ORDER EXACTLY to guarantee a FRESH, original story:
+   a. SEARCH FIRST. Before inventing anything, use your web search tool to gather fresh
+      real-world inspiration — run SEVERAL searches across DIFFERENT angles (see WEB SEARCH
+      below). The goal is raw material that pulls you away from generic, repetitive plots.
+   b. FORM A CANDIDATE premise grounded in what you found. Decide its:
+      - genre, setting (world / era / place), and tone
+      - core_conflict (the central dramatic tension)
+      - plot_shape: the STRUCTURAL ENGINE of the story (e.g. "heist", "whodunit", "survival",
+        "redemption arc", "lone chosen-one quest", "fish-out-of-water", "rivalry", "mystery-box").
+        This is what repeats most across arcs — make it different from the past arcs.
+      - themes (2-4 thematic threads)
+      - a proposed art_style that is DIFFERENT from every art_style in past_arcs.
+   c. VERIFY ORIGINALITY. Call check_arc_originality with your candidate. It reads the previous
+      arcs' summaries and compares your core story AND art style against them.
+   d. If the verdict is "too_similar" (or any collision is flagged), you MUST search the web AGAIN
+      from a DIFFERENT angle, revise the candidate toward the returned guidance_for_retry — change
+      the plot_shape and/or art_style, not just the surface theme — and call check_arc_originality
+      AGAIN. Repeat until the verdict is "ok". Do NOT proceed with a rejected idea.
+   e. Once the verdict is "ok", flesh out the full arc:
    - Create 2-4 compelling main characters with names, personality traits, and
      FULL VISUAL DESCRIPTIONS. For EVERY character who appears at any point in the
      arc (including antagonists and supporting characters introduced in later episodes),
@@ -524,8 +543,12 @@ ARC LIFECYCLE:
      features, and their exact outfit/costume. These descriptions are used to generate
      the character reference sheet on episode 1, so every character must be fully
      specified even if they don't appear until episode 5 or 8.
-   - Pick a distinctive art style for this arc (e.g., "ink wash noir", "vibrant manga",
-     "watercolor whimsy", "retro pixel art", "charcoal sketch", "pop art bold").
+   - Use the VERIFIED art_style for this arc. It must be DIFFERENT from every past arc — draw
+     from a wide palette, e.g.: "ink wash noir", "vibrant manga", "watercolor whimsy",
+     "retro pixel art", "charcoal sketch", "pop art bold", "art nouveau line", "gouache
+     storybook", "woodblock print", "cel-shaded 3D", "stained glass", "blueprint schematic",
+     "chalk pastel", "low-poly", "ukiyo-e", "graffiti street art", "silhouette cut-paper",
+     "oil impasto", "risograph print", "Saturday-morning cartoon".
    - Design a color_theme as a JSON string that matches the arc's mood and genre. The theme \
      will be used for the comic page layout. Pick colors that are visually cohesive and ensure \
      TEXT IS ALWAYS READABLE (high contrast between text and background). Keys required:
@@ -621,14 +644,17 @@ EPISODE DESIGN (inside the outline):
   to maintain consistency. You may adapt small details but never contradict major plot points.
 
 WEB SEARCH:
-- You have a web search tool available. Use it always to get inspiration or research:
-  * When creating a new arc — search for trending topics, cultural events, interesting scientific
-    discoveries, mythology, folklore, or anything that could spark a unique story idea.
-  * When writing about a specific setting, culture, or technical subject — search for accuracy.
-  * When you want to ensure your idea is genuinely original and not accidentally copying an
-    existing well-known comic or show.
-- You are NOT required to search every time — use your judgment. But when you feel stuck or
-  want to ground your story in something real and fresh, search freely.
+- When creating a NEW arc, searching is MANDATORY and comes FIRST. Run SEVERAL searches across
+  DIFFERENT angles before you settle on a premise, and pick a fresh angle each time you have to
+  search again (after a "too_similar" verdict). Angles to rotate through:
+  * current events and news, * scientific discoveries, * history, * world mythology and folklore,
+  * art movements and design, * subcultures and crafts, * natural phenomena and animals,
+  * technology and inventions.
+  Mine the results for a SPECIFIC, concrete spark — a real event, place, creature, ritual,
+  invention, or idea — and build the story on it, rather than a generic premise.
+- Also use search to ensure your idea is genuinely original and not accidentally copying an
+  existing well-known comic, film, or show.
+- When writing about a specific setting, culture, or technical subject — search for accuracy.
 
 EPISODE PLANNING:
 - Decide the number of panels (4-8) based on what today's episode needs.
@@ -912,6 +938,22 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
         speech_border, sfx_color, teaser_color, header_border, font_import (Google Fonts URL), heading_font, body_font."""
         logger.info("TOOL start_new_arc called: title='%s', genre='%s', planned_episodes=%s, art_style='%s'",
                      title, genre, planned_episodes, art_style)
+        # Backstop guard (tool-refusal layer): never let a recently-used art style ship again.
+        recent_styles = {
+            _normalize(a.get("art_style", ""))
+            for a in get_recent_arc_summaries(limit=10)
+            if a.get("art_style")
+        }
+        if _normalize(art_style) in recent_styles:
+            logger.warning("  -> REFUSED start_new_arc: art_style '%s' collides with a recent arc", art_style)
+            return {
+                "error": "art_style_collision",
+                "message": (
+                    f"Art style '{art_style}' was used by a recent arc. Pick a visibly different "
+                    f"art style and call start_new_arc again."
+                ),
+                "recent_art_styles": sorted(recent_styles),
+            }
         new_arc = _storage_start_new_arc(
             title=title,
             logline=logline,
@@ -946,6 +988,107 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
             "characters": characters,
             "art_style": art_style,
             "color_theme": color_theme,
+        }
+
+    @function_tool
+    async def check_arc_originality(
+        genre: str,
+        setting: str,
+        premise: str,
+        core_conflict: str,
+        plot_shape: str,
+        art_style: str,
+        themes: str,
+    ) -> Dict[str, Any]:
+        """Check whether a candidate NEW-ARC premise is sufficiently DIFFERENT from recent arcs.
+        You MUST call this before start_new_arc. If the verdict is 'too_similar', search the web
+        again from a DIFFERENT angle, revise the candidate (especially plot_shape and art_style —
+        not just the surface theme), and call this tool again. Repeat until the verdict is 'ok'.
+        plot_shape = the structural engine of the story (e.g. 'lone chosen-one quest', 'heist',
+        'whodunit', 'survival', 'redemption arc', 'fish-out-of-water', 'mystery-box', 'rivalry')."""
+        logger.info("TOOL check_arc_originality called: genre='%s', plot_shape='%s', art_style='%s'",
+                     genre, plot_shape, art_style)
+        past_arcs = get_recent_arc_summaries(limit=10)
+        recent_styles = {_normalize(a.get("art_style", "")) for a in past_arcs if a.get("art_style")}
+        recent_genres = {_normalize(a.get("genre", "")) for a in past_arcs if a.get("genre")}
+        art_style_collision = _normalize(art_style) in recent_styles
+        genre_collision = _normalize(genre) in recent_genres
+
+        # Semantic core-story similarity judgment (best-effort; never breaks the daily run).
+        most_similar_arc = ""
+        similarity_score = 0.0
+        offending_dimensions: List[str] = []
+        reasons = ""
+        if past_arcs:
+            try:
+                judge_prompt = (
+                    "You compare a CANDIDATE comic premise against a library of PAST arcs and judge "
+                    "whether the candidate's CORE STORY is too similar to any of them. Look PAST the "
+                    "surface theme — focus on plot_shape (the structural engine), core_conflict, "
+                    "character archetypes, setting archetype, and themes. Two stories with different "
+                    "themes but the SAME plot shape ARE too similar.\n\n"
+                    "CANDIDATE:\n"
+                    + json.dumps({
+                        "genre": genre, "setting": setting, "premise": premise,
+                        "core_conflict": core_conflict, "plot_shape": plot_shape, "themes": themes,
+                    }, ensure_ascii=False)
+                    + "\n\nPAST ARCS:\n"
+                    + json.dumps(past_arcs, ensure_ascii=False)
+                    + "\n\nReturn ONLY compact JSON with keys: "
+                    "\"most_similar_arc\" (title or \"\"), \"similarity_score\" (0.0-1.0), "
+                    "\"offending_dimensions\" (subset of [genre, setting, plot_shape, "
+                    "character_archetypes, themes]), \"reasons\" (one sentence)."
+                )
+                resp = await client.chat.completions.create(
+                    model=model_name,
+                    temperature=0.2,
+                    response_format={"type": "json_object"},
+                    messages=[{"role": "user", "content": judge_prompt}],
+                )
+                verdict_json = json.loads(resp.choices[0].message.content or "{}")
+                most_similar_arc = str(verdict_json.get("most_similar_arc", "") or "")
+                similarity_score = float(verdict_json.get("similarity_score", 0.0) or 0.0)
+                offending_dimensions = list(verdict_json.get("offending_dimensions", []) or [])
+                reasons = str(verdict_json.get("reasons", "") or "")
+            except Exception as exc:
+                logger.warning("  -> originality judge failed (%s) — using deterministic checks only", exc)
+
+        too_similar = (
+            art_style_collision
+            or genre_collision
+            or similarity_score >= 0.6
+            or "plot_shape" in offending_dimensions
+        )
+        verdict = "too_similar" if too_similar else "ok"
+
+        guidance_parts: List[str] = []
+        if art_style_collision:
+            guidance_parts.append(
+                f"art_style '{art_style}' was used recently — choose a visibly different style"
+            )
+        if genre_collision:
+            guidance_parts.append(f"genre '{genre}' was used recently — choose a different genre")
+        if similarity_score >= 0.6 or "plot_shape" in offending_dimensions:
+            dims = ", ".join(offending_dimensions) or "plot shape"
+            guidance_parts.append(
+                f"the core story resembles '{most_similar_arc}' ({dims}) — change the plot_shape and "
+                f"core_conflict, not just the theme; search a fresh angle for inspiration"
+            )
+        guidance = "; ".join(guidance_parts) if guidance_parts else "Candidate is sufficiently distinct."
+
+        logger.info("  -> verdict=%s (style_collision=%s, genre_collision=%s, score=%.2f, dims=%s)",
+                     verdict, art_style_collision, genre_collision, similarity_score, offending_dimensions)
+        return {
+            "verdict": verdict,
+            "art_style_collision": art_style_collision,
+            "genre_collision": genre_collision,
+            "most_similar_arc": most_similar_arc,
+            "similarity_score": similarity_score,
+            "offending_dimensions": offending_dimensions,
+            "reasons": reasons,
+            "guidance_for_retry": guidance,
+            "recent_art_styles": sorted(recent_styles),
+            "past_arcs": past_arcs,
         }
 
     @function_tool
@@ -1157,12 +1300,13 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
         instructions=STORYTELLER_INSTRUCTIONS,
         tools=[],
         model=model,
+        model_settings=ModelSettings(temperature=0.5),
     )
 
     director = Agent(
         name="Director",
         instructions=DIRECTOR_INSTRUCTIONS,
-        tools=[WebSearchTool(search_context_size="high"), get_arc_status, start_new_arc, end_current_arc, save_story_outline],
+        tools=[WebSearchTool(search_context_size="high"), get_arc_status, check_arc_originality, start_new_arc, end_current_arc, save_story_outline],
         model=model,
         model_settings=ModelSettings(temperature=1.2),
     )
@@ -1242,9 +1386,9 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
 
     async def _run_sequential():
         # Step 1: Director
-        logger.info("STEP 1/4 — Running Director (max_turns=10)...")
+        logger.info("STEP 1/4 — Running Director (max_turns=16)...")
         with trace(name="Director", run_type="chain", inputs={"payload_preview": input_payload[:500]}):
-            director_result = await Runner.run(director, input_payload, max_turns=10)
+            director_result = await Runner.run(director, input_payload, max_turns=16)
             director_plan = str(director_result.final_output)
         logger.info("Director finished. Plan length=%d, preview: %s",
                      len(director_plan), director_plan[:200])
