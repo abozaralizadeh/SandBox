@@ -29,6 +29,27 @@ table_service_client = TableServiceClient.from_connection_string(conn_str=connec
 episodes_table = table_service_client.get_table_client(episodes_table_name)
 arcs_table = table_service_client.get_table_client(arcs_table_name)
 
+# ---------------------------------------------------------------------------
+# Debug mode — isolate local test runs from production comics.
+#   DEBUG=true        → read/write a separate "arc_debug" partition (debug arcs get
+#                       "debugarc_*" ids), so production comics are never read or touched.
+#   DEBUG_SAVE=false  → skip ALL table/HTML persistence (pure dry run). The pipeline still
+#                       runs fully in-memory and returns HTML; nothing is written. Only
+#                       meaningful when DEBUG=true — production ALWAYS persists.
+# Generated panel-image blobs are NOT gated, so a debug comic is still viewable; only
+# arc/episode/outline/glossary records are isolated and (optionally) skipped.
+# ---------------------------------------------------------------------------
+DEBUG = os.getenv("DEBUG", "false").strip().lower() in ("1", "true", "yes")
+DEBUG_SAVE = os.getenv("DEBUG_SAVE", "true").strip().lower() in ("1", "true", "yes")
+_ARC_PARTITION = "arc_debug" if DEBUG else "arc"
+_ARC_ID_PREFIX = "debugarc" if DEBUG else "arc"
+_PERSIST = DEBUG_SAVE if DEBUG else True
+if DEBUG:
+    print(
+        f"[ComicBook] DEBUG mode ON — arc partition='{_ARC_PARTITION}', "
+        f"persistence={'ENABLED' if _PERSIST else 'DISABLED (dry run, nothing written)'}"
+    )
+
 MAX_TABLE_PROPERTY_CHARS = 32000
 
 
@@ -175,9 +196,9 @@ def _sort_by_rowkey(entities: list) -> list:
 
 def start_new_arc(title: str, logline: str, target_days: int, start_date: Optional[datetime] = None) -> dict:
     start_date = start_date or datetime.utcnow()
-    arc_id = f"arc_{get_flat_date(start_date)}_{uuid.uuid4().hex[:6]}"
+    arc_id = f"{_ARC_ID_PREFIX}_{get_flat_date(start_date)}_{uuid.uuid4().hex[:6]}"
     entity = {
-        "PartitionKey": "arc",
+        "PartitionKey": _ARC_PARTITION,
         "RowKey": arc_id,
         "title": title,
         "logline": logline,
@@ -187,14 +208,20 @@ def start_new_arc(title: str, logline: str, target_days: int, start_date: Option
         "episodes_count": 0,
         "last_episode_date": "",
     }
-    arcs_table.create_entity(entity=entity)
+    if _PERSIST:
+        arcs_table.create_entity(entity=entity)
+    else:
+        print(f"[ComicBook][dry-run] skip create arc {arc_id}")
     return entity
 
 
 def close_arc(arc_id: str, end_date: Optional[datetime] = None):
+    if not _PERSIST:
+        print(f"[ComicBook][dry-run] skip close arc {arc_id}")
+        return
     end_date = end_date or datetime.utcnow()
     entity = {
-        "PartitionKey": "arc",
+        "PartitionKey": _ARC_PARTITION,
         "RowKey": arc_id,
         "status": "closed",
         "end_date": end_date.isoformat(),
@@ -203,7 +230,7 @@ def close_arc(arc_id: str, end_date: Optional[datetime] = None):
 
 
 def get_latest_arc() -> Optional[dict]:
-    arcs = list(arcs_table.query_entities("PartitionKey eq 'arc'", results_per_page=100))
+    arcs = list(arcs_table.query_entities(f"PartitionKey eq '{_ARC_PARTITION}'", results_per_page=100))
     if not arcs:
         return None
     arcs = sorted(arcs, key=lambda x: x.get("start_date", ""), reverse=True)
@@ -218,16 +245,20 @@ def get_active_arc() -> Optional[dict]:
 
 
 def update_arc_metadata(arc_id: str, **kwargs):
-    entity = {"PartitionKey": "arc", "RowKey": arc_id}
+    if not _PERSIST:
+        return
+    entity = {"PartitionKey": _ARC_PARTITION, "RowKey": arc_id}
     entity.update(kwargs)
     arcs_table.upsert_entity(entity=entity, mode=UpdateMode.MERGE)
 
 
 def save_arc_story_outline(arc_id: str, story_outline: str, lang: str = "en"):
+    if not _PERSIST:
+        return
     suffix = "" if lang == "en" else f"_{lang}"
     key = f"story_outline{suffix}"
     blob_key = f"story_outline_blob_name{suffix}"
-    entity = {"PartitionKey": "arc", "RowKey": arc_id}
+    entity = {"PartitionKey": _ARC_PARTITION, "RowKey": arc_id}
     if len(story_outline) > MAX_TABLE_PROPERTY_CHARS:
         blob_name = upload_text_to_blob(story_outline, extension=".txt")
         entity[key] = ""
@@ -253,10 +284,12 @@ def get_arc_story_outline(arc: dict, lang: str = "en") -> str:
 
 
 def save_arc_glossary(arc_id: str, lang: str, glossary: dict):
+    if not _PERSIST:
+        return
     import json
     key = f"glossary_{lang}"
     content = json.dumps(glossary, ensure_ascii=False)
-    entity = {"PartitionKey": "arc", "RowKey": arc_id}
+    entity = {"PartitionKey": _ARC_PARTITION, "RowKey": arc_id}
     if len(content) > MAX_TABLE_PROPERTY_CHARS:
         blob_name = upload_text_to_blob(content, extension=".json")
         entity[key] = ""
@@ -311,9 +344,11 @@ def _count_episodes(arc_id: str) -> int:
 
 def save_key_panel(arc_id: str, panel_url: str, character_name: str, episode_number: int) -> None:
     """Append a key panel to the arc's key_panels list (capped at 20 most recent)."""
+    if not _PERSIST:
+        return
     import json
     try:
-        arc = arcs_table.get_entity(partition_key="arc", row_key=arc_id)
+        arc = arcs_table.get_entity(partition_key=_ARC_PARTITION, row_key=arc_id)
     except Exception:
         arc = {}
     raw = arc.get("key_panels", "[]")
@@ -325,7 +360,7 @@ def save_key_panel(arc_id: str, panel_url: str, character_name: str, episode_num
     panels = panels[-20:]  # keep most recent 20
     content = json.dumps(panels, ensure_ascii=False)
     arcs_table.upsert_entity(
-        entity={"PartitionKey": "arc", "RowKey": arc_id, "key_panels": content},
+        entity={"PartitionKey": _ARC_PARTITION, "RowKey": arc_id, "key_panels": content},
         mode=UpdateMode.MERGE,
     )
 
@@ -379,6 +414,8 @@ def get_episode_index() -> List[dict]:
         select=["PartitionKey", "RowKey", "arc_title", "episode_number"],
         results_per_page=500,
     ))
+    # Keep debug episodes ("debugarc_*" partitions) out of the production index and vice versa.
+    all_eps = [e for e in all_eps if str(e.get("PartitionKey", "")).startswith("debugarc") == DEBUG]
     all_eps.sort(key=lambda x: x.get("RowKey", ""))
     return [
         {
@@ -394,7 +431,7 @@ def get_episode_index() -> List[dict]:
 def get_arc_list() -> List[dict]:
     """Return all arcs sorted by start_date."""
     arcs = list(arcs_table.query_entities(
-        "PartitionKey eq 'arc'",
+        f"PartitionKey eq '{_ARC_PARTITION}'",
         select=["RowKey", "title", "status", "start_date", "episodes_count", "character_sheet_url"],
         results_per_page=100,
     ))
@@ -415,7 +452,7 @@ def get_arc_list() -> List[dict]:
 def get_recent_arc_summaries(limit: int = 10) -> List[dict]:
     """Return the most recent arcs with title, logline, genre, and art_style (newest first)."""
     arcs = list(arcs_table.query_entities(
-        "PartitionKey eq 'arc'",
+        f"PartitionKey eq '{_ARC_PARTITION}'",
         select=["RowKey", "title", "logline", "genre", "art_style", "start_date", "status"],
         results_per_page=100,
     ))
@@ -441,8 +478,17 @@ def save_episode(
     html_content_fa: str = "",
 ) -> dict:
     arc_id = arc["RowKey"]
-    episode_number = _count_episodes(arc_id) + 1
     row_key = get_flat_date(episode_date)
+    if not _PERSIST:
+        episode_number = int(arc.get("episodes_count", 0)) + 1
+        print(f"[ComicBook][dry-run] skip save_episode {arc_id}/{row_key} (ep {episode_number})")
+        return {
+            "PartitionKey": arc_id,
+            "RowKey": row_key,
+            "arc_title": arc.get("title", ""),
+            "episode_number": episode_number,
+        }
+    episode_number = _count_episodes(arc_id) + 1
     entity = {
         "PartitionKey": arc_id,
         "RowKey": row_key,
@@ -457,7 +503,7 @@ def save_episode(
     episodes_table.upsert_entity(entity=entity, mode=UpdateMode.REPLACE)
     arcs_table.upsert_entity(
         entity={
-            "PartitionKey": "arc",
+            "PartitionKey": _ARC_PARTITION,
             "RowKey": arc_id,
             "episodes_count": episode_number,
             "last_episode_date": episode_date.isoformat(),
