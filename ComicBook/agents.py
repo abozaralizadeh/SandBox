@@ -511,6 +511,38 @@ IMPORTANT RULES:
 - Your final response after calling assemble_layout should confirm the comic was assembled.\
 """
 
+ORIGINALITY_CRITIC_INSTRUCTIONS = """\
+You are the Originality Critic. The Director is about to launch a NEW comic arc and hands you \
+its candidate to vet for originality.
+
+You receive a free-text description of the candidate, which should include: genre, setting, \
+premise, core_conflict, plot_shape (the structural engine — e.g. heist, whodunit, survival, \
+redemption arc, chosen-one quest, fish-out-of-water, rivalry, mystery-box), art_style, and themes.
+
+STEP 1 — Call get_recent_arcs to load summaries (title, logline, genre, art_style) of the most \
+recent arcs.
+
+STEP 2 — Compare the candidate against EACH past arc. Look PAST the surface theme — two stories \
+with different themes but the SAME plot_shape ARE too similar. Judge these dimensions:
+- plot_shape (the structural engine) — the MOST important; repetition here is the main problem.
+- core_conflict and character archetypes.
+- setting archetype.
+- genre.
+- art_style — treat near-synonyms as a match ("ink wash noir" ≈ "noir ink wash").
+
+STEP 3 — Decide. The candidate is "too_similar" if ANY of these hold: its plot_shape matches a \
+past arc, its art_style is the same or very close to a past arc, its genre repeats a past arc, \
+or the overall core story closely resembles one (similarity_score >= 0.6). Otherwise it is "ok". \
+If there are NO past arcs, the verdict is "ok".
+
+OUTPUT — return ONLY a compact JSON object, no prose, no code fences:
+{"verdict": "ok" | "too_similar", "most_similar_arc": "<title or empty>", \
+"similarity_score": <0.0-1.0>, "offending_dimensions": [<subset of genre, setting, plot_shape, \
+character_archetypes, themes, art_style>], "reasons": "<one sentence>", \
+"guidance_for_retry": "<concrete instruction: which plot_shape/art_style/angle to avoid and how \
+to diverge; empty string if ok>"}\
+"""
+
 
 # ---------------------------------------------------------------------------
 # Pipeline runner
@@ -578,7 +610,7 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
     # Tool definitions (closures over mutable state)
     # ------------------------------------------------------------------
 
-    agent_tools = build_comic_tools(state, target_date, client, model_name)
+    agent_tools = build_comic_tools(state, target_date)
 
     # ------------------------------------------------------------------
     # Agent definitions
@@ -599,10 +631,35 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
         model_settings=ModelSettings(temperature=0.5),
     )
 
+    # The originality check is its own agent (it reasons over past arcs), not a tool with an
+    # embedded LLM call. The Director invokes it via as_tool, gets a verdict back, and reacts.
+    originality_critic = Agent(
+        name="OriginalityCritic",
+        instructions=ORIGINALITY_CRITIC_INSTRUCTIONS,
+        tools=[agent_tools["get_recent_arcs"]],
+        model=model,
+        model_settings=ModelSettings(temperature=0.2),
+    )
+
     director = Agent(
         name="Director",
         instructions=DIRECTOR_INSTRUCTIONS,
-        tools=[WebSearchTool(search_context_size="high"), agent_tools["get_arc_status"], agent_tools["check_arc_originality"], agent_tools["start_new_arc"], agent_tools["end_current_arc"], agent_tools["save_story_outline"]],
+        tools=[
+            WebSearchTool(search_context_size="high"),
+            agent_tools["get_arc_status"],
+            originality_critic.as_tool(
+                tool_name="check_arc_originality",
+                tool_description=(
+                    "Vet a candidate NEW-ARC premise for originality against recent arcs. Pass a "
+                    "description that includes genre, setting, premise, core_conflict, plot_shape, "
+                    "art_style, and themes. Returns a JSON verdict ('ok' or 'too_similar') with a "
+                    "guidance_for_retry field to act on."
+                ),
+            ),
+            agent_tools["start_new_arc"],
+            agent_tools["end_current_arc"],
+            agent_tools["save_story_outline"],
+        ],
         model=model,
         model_settings=ModelSettings(temperature=1.2),
     )

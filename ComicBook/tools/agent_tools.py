@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 from agents.tool import function_tool
 
@@ -31,7 +31,7 @@ from ComicBook.tools.getimage import (
 logger = logging.getLogger("ComicBook")
 
 
-def build_comic_tools(state: Dict[str, Any], target_date: datetime, client, model_name: str) -> Dict[str, Any]:
+def build_comic_tools(state: Dict[str, Any], target_date: datetime) -> Dict[str, Any]:
     """Build the agent function-tools as closures over the pipeline's mutable state.
 
     `state` is the same dict the pipeline reads after the agents run, so tool mutations
@@ -145,105 +145,11 @@ def build_comic_tools(state: Dict[str, Any], target_date: datetime, client, mode
         }
 
     @function_tool
-    async def check_arc_originality(
-        genre: str,
-        setting: str,
-        premise: str,
-        core_conflict: str,
-        plot_shape: str,
-        art_style: str,
-        themes: str,
-    ) -> Dict[str, Any]:
-        """Check whether a candidate NEW-ARC premise is sufficiently DIFFERENT from recent arcs.
-        You MUST call this before start_new_arc. If the verdict is 'too_similar', search the web
-        again from a DIFFERENT angle, revise the candidate (especially plot_shape and art_style —
-        not just the surface theme), and call this tool again. Repeat until the verdict is 'ok'.
-        plot_shape = the structural engine of the story (e.g. 'lone chosen-one quest', 'heist',
-        'whodunit', 'survival', 'redemption arc', 'fish-out-of-water', 'mystery-box', 'rivalry')."""
-        logger.info("TOOL check_arc_originality called: genre='%s', plot_shape='%s', art_style='%s'",
-                     genre, plot_shape, art_style)
-        past_arcs = get_recent_arc_summaries(limit=10)
-        recent_styles = {_normalize(a.get("art_style", "")) for a in past_arcs if a.get("art_style")}
-        recent_genres = {_normalize(a.get("genre", "")) for a in past_arcs if a.get("genre")}
-        art_style_collision = _normalize(art_style) in recent_styles
-        genre_collision = _normalize(genre) in recent_genres
-
-        # Semantic core-story similarity judgment (best-effort; never breaks the daily run).
-        most_similar_arc = ""
-        similarity_score = 0.0
-        offending_dimensions: List[str] = []
-        reasons = ""
-        if past_arcs:
-            try:
-                judge_prompt = (
-                    "You compare a CANDIDATE comic premise against a library of PAST arcs and judge "
-                    "whether the candidate's CORE STORY is too similar to any of them. Look PAST the "
-                    "surface theme — focus on plot_shape (the structural engine), core_conflict, "
-                    "character archetypes, setting archetype, and themes. Two stories with different "
-                    "themes but the SAME plot shape ARE too similar.\n\n"
-                    "CANDIDATE:\n"
-                    + json.dumps({
-                        "genre": genre, "setting": setting, "premise": premise,
-                        "core_conflict": core_conflict, "plot_shape": plot_shape, "themes": themes,
-                    }, ensure_ascii=False)
-                    + "\n\nPAST ARCS:\n"
-                    + json.dumps(past_arcs, ensure_ascii=False)
-                    + "\n\nReturn ONLY compact JSON with keys: "
-                    "\"most_similar_arc\" (title or \"\"), \"similarity_score\" (0.0-1.0), "
-                    "\"offending_dimensions\" (subset of [genre, setting, plot_shape, "
-                    "character_archetypes, themes]), \"reasons\" (one sentence)."
-                )
-                resp = await client.chat.completions.create(
-                    model=model_name,
-                    temperature=0.2,
-                    response_format={"type": "json_object"},
-                    messages=[{"role": "user", "content": judge_prompt}],
-                )
-                verdict_json = json.loads(resp.choices[0].message.content or "{}")
-                most_similar_arc = str(verdict_json.get("most_similar_arc", "") or "")
-                similarity_score = float(verdict_json.get("similarity_score", 0.0) or 0.0)
-                offending_dimensions = list(verdict_json.get("offending_dimensions", []) or [])
-                reasons = str(verdict_json.get("reasons", "") or "")
-            except Exception as exc:
-                logger.warning("  -> originality judge failed (%s) — using deterministic checks only", exc)
-
-        too_similar = (
-            art_style_collision
-            or genre_collision
-            or similarity_score >= 0.6
-            or "plot_shape" in offending_dimensions
-        )
-        verdict = "too_similar" if too_similar else "ok"
-
-        guidance_parts: List[str] = []
-        if art_style_collision:
-            guidance_parts.append(
-                f"art_style '{art_style}' was used recently — choose a visibly different style"
-            )
-        if genre_collision:
-            guidance_parts.append(f"genre '{genre}' was used recently — choose a different genre")
-        if similarity_score >= 0.6 or "plot_shape" in offending_dimensions:
-            dims = ", ".join(offending_dimensions) or "plot shape"
-            guidance_parts.append(
-                f"the core story resembles '{most_similar_arc}' ({dims}) — change the plot_shape and "
-                f"core_conflict, not just the theme; search a fresh angle for inspiration"
-            )
-        guidance = "; ".join(guidance_parts) if guidance_parts else "Candidate is sufficiently distinct."
-
-        logger.info("  -> verdict=%s (style_collision=%s, genre_collision=%s, score=%.2f, dims=%s)",
-                     verdict, art_style_collision, genre_collision, similarity_score, offending_dimensions)
-        return {
-            "verdict": verdict,
-            "art_style_collision": art_style_collision,
-            "genre_collision": genre_collision,
-            "most_similar_arc": most_similar_arc,
-            "similarity_score": similarity_score,
-            "offending_dimensions": offending_dimensions,
-            "reasons": reasons,
-            "guidance_for_retry": guidance,
-            "recent_art_styles": sorted(recent_styles),
-            "past_arcs": past_arcs,
-        }
+    async def get_recent_arcs() -> Dict[str, Any]:
+        """Return summaries (title, logline, genre, art_style) of the most recent story arcs,
+        so a candidate new arc can be judged for originality against them."""
+        logger.info("TOOL get_recent_arcs called")
+        return {"past_arcs": get_recent_arc_summaries(limit=10)}
 
     @function_tool
     async def end_current_arc(conclusion_note: str) -> Dict[str, Any]:
@@ -440,8 +346,8 @@ def build_comic_tools(state: Dict[str, Any], target_date: datetime, client, mode
 
     return {
         "get_arc_status": get_arc_status,
+        "get_recent_arcs": get_recent_arcs,
         "start_new_arc": start_new_arc,
-        "check_arc_originality": check_arc_originality,
         "end_current_arc": end_current_arc,
         "save_story_outline": save_story_outline,
         "generate_character_sheet": generate_character_sheet,
