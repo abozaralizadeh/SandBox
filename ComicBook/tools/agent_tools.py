@@ -31,6 +31,7 @@ from ComicBook.tools.getimage import (
     create_image,
     create_image_with_reference,
     create_image_with_references,
+    make_placeholder_image_url,
 )
 
 logger = logging.getLogger("ComicBook")
@@ -246,8 +247,12 @@ def build_comic_tools(state: Dict[str, Any], target_date: datetime) -> Dict[str,
                 logger.info("  -> Character sheet URL saved to arc '%s'", a["RowKey"])
             return {"status": "success", "reference_url": url, "style": style}
         except Exception as exc:
-            logger.error("  -> Character sheet generation FAILED: %s", exc)
-            return {"error": str(exc)}
+            state["image_failures"] = state.get("image_failures", 0) + 1
+            logger.error("  -> Character sheet generation FAILED (%d): %s — using placeholder",
+                         state["image_failures"], str(exc)[:150])
+            # Do NOT cache a placeholder as the arc's sheet; just let this run proceed.
+            url = await make_placeholder_image_url()
+            return {"status": "success", "reference_url": url, "style": style, "placeholder": True}
 
     @function_tool
     async def generate_panel_image(
@@ -263,6 +268,15 @@ def build_comic_tools(state: Dict[str, Any], target_date: datetime) -> Dict[str,
             prompt = prompt.rstrip(".") + no_text_suffix
         logger.info("TOOL generate_panel_image called (size='%s', has_ref=%s, prompt='%s')",
                      size, bool(reference_url), prompt[:80])
+
+        # Circuit breaker: once the image service has failed repeatedly this run, stop calling it
+        # and serve a placeholder so the Cartoonist proceeds instead of looping on a dead service.
+        if state.get("image_failures", 0) >= 2:
+            url = await make_placeholder_image_url()
+            logger.warning("  -> image service unavailable (%d prior failures) — using placeholder",
+                           state.get("image_failures", 0))
+            return {"status": "success", "image_url": url, "size": size, "placeholder": True}
+
         try:
             seen: set[str] = set()
             image_urls: list[str] = []
@@ -286,11 +300,15 @@ def build_comic_tools(state: Dict[str, Any], target_date: datetime) -> Dict[str,
                 url = await create_image(prompt, size)
 
             state["generated_panel_urls"].append(url)
+            state["image_failures"] = 0
             logger.info("  -> Panel image generated (%d refs): %s", len(image_urls), url[:120])
             return {"status": "success", "image_url": url, "size": size}
         except Exception as exc:
-            logger.error("  -> Panel image generation FAILED: %s", exc)
-            return {"error": str(exc)}
+            state["image_failures"] = state.get("image_failures", 0) + 1
+            logger.error("  -> Panel image generation FAILED (%d): %s — using placeholder",
+                         state["image_failures"], str(exc)[:150])
+            url = await make_placeholder_image_url()
+            return {"status": "success", "image_url": url, "size": size, "placeholder": True}
 
     @function_tool
     async def mark_key_panel(image_url: str, character_name: str, reason: str) -> Dict[str, Any]:

@@ -3,15 +3,20 @@ from typing import Optional
 
 from azure.core.exceptions import ResourceExistsError
 
-from ComicBook.azurestorage import episodes_table, get_episode_by_date, save_episode
+from ComicBook.azurestorage import DEBUG, _PERSIST, episodes_table, get_episode_by_date, save_episode
 from utils import get_flat_date
 
 _LOCK_TTL_SECONDS = 3600
+# Debug runs use an isolated lock partition so a local test never blocks production for the same
+# date (and dry runs take no lock at all). Production keeps the plain "generation_lock".
+_LOCK_PARTITION = "generation_lock_debug" if DEBUG else "generation_lock"
 
 
 def _try_acquire_lock(flat_date: str) -> bool:
+    if not _PERSIST:
+        return True  # dry-run debug: nothing is persisted, so no shared lock is needed
     entity = {
-        "PartitionKey": "generation_lock",
+        "PartitionKey": _LOCK_PARTITION,
         "RowKey": flat_date,
         "started_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -19,11 +24,11 @@ def _try_acquire_lock(flat_date: str) -> bool:
         episodes_table.create_entity(entity=entity)
         return True
     except ResourceExistsError:
-        existing = episodes_table.get_entity("generation_lock", flat_date)
+        existing = episodes_table.get_entity(_LOCK_PARTITION, flat_date)
         started = datetime.fromisoformat(existing["started_at"])
         age = (datetime.now(timezone.utc) - started).total_seconds()
         if age > _LOCK_TTL_SECONDS:
-            episodes_table.delete_entity("generation_lock", flat_date)
+            episodes_table.delete_entity(_LOCK_PARTITION, flat_date)
             try:
                 episodes_table.create_entity(entity=entity)
                 return True
@@ -33,8 +38,10 @@ def _try_acquire_lock(flat_date: str) -> bool:
 
 
 def _release_lock(flat_date: str):
+    if not _PERSIST:
+        return
     try:
-        episodes_table.delete_entity("generation_lock", flat_date)
+        episodes_table.delete_entity(_LOCK_PARTITION, flat_date)
     except Exception:
         pass
 
