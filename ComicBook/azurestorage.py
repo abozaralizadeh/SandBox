@@ -398,6 +398,14 @@ def get_recent_episodes(arc_id: str, limit: int = 3, hydrate_html: bool = True) 
 def get_episode_by_date(date_key: str, lang: str = "en") -> Optional[dict]:
     try:
         entities = list(episodes_table.query_entities(f"RowKey eq '{date_key}'", results_per_page=5))
+        # Only the current mode's episodes: production (DEBUG=false) must NEVER serve a debug
+        # episode ('debugarc_*' partition), and vice versa. Also drop any 'generation_lock*' row
+        # that shares this date as its RowKey.
+        entities = [
+            e for e in entities
+            if str(e.get("PartitionKey", "")).startswith("debugarc") == DEBUG
+            and not str(e.get("PartitionKey", "")).startswith("generation_lock")
+        ]
         if not entities:
             return None
         entity = _sort_by_rowkey(entities)[0]
