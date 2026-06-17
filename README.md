@@ -162,30 +162,36 @@ AZURE_OPENAI_MODEL_SORA=sora-2   # single value applies to all, or give one per 
 ## ComicBook
 
 Multi-Agent AI Comic Strip Generator  
-ComicBook produces a daily AI-generated comic strip using three collaborating agents built on the **OpenAI Agents SDK**. Each agent hands off to the next via the SDK's native handoff mechanism, forming a Director → Storyteller → Cartoonist pipeline that runs end-to-end without human intervention.
+ComicBook produces a daily AI-generated comic strip on the **OpenAI Agents SDK**, orchestrated as a **handoff chain**: Director → Storyteller → Cartoonist → Reteller. A single `Runner.run(Director)` drives the whole episode; each agent calls its `transfer_to_<next>` tool to pass control on, and a **deterministic recovery** runs any stage a missed handoff skipped — so a comic always ships. The Director also consults an **OriginalityCritic** sub-agent (via `as_tool`) before starting a new arc.
 
 📐 **Architecture:** [Technical flow and Mermaid diagrams](ComicBook/architecture.md)
 
 #### Agent Pipeline
-- **Director** — Invents original story arcs (genre, characters, art style), decides when an arc starts and ends based on narrative progression (not a fixed day count), and plans each episode's panel layout and tone.
-- **Storyteller** — Transforms the Director's outline into a panel-by-panel script with dialogue, captions, sound effects, camera angles, and per-panel size directives (wide / tall / square).
-- **Cartoonist** — Generates a **character reference sheet** first for visual consistency, then produces each panel image using the reference via Azure OpenAI image editing. Assembles the final responsive HTML comic page.
+- **Director** (temp 1.2) — Invents original story arcs. For a new arc it **web-searches for fresh inspiration**, forms a candidate, calls `check_arc_originality`, and retries until it's distinct from recent arcs; decides arc length organically; writes the story outline; plans each episode's panels and tone. Then hands off to the Storyteller.
+- **OriginalityCritic** (temp 0.2, `as_tool`) — Reads recent arcs and judges a candidate's core story (plot shape, conflict, archetypes, setting, art style), returning `ok` / `too_similar` + retry guidance. `start_new_arc` additionally refuses a recently-used art style.
+- **Storyteller** (temp 0.5) — Transforms the Director's plan into a panel-by-panel script (dialogue, captions, SFX, camera angles, per-panel size), then hands off to the Cartoonist.
+- **Cartoonist** — Pulls the full arc roster, generates a **character reference sheet** for visual consistency, then draws each panel sequentially using the reference via Azure OpenAI image editing, assembles the English HTML page, and hands off to the Reteller.
+- **Reteller** (temp 0.9) — In one run, **retells** the episode natively in Italian and Persian over the same fixed images (not a translation), adapting + saving the localized outline on episode 1 and maintaining a per-language glossary.
 
 #### Key Features
-- **Dynamic Story Arcs**: The Director agent decides arc length organically — a story runs for as many episodes as it needs (3, 8, 15…), then closes and a completely fresh arc with new characters, world, and genre begins.
-- **Character Consistency**: The Cartoonist creates a single reference image of all characters and the environment before drawing any panels. Every panel is generated with that reference to maintain visual coherence.
-- **Configurable Panel Sizes**: Each panel can be wide (1536×1024 for landscapes/action), tall (1024×1536 for reveals), or square (1024×1024 for dialogue) — chosen by the Storyteller based on pacing needs.
-- **Arc Memory**: Azure Table Storage tracks arc metadata (title, logline, genre, characters, art style, episode count), daily episode summaries, and panel notes so each strip honors continuity.
-- **Responsive Comic Layout**: The final HTML uses comic-book styling (speech bubbles, caption boxes, sound effects) and adapts to mobile and desktop screens.
+- **Dynamic Story Arcs**: arcs run for as many episodes as they need (3, 8, 15…), then close and a completely fresh arc begins. A **three-layer originality guard** (prompt-mandated search + the OriginalityCritic + an art-style refusal) keeps each arc genuinely different.
+- **Character Consistency**: one character reference sheet per arc (cached), then every panel is drawn sequentially with that reference (plus mid-arc key panels and prior-episode anchors).
+- **Multi-language editions**: English is native; the Reteller produces it/fa over the shared art. The **main title comes from the arc** (consistent every episode) with the episode's native title shown as a **subtitle**.
+- **Readability guard**: the page's color theme is contrast-checked at render time — any low-contrast text is auto-flipped to near-black/near-white, so a box is never light-on-light or dark-on-dark.
+- **Local debug mode**: `DEBUG=true` isolates all reads/writes to a separate `arc_debug` partition (and lock) so local tests never touch production; `DEBUG_SAVE=false` is a pure dry run.
+- **Arc Memory**: Azure Table Storage tracks arc metadata, outlines, glossaries, key panels, and episode summaries so each strip honors continuity.
+- **Responsive Comic Layout**: comic-book styling (speech bubbles, caption boxes, SFX) that adapts to mobile and desktop.
 - **Frontend**: `/comicbook` fetches the latest strip (or a selected date) and renders the comic page.
 
 #### Tech Stack
-- **OpenAI Agents SDK** (`openai-agents`) — Agent definitions, `@function_tool` tools, handoffs, `Runner.run()`
-- **Azure OpenAI** — GPT for agent reasoning, gpt-image for image generation
-- **Azure Table & Blob Storage** — Arc/episode persistence, image and HTML hosting
+- **OpenAI Agents SDK** (`openai-agents`) — agent definitions, `@function_tool` tools (deterministic only), **handoffs** with `input_filter` + `prompt_with_handoff_instructions`, sub-agents via `Agent.as_tool`, `Runner.run()`
+- **Azure OpenAI** — chat model (configurable, e.g. `gpt-5.4`) for the agents, `gpt-image` for image generation (1-hour client timeouts, override via `COMICBOOK_LLM_TIMEOUT` / `COMICBOOK_IMAGE_TIMEOUT`)
+- **Azure Table & Blob Storage** — arc/episode persistence (with `DEBUG` partition isolation), image and HTML hosting
 
 ![ComicBook](https://github.com/abozaralizadeh/SandBox/blob/main/static/ComicBook.png?raw=true)
 
 ---
 ## Command to run the project
-`gunicorn --bind=0.0.0.0 --timeout 600 main:app`
+`gunicorn --bind=0.0.0.0 --timeout 3600 --workers 4 --threads 2 main:app`
+
+(The 1-hour worker timeout matches the ComicBook generation budget so a long comic run is not cut off; see `startup.sh`.)

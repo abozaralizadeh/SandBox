@@ -1,7 +1,9 @@
 # ComicBook — Technical Flow
 
-End-to-end architecture of ComicBook: a daily, multi-agent AI comic strip with dynamic
-story arcs, character consistency, and en/it/fa editions. Built on the **OpenAI Agents SDK**.
+End-to-end architecture of ComicBook: a daily, multi-agent AI comic strip with dynamic story
+arcs, character consistency, and en/it/fa editions. Built on the **OpenAI Agents SDK** and
+orchestrated as a **handoff chain** — Director → Storyteller → Cartoonist → Reteller — with a
+deterministic recovery fallback so a missed handoff never strands a comic.
 (Renders on GitHub, Mermaid Live, and most Markdown viewers.)
 
 ## System flow
@@ -26,35 +28,42 @@ flowchart TB
     direction TB
     GC["get_comicbook(date, lang)"]
     CACHE{"episode cached?<br/>get_episode_by_date"}
-    LOCK{"acquire generation_lock?"}
+    LOCK{"acquire generation_lock?<br/>(generation_lock_debug in DEBUG)"}
     SAVE["save_episode<br/>(blob offload if > 32K)"]
   end
 
-  subgraph PIPE["Agent Pipeline — ComicBook/agents.py · OpenAI Agents SDK · Runner.run"]
+  subgraph PIPE["Handoff chain — ComicBook/agents.py · run_comic_pipeline · Runner.run(Director)"]
     direction TB
-    DIR["Director (temp 1.2)<br/>create/continue arc + episode plan"]
-    OA["OutlineAdapter (episode 1 only)<br/>adapt outline → it, fa"]
-    ST["Storyteller<br/>panel-by-panel script"]
-    CART["Cartoonist (max 30 turns)<br/>character sheet + panels + HTML"]
-    RET["Reteller (temp 0.9)<br/>rewrite panels → it, fa + glossary"]
+    DIR["🎭 Director · temp 1.2<br/>web-search inspiration · originality check<br/>create / continue arc + episode plan"]
+    OC["🔎 OriginalityCritic · temp 0.2<br/>(as_tool: check_arc_originality)"]
+    ST["✍️ Storyteller · temp 0.5<br/>panel-by-panel script"]
+    CART["🎨 Cartoonist<br/>character sheet · panels · assemble (en)"]
+    RET["🗣️ Reteller · temp 0.9<br/>retell it + fa · outline + glossary"]
+    DIR -->|transfer_to_Storyteller| ST
+    ST -->|transfer_to_Cartoonist| CART
+    CART -->|transfer_to_Reteller| RET
+    DIR -. as_tool .-> OC
   end
 
-  subgraph TOOLS["Function Tools"]
+  REC["🛟 Deterministic recovery<br/>if a stage's artifact (html_en / html_it / html_fa)<br/>is missing in state, run that stage directly"]
+
+  subgraph TOOLS["Function tools — deterministic only (no LLM inside a tool)"]
     direction TB
     WS["WebSearchTool"]
-    ARCT["Arc tools<br/>get_arc_status · start/end_arc · save_story_outline"]
-    IMGT["Image tools<br/>generate_character_sheet · generate_panel_image<br/>mark_key_panel · assemble_layout"]
+    ARCT["Arc tools<br/>get_arc_status · get_recent_arcs<br/>start_new_arc · end_current_arc · save_story_outline"]
+    IMGT["Cartoonist tools<br/>get_cartoonist_brief · generate_character_sheet<br/>generate_panel_image · mark_key_panel · assemble_layout"]
+    LOCT["Reteller tools<br/>get_localization_brief · save_local_outline · assemble_localized"]
   end
 
   subgraph STORE["Azure Storage — ComicBook/azurestorage.py"]
-    TEP[("Table comicbook<br/>episodes (PK arc_id · RK date)<br/>+ generation_lock")]
-    TARC[("Table comicbookarcs<br/>arc meta · outline · glossary<br/>key_panels · character_sheet_url")]
+    TEP[("Table comicbook<br/>episodes (PK arc_id · RK date)<br/>+ generation_lock(_debug)")]
+    TARC[("Table comicbookarcs<br/>arc meta · outline · glossary · title_{lang}<br/>key_panels · character_sheet_url<br/>PK = arc or arc_debug")]
     BLOB[("Blob comicbook-html<br/>HTML · outlines · glossaries · panel images")]
   end
 
   subgraph AZ["Azure OpenAI + LangSmith"]
-    CHAT["Chat model (gpt-4o)<br/>all 5 agents"]
-    IMG["Image model (gpt-image)<br/>AZURE_OPENAI_*_DALLE"]
+    CHAT["Chat model (configurable, e.g. gpt-5.4)<br/>all agents · timeout COMICBOOK_LLM_TIMEOUT (1h)"]
+    IMG["Image model (gpt-image)<br/>AZURE_OPENAI_*_DALLE · timeout COMICBOOK_IMAGE_TIMEOUT (1h)"]
     LSM["LangSmith<br/>wrap_openai + @traceable"]
   end
 
@@ -70,20 +79,24 @@ flowchart TB
   LOCK -->|busy| RCC
   LOCK -->|got it| DIR
 
-  DIR --> ST --> CART --> RET --> SAVE
-  DIR -.->|episode 1| OA
+  RET --> SAVE
+  PIPE -. missing artifact .-> REC --> SAVE
+
   DIR --> WS
   DIR --> ARCT
+  OC --> ARCT
   CART --> IMGT
+  RET --> LOCT
 
   DIR --> CHAT
   ST --> CHAT
   CART --> CHAT
   RET --> CHAT
-  OA --> CHAT
+  OC --> CHAT
   IMGT --> IMG
 
   ARCT <--> TARC
+  LOCT <--> TARC
   IMGT --> BLOB
   SAVE --> TEP
   SAVE --> TARC
@@ -92,20 +105,25 @@ flowchart TB
 
   DIR -.-> LSM
   CART -.-> LSM
-  IMGT -.-> LSM
 ```
 
-## Agent pipeline + consistency
+## Handoff chain + consistency
 
 ```mermaid
 flowchart LR
-  D["Director<br/>new or continue arc<br/>(arc ends when episodes ≥ planned)"] --> S["Storyteller<br/>panel script"]
-  S --> C["Cartoonist"]
+  D["🎭 Director<br/>search → check_arc_originality → start/continue arc<br/>(arc ends when episodes ≥ planned)"]
+  D -->|handoff| S["✍️ Storyteller<br/>panel script"]
+  S -->|handoff| C["🎨 Cartoonist"]
   C --> CS["character sheet<br/>once per arc (cached on arc)"]
-  CS --> PI["panel images<br/>references: sheet → key panels<br/>→ prior-episode anchors"]
-  PI --> L["assemble HTML layout (en)"]
-  L --> R["Reteller → it, fa<br/>reuse fixed panel images + glossary"]
+  CS --> PI["panel images<br/>refs: sheet → key panels → prior-episode anchors"]
+  PI --> L["assemble_layout → html_en in state"]
+  L -->|handoff| R["🗣️ Reteller → it + fa<br/>get_localization_brief · (ep.1) save_local_outline · assemble_localized"]
+  D -. as_tool .-> OC["🔎 OriginalityCritic<br/>verdict ok / too_similar + guidance"]
 ```
+
+Each handoff uses `input_filter=remove_all_tools`, so the next agent inherits the plan/script
+**messages** but not the previous stage's tool-call noise. Every chained agent is wrapped with
+`prompt_with_handoff_instructions(...)` so it reliably calls its `transfer_to_<next>` tool.
 
 ## Runtime sequence
 
@@ -115,7 +133,7 @@ sequenceDiagram
     participant CV as Comic viewer
     participant API as Flask (main.py)
     participant P as get_comicbook
-    participant AG as Agents (agents.py)
+    participant AG as run_comic_pipeline
     participant T as Azure Table
     participant B as Azure Blob
     participant AOAI as Azure OpenAI
@@ -123,17 +141,20 @@ sequenceDiagram
     U->>CV: open /comicbook (date + lang)
     CV->>API: GET /comicbookcontent?dt and lang
     API->>P: get_comicbook(date, lang)
-    P->>T: get_episode_by_date (cache)
+    P->>T: get_episode_by_date (cache, current mode only)
     alt cached
         T-->>P: episode HTML (hydrate from blob if large)
     else not cached
-        P->>T: acquire generation_lock
-        P->>AG: run_comic_pipeline(date)
-        AG->>AOAI: Director (arc + episode plan, web search)
-        AG->>AOAI: Storyteller (panel script)
-        AG->>AOAI: Cartoonist → image model (character sheet + panels)
+        P->>T: acquire generation_lock (skipped in dry-run)
+        P->>AG: run_comic_pipeline(date) — Runner.run(Director)
+        AG->>AOAI: Director — web search + check_arc_originality (OriginalityCritic as_tool) + arc/episode plan
+        Note over AG,AOAI: Director → transfer_to_Storyteller
+        AG->>AOAI: Storyteller — panel script → transfer_to_Cartoonist
+        AG->>AOAI: Cartoonist — character sheet + panels → assemble_layout (html_en)
         AOAI-->>B: upload panel images
-        AG->>AOAI: Reteller (it + fa) + glossary
+        Note over AG,AOAI: Cartoonist → transfer_to_Reteller
+        AG->>AOAI: Reteller — it + fa (get_localization_brief, assemble_localized) + glossary, (ep.1) outline
+        Note over AG: recovery — any stage whose artifact is missing is run directly
         AG-->>P: html, html_it, html_fa, arc
         P->>T: save_episode (+ arc meta)
         P->>B: offload HTML if > 32K
@@ -144,17 +165,53 @@ sequenceDiagram
 ```
 
 ### Notes
-- **Dynamic arcs:** the Director invents and ends story arcs organically (an arc runs as
-  many episodes as it needs), tracked in the `comicbookarcs` table.
-- **Character consistency:** the Cartoonist generates one **character reference sheet** per
-  arc, then draws every panel with references (sheet → mid-arc key panels → prior-episode
-  anchors) via Azure OpenAI image editing.
-- **Multi-language:** English is native; **OutlineAdapter** (episode 1) localizes the story
-  outline and **Reteller** rewrites each episode's panels into it/fa, with a per-language
-  **glossary** for consistent names/terms. The same panel images are reused across languages.
-- **Caching + single-flight lock:** one episode per date is cached; `generation_lock`
-  (a partition in the episodes table, TTL-guarded) prevents concurrent regeneration.
-- **Blob offload:** HTML / outlines / glossaries over 32K chars are stored in blob, with the
-  name kept in the table; panel images live in the same `comicbook-html` container.
-- **Separate deployments:** chat (`gpt-4o`) for the agents, image (`gpt-image`) via the
-  `AZURE_OPENAI_*_DALLE` resource. LangSmith traces the run (`wrap_openai` + `@traceable`).
+
+- **Orchestration = handoff chain + recovery.** `run_comic_pipeline` is a single
+  `Runner.run(Director)`; control flows by SDK handoffs Director → Storyteller → Cartoonist →
+  Reteller. The Cartoonist is hard-gated to finish `assemble_layout` before it may transfer.
+  Because LLMs don't always call their transfer tool, a **deterministic recovery** runs any stage
+  whose artifact (`html_en` / `html_it` / `html_fa`) is missing in `state` directly with a clean
+  input — so the comic always completes.
+- **Originality (three-layer guard).** New arcs are kept fresh by: (1) the Director's prompt
+  mandates web search and a candidate→check→retry loop; (2) `check_arc_originality` is the
+  **OriginalityCritic** agent exposed via `as_tool` (it reads recent arcs with `get_recent_arcs`
+  and returns `ok`/`too_similar` + guidance); (3) `start_new_arc` refuses an art style that
+  collides with a recent arc. The Director is the creative engine (temp 1.2); the Storyteller is
+  cool (temp 0.5) so it faithfully executes the plan.
+- **No LLM calls inside tools.** A `@function_tool` only does deterministic work (storage,
+  assembly, image generation, string logic). Anything that reasons with the model is an Agent,
+  reached via `as_tool` or a handoff.
+- **Character consistency.** The Cartoonist generates one **character reference sheet** per arc
+  (cached on the arc), then draws each panel sequentially with references (sheet → mid-arc key
+  panels → prior-episode anchors) via Azure OpenAI image editing.
+- **Multi-language.** English is native. The **Reteller** produces both Italian and Persian in one
+  run via tools: `get_localization_brief` (fixed-panel manifest + outlines + glossary),
+  `save_local_outline` (adapts + saves the localized outline on episode 1 — there is no separate
+  OutlineAdapter anymore), and `assemble_localized` (maps the native text onto the fixed panels).
+  A per-language **glossary** keeps names/terms consistent; the same panel images are reused.
+- **Consistent localized title.** The localized **main title comes from the ARC** (stored once as
+  `title_{lang}` and reused every episode); the Reteller's per-episode native title is shown as a
+  **subtitle** under it. Backward compatible (old episodes keep their HTML).
+- **Readability guard.** `_assemble_html` runs the resolved color theme through a contrast check;
+  any text color that doesn't contrast with its box (caption, recap, speech bubble, title, teaser)
+  is auto-flipped to near-black/near-white — never light-on-light or dark-on-dark.
+- **Caching + single-flight lock.** One episode per date is cached; `generation_lock` prevents
+  concurrent regeneration (TTL-guarded). In `DEBUG` it uses `generation_lock_debug`; in a dry run
+  it is skipped entirely.
+- **DEBUG / DEBUG_SAVE (local testing).** `DEBUG=true` isolates all arc reads/writes to an
+  `arc_debug` partition (debug arcs get `debugarc_*` ids) so production comics are never read or
+  touched; `DEBUG_SAVE=false` skips all persistence (pure dry run). Production (`DEBUG` unset)
+  always persists. Cross-partition reads (`get_episode_by_date`, `get_episode_index`) filter to
+  the current mode.
+- **No generation time limit.** The chat and image clients use a 1-hour timeout (overridable via
+  `COMICBOOK_LLM_TIMEOUT` / `COMICBOOK_IMAGE_TIMEOUT`) matching the gunicorn request budget, so a
+  slow-but-successful generation is never cut off.
+- **Blob offload.** HTML / outlines / glossaries over 32K chars are stored in blob with the name
+  kept in the table; panel images live in the same `comicbook-html` container.
+- **Code layout.** Pure helpers live in `ComicBook/helpers.py`; the `@function_tool`s in
+  `ComicBook/tools/agent_tools.py` (`build_comic_tools(state, target_date)` — closures over the
+  pipeline's mutable `state`); image generation in `ComicBook/tools/getimage.py`; prompts, agent
+  definitions and `run_comic_pipeline` in `ComicBook/agents.py`; orchestration/caching/lock in
+  `ComicBook/prompt.py`.
+- **Separate deployments.** Chat (configurable, e.g. `gpt-5.4`) for the agents; image (`gpt-image`)
+  via the `AZURE_OPENAI_*_DALLE` resource. LangSmith traces the run (`wrap_openai` + `@traceable`).

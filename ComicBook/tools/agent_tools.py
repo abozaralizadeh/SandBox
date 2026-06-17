@@ -409,16 +409,24 @@ def build_comic_tools(state: Dict[str, Any], target_date: datetime) -> Dict[str,
         local_outline = ""
         english_outline = ""
         glossary: Dict[str, Any] = {}
+        arc_title_en = ""
+        arc_title_local = ""
         if a:
             local_outline = a.get(f"story_outline_{lang}", "") or get_arc_story_outline(a, lang=lang)
             english_outline = get_arc_story_outline(a)
             glossary = get_arc_glossary(a, lang)
+            arc_title_en = a.get("title", "")
+            arc_title_local = a.get(f"title_{lang}", "")
         return {
             "lang_code": lang,
             "manifest": manifest,
             "english_outline": english_outline,
             "local_outline": local_outline,
             "glossary": glossary,
+            # The MAIN comic title is the ARC/series title and must stay identical across episodes.
+            # Use arc_title_local if set; otherwise render arc_title_en natively (it gets stored).
+            "arc_title_en": arc_title_en,
+            "arc_title_local": arc_title_local,
         }
 
     @function_tool
@@ -441,12 +449,17 @@ def build_comic_tools(state: Dict[str, Any], target_date: datetime) -> Dict[str,
         recap: str,
         teaser: str,
         title: str,
+        subtitle: str = "",
         updated_glossary_json: str = "",
     ) -> Dict[str, Any]:
         """Assemble and store the localized comic page from your native retelling.
-        native_panels_json is a JSON array of {"number","dialogue","caption","sfx"} in the target
-        script — it is mapped onto the FIXED English panel images (you do not change images/positions).
-        updated_glossary_json is the full glossary JSON to persist for future episodes."""
+        - title: the SERIES/ARC title in the target language. It must be the SAME every episode; it
+          is established once for the arc and reused (a title that varies per episode is ignored
+          after the first one).
+        - subtitle: a short native title for THIS episode, shown under the main title (optional).
+        - native_panels_json: a JSON array of {"number","dialogue","caption","sfx"} in the target
+          script — mapped onto the FIXED English panel images (you do not change images/positions).
+        - updated_glossary_json: the full glossary JSON to persist for future episodes."""
         lang = "it" if str(target_language).lower().startswith("it") else "fa"
         logger.info("TOOL assemble_localized called (lang=%s)", lang)
         a = state["arc"]
@@ -466,20 +479,31 @@ def build_comic_tools(state: Dict[str, Any], target_date: datetime) -> Dict[str,
                     logger.info("  -> Glossary for %s updated: %d entries", lang, len(ug))
             except (json.JSONDecodeError, TypeError) as exc:
                 logger.warning("  -> invalid updated_glossary_json for %s: %s", lang, exc)
-        native = {"title": title, "recap": recap, "teaser": teaser, "panels": native_panels}
+        # The MAIN title is the ARC/series title and stays consistent across episodes: reuse the
+        # stored localized arc title if present, otherwise establish it now from `title` and persist.
+        main_title = a.get(f"title_{lang}", "") if a else ""
+        if not main_title:
+            main_title = (title or "").strip() or (a.get("title", "") if a else "")
+            if a and main_title:
+                update_arc_metadata(a["RowKey"], **{f"title_{lang}": main_title})
+                a[f"title_{lang}"] = main_title
+                logger.info("  -> Localized arc title for %s established: %s", lang, main_title)
+        episode_subtitle = (subtitle or "").strip()
+        native = {"title": main_title, "recap": recap, "teaser": teaser, "panels": native_panels}
         t_panels, t_recap, t_teaser, t_title = _apply_reteller_output(
             panels,
             state.get("assembled_recap", ""),
             state.get("assembled_teaser", ""),
             native,
-            title=(a.get("title", "") if a else title),
+            title=main_title,
         )
         html = _assemble_html(
             t_title, state["episode_number"], target_date.strftime("%Y-%m-%d"),
-            t_recap, t_teaser, t_panels, lang=lang, theme=_parse_arc_theme(a),
+            t_recap, t_teaser, t_panels, lang=lang, theme=_parse_arc_theme(a), subtitle=episode_subtitle,
         )
         state[f"html_{lang}"] = html
-        logger.info("  -> Localized (%s) HTML assembled: %d chars", lang, len(html))
+        logger.info("  -> Localized (%s) HTML assembled: %d chars (subtitle=%s)",
+                     lang, len(html), bool(episode_subtitle))
         return {"status": "success", "lang": lang, "panel_count": len(t_panels)}
 
     return {

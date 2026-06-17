@@ -80,11 +80,14 @@ FOR EACH of the two languages, in order ("it" then "fa"), do this:
    - "local_outline": the arc outline already adapted into your language (your PRIMARY reference for voice, tone, and names) — may be empty on episode 1.
    - "english_outline": the English arc outline.
    - "glossary": established target-language renderings for this arc's names and terms (may be empty).
+   - "arc_title_local" / "arc_title_en": the SERIES/ARC title. The MAIN comic title must be IDENTICAL in every episode of this arc — it is the title of the whole series, not of this episode.
 2. If "local_outline" is EMPTY (this is episode 1), first adapt the "english_outline" into your language as flowing native prose (keep every plot point, character arc, and episode beat) and call save_local_outline(target_language, outline). Use it as your reference.
 3. Write the native retelling of every panel following the rules below.
-4. Call assemble_localized(target_language, native_panels_json, recap, teaser, title, updated_glossary_json):
+4. Call assemble_localized(target_language, native_panels_json, recap, teaser, title, subtitle, updated_glossary_json):
    - native_panels_json: a JSON array, one object per panel IN ORDER, each {"number", "dialogue", "caption", "sfx"} in the target script (see OUTPUT RULES below for field meaning).
-   - title / recap / teaser: the native title, 3-4 line recap, and one-line teaser.
+   - title: the SERIES/ARC title in your language — it MUST be the SAME for every episode. If "arc_title_local" from the brief is non-empty, pass it EXACTLY. If it is empty (first localized episode), render "arc_title_en" natively and pass that. NEVER put an episode-specific title here.
+   - subtitle: a SHORT native title for THIS episode only — it is shown under the main title. Put the episode's own evocative title here, NOT in "title".
+   - recap / teaser: the native 3-4 line recap and one-line teaser.
    - updated_glossary_json: the FULL glossary as a JSON string (existing entries plus any new terms you coined) — it is saved and fed back to you next episode.
 After you have called assemble_localized for BOTH "it" and "fa", your job is done — end your turn. Do NOT hand off anywhere; you are the last stage.
 
@@ -252,7 +255,11 @@ ARC LIFECYCLE:
      "oil impasto", "risograph print", "Saturday-morning cartoon".
    - Design a color_theme as a JSON string that matches the arc's mood and genre. The theme \
      will be used for the comic page layout. Pick colors that are visually cohesive and ensure \
-     TEXT IS ALWAYS READABLE (high contrast between text and background). Keys required:
+     TEXT IS ALWAYS READABLE (high contrast between text and background). For EVERY text/box pair \
+     — caption_text on caption_bg, speech text on speech_bg, title_color on page_bg, recap and \
+     teaser on their backgrounds — the text and its background must STRONGLY contrast: NEVER pair \
+     a light text with a light background, or a dark text with a dark background (e.g. if \
+     caption_bg is dark, caption_text must be light, and vice versa). Keys required:
      * page_bg: page background (e.g., "#1a1a2e" for noir, "#f5f0e1" for vintage)
      * title_color, title_shadow: title text color and shadow
      * recap_bg, recap_border: recap box background and left-border accent
