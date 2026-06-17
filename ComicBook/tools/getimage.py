@@ -1,6 +1,8 @@
 import asyncio
 import base64
 import os
+import struct
+import zlib
 from io import BytesIO
 from typing import Optional
 
@@ -31,6 +33,49 @@ def _get_client() -> AsyncAzureOpenAI:
             timeout=_IMAGE_TIMEOUT,
         )
     return _client
+
+
+async def _call_with_retries(make_coro, attempts: int, label: str):
+    """Run an image API call with a few retries on transient failures (e.g. gateway 500/timeout)."""
+    delay = 2.0
+    last_exc: Optional[Exception] = None
+    for i in range(1, attempts + 1):
+        try:
+            return await make_coro()
+        except Exception as exc:
+            last_exc = exc
+            print(f"[ComicBook:getimage] {label} attempt {i}/{attempts} failed: {str(exc)[:180]}")
+            if i < attempts:
+                await asyncio.sleep(delay)
+                delay *= 2
+    raise last_exc
+
+
+def _solid_png_bytes(rgb=(214, 214, 210), w: int = 32, h: int = 32) -> bytes:
+    """Build a tiny solid-color PNG with the stdlib only (no Pillow). Stretched by the panel CSS
+    (object-fit: cover) it renders as a flat placeholder tile."""
+    row = b"\x00" + bytes(rgb) * w          # filter byte 0 + RGB pixels
+    raw = row * h
+    def _chunk(typ: bytes, data: bytes) -> bytes:
+        return (struct.pack(">I", len(data)) + typ + data
+                + struct.pack(">I", zlib.crc32(typ + data) & 0xFFFFFFFF))
+    ihdr = struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0)   # 8-bit, color type 2 (RGB)
+    return (b"\x89PNG\r\n\x1a\n"
+            + _chunk(b"IHDR", ihdr)
+            + _chunk(b"IDAT", zlib.compress(raw))
+            + _chunk(b"IEND", b""))
+
+
+_placeholder_url_cache: Optional[str] = None
+
+
+async def make_placeholder_image_url() -> str:
+    """Return a blob URL for a neutral placeholder tile (uploaded once per process). Used when the
+    image service is unavailable so a panel still renders and the run completes instead of hanging."""
+    global _placeholder_url_cache
+    if _placeholder_url_cache is None:
+        _placeholder_url_cache = await asyncio.to_thread(upload_image_bytes_to_blob, _solid_png_bytes())
+    return _placeholder_url_cache
 
 
 def _get_model() -> str:
@@ -81,33 +126,47 @@ def _upload_result(result) -> str:
 async def create_image(prompt: str, size: str = "square", quality: str = "medium") -> str:
     """Generate an image from a text prompt. Returns the blob URL."""
     model = _get_model()
-    result = await _get_client().images.generate(
-        model=model,
-        prompt=prompt,
-        size=_resolve_size(size),
-        quality=_resolve_quality(quality),
-    )
-    return await asyncio.to_thread(_upload_result, result)
+
+    async def _gen():
+        result = await _get_client().images.generate(
+            model=model,
+            prompt=prompt,
+            size=_resolve_size(size),
+            quality=_resolve_quality(quality),
+        )
+        return await asyncio.to_thread(_upload_result, result)
+
+    return await _call_with_retries(_gen, attempts=1, label="generate")
 
 
 async def create_image_with_reference(prompt: str, reference_url: str, size: str = "square", quality: str = "medium") -> str:
-    """Generate an image using a text prompt and a reference image for style/character consistency."""
+    """Generate an image using a text prompt and a reference image for style/character consistency.
+
+    Falls back to prompt-only generation if the (slower) edits endpoint fails, so a panel
+    always renders even when the image gateway times out on reference edits.
+    """
     model = _get_model()
     reference_bytes = await _download_image_bytes(reference_url)
+    if not reference_bytes or model == "dall-e-3":
+        return await create_image(prompt, size, quality)
 
-    kwargs = {
-        "model": model,
-        "prompt": prompt,
-        "size": _resolve_size(size),
-        "quality": _resolve_quality(quality),
-    }
-    if reference_bytes and model != "dall-e-3":
-        reference_file = BytesIO(reference_bytes)
-        reference_file.name = "reference.png"
-        kwargs["image"] = reference_file
+    async def _edit():
+        ref = BytesIO(reference_bytes)
+        ref.name = "reference.png"
+        result = await _get_client().images.edit(
+            model=model,
+            prompt=prompt,
+            size=_resolve_size(size),
+            quality=_resolve_quality(quality),
+            image=ref,
+        )
+        return await asyncio.to_thread(_upload_result, result)
 
-    result = await _get_client().images.edit(**kwargs)
-    return await asyncio.to_thread(_upload_result, result)
+    try:
+        return await _call_with_retries(_edit, attempts=1, label="edit(1 ref)")
+    except Exception as exc:
+        print(f"[ComicBook:getimage] edit failed, falling back to prompt-only generate: {str(exc)[:180]}")
+        return await create_image(prompt, size, quality)
 
 
 async def create_image_with_references(
@@ -119,8 +178,8 @@ async def create_image_with_references(
     """Generate an image using a text prompt and multiple reference images (up to 16).
 
     The first image should be the character sheet; subsequent ones can be previous
-    panels, key frames from earlier episodes, etc.  Falls back to single-reference
-    or prompt-only generation when only 0-1 images download successfully.
+    panels, key frames from earlier episodes, etc.  Falls back to prompt-only generation
+    when no images download or the edits endpoint fails — so a panel always renders.
     """
     model = _get_model()
 
@@ -131,25 +190,27 @@ async def create_image_with_references(
     downloads = await asyncio.gather(
         *[_download_image_bytes(u) for u in image_urls[:16]]
     )
-    files = []
-    for idx, data in enumerate(downloads):
-        if data:
+    ref_bytes = [d for d in downloads if d]
+    if not ref_bytes:
+        return await create_image(prompt, size, quality)
+
+    async def _edit():
+        files = []
+        for idx, data in enumerate(ref_bytes):
             f = BytesIO(data)
             f.name = f"ref_{idx}.png"
             files.append(f)
-
-    if not files:
-        result = await _get_client().images.generate(
-            model=model, prompt=prompt, size=_resolve_size(size), quality=_resolve_quality(quality),
+        result = await _get_client().images.edit(
+            model=model,
+            prompt=prompt,
+            size=_resolve_size(size),
+            quality=_resolve_quality(quality),
+            image=files if len(files) > 1 else files[0],
         )
         return await asyncio.to_thread(_upload_result, result)
 
-    kwargs = {
-        "model": model,
-        "prompt": prompt,
-        "size": _resolve_size(size),
-        "quality": _resolve_quality(quality),
-        "image": files if len(files) > 1 else files[0],
-    }
-    result = await _get_client().images.edit(**kwargs)
-    return await asyncio.to_thread(_upload_result, result)
+    try:
+        return await _call_with_retries(_edit, attempts=1, label=f"edit({len(ref_bytes)} refs)")
+    except Exception as exc:
+        print(f"[ComicBook:getimage] multi-ref edit failed, falling back to prompt-only generate: {str(exc)[:180]}")
+        return await create_image(prompt, size, quality)

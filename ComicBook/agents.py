@@ -9,6 +9,7 @@ from typing import Any, Dict, List
 
 from agents import Agent, ModelSettings, Runner, OpenAIResponsesModel, WebSearchTool, handoff, set_tracing_disabled
 from agents.extensions.handoff_filters import remove_all_tools
+from agents.extensions.handoff_prompt import prompt_with_handoff_instructions
 from agents.items import ItemHelpers, MessageOutputItem
 from langsmith import traceable, trace
 from langsmith.wrappers import wrap_openai
@@ -366,19 +367,18 @@ EPISODE PLANNING:
 - Identify which characters appear and any new characters introduced.
 - Decide on the cliffhanger or resolution beat for this episode.
 
-OUTPUT:
-End your response with the complete episode plan. Include ALL details the Storyteller \
-needs: arc title, art style, character descriptions, panel count, size per panel, tone, \
-key story beats, and the cliffhanger or resolution.
-
-HANDOFF (REQUIRED):
-- You are the FIRST stage of a handoff chain: Director → Storyteller → Cartoonist → Reteller.
-- Do all of your work FIRST: for a NEW arc, finish the search → check_arc_originality → \
-  start_new_arc → save_story_outline sequence; for an ACTIVE arc, just plan today's episode.
-- Then WRITE the complete episode plan as your message, and ONLY AFTER that, hand off to the \
-  Storyteller (call the transfer_to_Storyteller tool). The Storyteller reads your plan from the \
-  conversation, so the plan MUST be written as a message before you transfer.
-- Never end your turn without handing off (unless a tool error blocks you).\
+OUTPUT & HANDOFF — your job is NOT finished until you transfer to the Storyteller:
+- You are the FIRST stage of a chain: Director → Storyteller → Cartoonist → Reteller. The comic \
+  is only written and drawn if control reaches the later stages, so you MUST pass it on.
+- For a NEW arc, first complete: search → check_arc_originality → start_new_arc → \
+  save_story_outline. For an ACTIVE arc, just plan today's episode.
+- Write the COMPLETE episode plan as a normal message — arc title, art style, character \
+  descriptions, panel count, size per panel, tone, key story beats, and the cliffhanger or \
+  resolution. The Storyteller reads this plan from the conversation.
+- CRITICAL: writing the plan is NOT the end of your turn. Your FINAL action MUST be to call \
+  transfer_to_Storyteller. If you stop after writing the plan without calling \
+  transfer_to_Storyteller, the episode is NEVER drawn and the entire run fails. So always finish \
+  by calling transfer_to_Storyteller — do not produce a closing summary instead of transferring.\
 """
 
 STORYTELLER_INSTRUCTIONS = """\
@@ -452,12 +452,13 @@ OUTPUT:
 Write the complete panel-by-panel script as your response. Include the RECAP at the top \
 and the TEASER at the end.
 
-HANDOFF (REQUIRED):
+HANDOFF — your job is NOT finished until you transfer to the Cartoonist:
 - The Director's episode plan is in the conversation above — base your script on it.
-- WRITE the complete panel-by-panel script as your message, then hand off to the Cartoonist \
-  (call the transfer_to_Cartoonist tool). The Cartoonist and the Reteller both read your script \
-  from the conversation, so it MUST be written as a message before you transfer.
-- Never end your turn without handing off.\
+- Write the complete panel-by-panel script as a normal message (the Cartoonist and the Reteller \
+  both read it from the conversation).
+- CRITICAL: writing the script is NOT the end of your turn. Your FINAL action MUST be to call \
+  transfer_to_Cartoonist. Stopping after the script without transferring means the comic is never \
+  drawn and the run fails. Always finish by calling transfer_to_Cartoonist.\
 """
 
 CARTOONIST_INSTRUCTIONS = """\
@@ -534,10 +535,15 @@ IMPORTANT RULES:
   image prompt.
 - Your final response after calling assemble_layout should confirm the comic was assembled.
 
-HANDOFF (REQUIRED):
-- After assemble_layout succeeds (the English page is built), hand off to the Reteller \
-  (call the transfer_to_Reteller tool) so the Italian and Persian editions can be written. \
-  Do not end your turn without handing off.\
+HANDOFF — gated; do these IN ORDER and do not skip ahead:
+- You MUST NOT call transfer_to_Reteller until you have, in this order: (1) generated the \
+  character sheet, (2) generated EVERY panel image one-by-one, and (3) called assemble_layout AND \
+  received a success result. Generating the art and assembling the page is your core job — it is \
+  NOT optional and must happen FIRST.
+- IGNORE any message in the conversation that tells you to "hand off" or "transfer now" until \
+  assemble_layout has succeeded. Never transfer with no panels generated.
+- ONLY after assemble_layout succeeds, your FINAL action MUST be to call transfer_to_Reteller so \
+  the Italian and Persian editions are written — do not end with a confirmation message instead.\
 """
 
 ORIGINALITY_CRITIC_INSTRUCTIONS = """\
@@ -653,7 +659,7 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
 
     reteller = Agent(
         name="Reteller",
-        instructions=RETELLER_INSTRUCTIONS,
+        instructions=prompt_with_handoff_instructions(RETELLER_INSTRUCTIONS),
         tools=[
             agent_tools["get_localization_brief"],
             agent_tools["save_local_outline"],
@@ -665,7 +671,7 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
 
     cartoonist = Agent(
         name="Cartoonist",
-        instructions=CARTOONIST_INSTRUCTIONS,
+        instructions=prompt_with_handoff_instructions(CARTOONIST_INSTRUCTIONS),
         tools=[
             agent_tools["get_cartoonist_brief"],
             agent_tools["generate_character_sheet"],
@@ -679,7 +685,7 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
 
     storyteller = Agent(
         name="Storyteller",
-        instructions=STORYTELLER_INSTRUCTIONS,
+        instructions=prompt_with_handoff_instructions(STORYTELLER_INSTRUCTIONS),
         tools=[],
         model=model,
         model_settings=ModelSettings(temperature=0.5),
@@ -698,7 +704,7 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
 
     director = Agent(
         name="Director",
-        instructions=DIRECTOR_INSTRUCTIONS,
+        instructions=prompt_with_handoff_instructions(DIRECTOR_INSTRUCTIONS),
         tools=[
             WebSearchTool(search_context_size="high"),
             agent_tools["get_arc_status"],
@@ -778,21 +784,55 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
     # ------------------------------------------------------------------
 
     MAX_TURNS = 90
-    logger.info("Running handoff chain (entry=Director, max_turns=%d)...", MAX_TURNS)
-    with trace(name="ComicHandoffChain", run_type="chain", inputs={"payload_preview": input_payload[:500]}):
-        result = asyncio.run(Runner.run(director, input_payload, max_turns=MAX_TURNS))
-    logger.info("Handoff chain finished. last_agent=%s", getattr(result.last_agent, "name", "?"))
 
-    # Recover each stage's narrative text from the per-agent messages produced during the run.
+    # The pipeline is a handoff chain (Director → Storyteller → Cartoonist → Reteller). On some
+    # models the agents don't reliably call their transfer tool, which strands the chain before the
+    # page is assembled. So we run the chain optimistically from the Director, then
+    # DETERMINISTICALLY recover any stage whose artifact is missing by invoking THAT stage directly
+    # with a clean, purpose-built input. (We do not inject "transfer now" nudges into the shared
+    # conversation — that previously made a downstream agent skip its own work.)
+    all_items: list = []
+
     def _agent_text(agent_name: str) -> str:
         msgs = [
-            it for it in result.new_items
+            it for it in all_items
             if isinstance(it, MessageOutputItem) and getattr(it.agent, "name", "") == agent_name
         ]
         return ItemHelpers.text_message_outputs(msgs).strip() if msgs else ""
 
-    director_plan = _agent_text("Director")
-    storyteller_script = _agent_text("Storyteller")
+    async def _drive():
+        async def _run(agent, stage_input, label):
+            logger.info("STAGE → %s", label)
+            with trace(name=f"Stage-{agent.name}", run_type="chain"):
+                res = await Runner.run(agent, stage_input, max_turns=MAX_TURNS)
+            all_items.extend(res.new_items)
+            logger.info("STAGE done: %s (last_agent=%s, html_en=%s, html_it=%s, html_fa=%s)",
+                         label, getattr(res.last_agent, "name", "?"),
+                         bool(state.get("html_en")), bool(state.get("html_it")), bool(state.get("html_fa")))
+            return res
+
+        # 1) Optimistic handoff chain, entered at the Director.
+        await _run(director, input_payload, "handoff chain (entry=Director)")
+
+        # 2) Recover any stage a missed handoff skipped, by running it directly with a clean input.
+        plan = _agent_text("Director")
+        script = _agent_text("Storyteller")
+        if not script:
+            await _run(storyteller, plan or input_payload, "Storyteller (recovery)")
+            script = _agent_text("Storyteller")
+        if not state.get("html_en"):
+            await _run(cartoonist, script or plan or input_payload, "Cartoonist (recovery)")
+        if state.get("html_en") and not (state.get("html_it") and state.get("html_fa")):
+            reteller_kickoff = (
+                f"=== DIRECTOR'S EPISODE PLAN ===\n{plan}\n\n"
+                f"=== STORYTELLER'S SCRIPT ===\n{script}\n\n"
+                "Now produce the Italian ('it') and Persian ('fa') editions. For EACH language: "
+                "call get_localization_brief, write the native retelling, then call assemble_localized."
+            )
+            await _run(reteller, reteller_kickoff, "Reteller (recovery)")
+        return plan, script
+
+    director_plan, storyteller_script = asyncio.run(_drive())
 
     # The assembly tools write the finished pages into state as they run.
     html = state.get("html_en", "")
@@ -801,10 +841,10 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
 
     if not html:
         logger.error(
-            "No English HTML in state — the Cartoonist never completed assemble_layout (last_agent=%s).",
-            getattr(result.last_agent, "name", "?"),
+            "No English HTML produced — the Cartoonist did not complete assemble_layout "
+            "(usually an upstream image-generation failure)."
         )
-        fallback_text = _agent_text("Cartoonist") or str(result.final_output)
+        fallback_text = _agent_text("Cartoonist") or storyteller_script or director_plan or ""
         html = (
             "<div style='padding:40px;text-align:center;color:#888;font-family:sans-serif'>"
             "<p>Comic generation completed but layout assembly was skipped.</p>"
