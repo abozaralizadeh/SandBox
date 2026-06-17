@@ -46,12 +46,19 @@ logger = logging.getLogger("ComicBook")
 # OpenAI client
 # ---------------------------------------------------------------------------
 
+# No time limit on comic generation: a single gpt-5.4 agent call (the Cartoonist's context is
+# large) can run long, and the comic must not be cut off mid-generation. Default to the gunicorn
+# request budget (1h) instead of the SDK's 600s; override with COMICBOOK_LLM_TIMEOUT.
+_LLM_TIMEOUT = float(os.environ.get("COMICBOOK_LLM_TIMEOUT", "3600"))
+
+
 def _build_openai_client() -> AsyncAzureOpenAI:
     client = AsyncAzureOpenAI(
         api_key=os.environ["AZURE_OPENAI_API_KEY"],
         api_version=os.environ.get("AZURE_OPENAI_API_VERSION", "2025-04-01-preview"),
         azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],
         azure_deployment=os.environ.get("AZURE_OPENAI_MODEL", "gpt-4o"),
+        timeout=_LLM_TIMEOUT,
     )
     return wrap_openai(client)
 

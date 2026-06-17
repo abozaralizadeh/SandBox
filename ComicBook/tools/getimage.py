@@ -15,6 +15,12 @@ _DALLE3_SIZES = {"wide": "1792x1024", "tall": "1024x1792", "square": "1024x1024"
 _GPT_IMAGE_SIZES = {"wide": "1536x1024", "tall": "1024x1536", "square": "1024x1024"}
 
 
+# No time limit on image generation: gpt-image edits/generations are slow (and slower under load).
+# Default to the gunicorn request budget (1h) instead of the SDK's 600s so a slow-but-successful
+# panel is never cut off; override with COMICBOOK_IMAGE_TIMEOUT.
+_IMAGE_TIMEOUT = float(os.environ.get("COMICBOOK_IMAGE_TIMEOUT", "3600"))
+
+
 def _get_client() -> AsyncAzureOpenAI:
     global _client
     if _client is None:
@@ -22,6 +28,7 @@ def _get_client() -> AsyncAzureOpenAI:
             api_version=os.environ.get("AZURE_OPENAI_API_VERSION", "2025-04-01-preview"),
             azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT_DALLE"],
             api_key=os.environ["AZURE_OPENAI_API_KEY_DALLE"],
+            timeout=_IMAGE_TIMEOUT,
         )
     return _client
 
