@@ -224,7 +224,7 @@
     /* ── open positions — live TP/SL bracket ── */
     .pos { background: var(--s2); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; margin-bottom: 10px; }
     .pos:last-child { margin-bottom: 0; }
-    .pos-top { display: flex; align-items: center; gap: 9px; }
+    .pos-top { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; row-gap: 8px; }
     .pos-top .sym-cell { font-weight: 700; font-family: var(--mono); font-size: 0.9rem; }
     .pos-top .tags { display: inline-flex; gap: 5px; }
     .pos-ret { margin-left: auto; font-family: var(--mono); font-weight: 700; font-size: 1.06rem; }
@@ -243,6 +243,22 @@
     .bracket-lbl .sl { color: var(--down); } .bracket-lbl .tp { color: var(--up); }
     .pos-stops1 { font-family: var(--mono); font-size: 0.7rem; color: var(--text-2); margin-top: 9px; display: flex; gap: 9px; align-items: center; flex-wrap: wrap; }
     .pos-stops1 .sl { color: var(--down); } .pos-stops1 .tp { color: var(--up); } .pos-stops1 .mono-x { color: var(--text-3); }
+
+    /* expandable candlestick per position — real price action with entry / TP / SL / mark overlaid */
+    .pos-chart-btn {
+      font-family: var(--mono); font-size: 0.6rem; font-weight: 600; letter-spacing: 0.4px; text-transform: uppercase;
+      display: inline-flex; align-items: center; gap: 5px; cursor: pointer; margin-left: 10px;
+      padding: 4px 9px; border-radius: 7px; color: var(--text-2);
+      background: rgba(255,255,255,0.03); border: 1px solid var(--border);
+      transition: color 0.15s, border-color 0.15s, background 0.15s;
+    }
+    .pos-chart-btn:hover { color: var(--cyan); border-color: var(--border2); background: var(--s2); }
+    .pos-chart-btn.open { color: var(--cyan); border-color: rgba(45,212,255,0.35); background: rgba(45,212,255,0.08); }
+    .pos-chart-btn svg { width: 12px; height: 12px; }
+    .pos-chart-wrap { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); animation: slidein 0.3s ease; }
+    .pos-chart-wrap .seg { margin-bottom: 8px; }
+    .pos-chart-slot { width: 100%; }
+    .pos-chart { width: 100%; height: 240px; }
 
     /* ── research / notes — only plan messages scroll; sentiment/watch-list pinned below ── */
     #researchPlans { max-height: 320px; overflow-y: auto; padding-right: 4px; }
@@ -264,6 +280,27 @@
     @media (max-width: 900px) {
       .kpis { grid-template-columns: repeat(2, 1fr); }
       .grid, .grid-2 { grid-template-columns: 1fr; }
+
+      /* Mobile repaint fix. A position:fixed layer carrying a large blur() filter (the glows) or a
+         mask (the grid) makes iOS/Android browsers drop or clip page content when scrolling back on
+         a long page — the reported "parts get cut off / disappear". Render the glows as plain radial
+         gradients (identical look, but no blur buffer or fragile compositing layer) and drop the
+         grid's mask, so there's nothing for the compositor to lose. */
+      .bg-glow { filter: none; will-change: auto; opacity: 1; }
+      .bg-glow.g1 { background: radial-gradient(circle, rgba(0,230,168,0.16), rgba(0,230,168,0) 70%); }
+      .bg-glow.g2 { background: radial-gradient(circle, rgba(45,212,255,0.13), rgba(45,212,255,0) 70%); }
+      .bg-grid { -webkit-mask-image: none; mask-image: none; }
+
+      /* Let the page scroll as one column. The inner max-height scrollers (decision feed, research,
+         supervisor notes) become cramped boxes on a phone and clip their lists after scroll — expand
+         them so each list flows with the page instead of being cut off inside a nested scroller. */
+      .feed, #researchPlans, #notesBox { max-height: none; overflow: visible; }
+
+      .pos-chart { height: 200px; }
+      /* Icon-only chart toggle on phones so the position header never overflows; the cyan
+         "open" state already signals expanded, so the text label is redundant here. */
+      .pos-chart-btn span { display: none; }
+      .pos-chart-btn { margin-left: 8px; padding: 4px 7px; }
     }
   </style>
 </head>
@@ -425,7 +462,7 @@
       equityChart = echarts.init(el('equityChart'), null, { renderer: 'canvas' });
       donutChart = echarts.init(el('donutChart'), null, { renderer: 'canvas' });
       tradesChart = echarts.init(el('tradesChart'), null, { renderer: 'canvas' });
-      window.addEventListener('resize', () => { equityChart.resize(); donutChart.resize(); tradesChart.resize(); });
+      window.addEventListener('resize', () => { equityChart.resize(); donutChart.resize(); tradesChart.resize(); Object.values(posExpanded).forEach(s => s.chart && s.chart.resize()); });
     }
 
     function renderEquity(points) {
@@ -542,11 +579,107 @@
       });
     }
 
+    /* ---------- open-position candlestick (expandable) ---------- */
+    const posExpanded = {};    // posKey -> { el, chart, iv }  (presence === expanded)
+    const _candleCache = {};   // "SYMBOL|iv" -> { ts, candles }
+    const CHART_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><rect x="7" y="10" width="3" height="7"/><rect x="14" y="6" width="3" height="11"/></svg>';
+
+    function posKey(p) { return (p.symbol || '') + '|' + (p.venue || ''); }
+    function fnum(v) { return (v == null || v === '' || isNaN(v)) ? null : Number(v); }
+    function pxF(v) { return (v == null || isNaN(v)) ? '—' : Number(v).toPrecision(6); }
+    function axPx(v) { const n = Math.abs(v); return n >= 1000 ? v.toFixed(0) : (n >= 1 ? v.toFixed(2) : (n >= 0.01 ? v.toFixed(4) : v.toPrecision(3))); }
+    function fmtCandleTime(t) {
+      const d = new Date(t * 1000), p = n => String(n).padStart(2, '0');
+      return `${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
+    }
+
+    async function getCandles(symbol, iv) {
+      const ck = symbol + '|' + iv, hit = _candleCache[ck];
+      if (hit && (Date.now() - hit.ts) < 45000) return hit.candles;   // matches the server-side TTL
+      try {
+        const r = await fetch(`/traide/candles?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(iv)}`, { headers: { 'X-Requested-With': 'fetch' } });
+        const candles = (await r.json()).candles || [];
+        _candleCache[ck] = { ts: Date.now(), candles };
+        return candles;
+      } catch (e) { console.warn('candles load failed', e); return (hit && hit.candles) || []; }
+    }
+
+    function buildCandleOption(candles, p) {
+      const up = '#00e6a8', down = '#ff3b5c';
+      const x = candles.map(c => fmtCandleTime(c.t));
+      const k = candles.map(c => [c.o, c.c, c.l, c.h]);   // ECharts candlestick wants [open, close, low, high]
+      const entry = fnum(p.avgEntry), tp = fnum(p.tpPrice), sl = fnum(p.slPrice), mark = fnum(p.currentPrice);
+      // Fit the y-axis to candles AND every reference line, so entry/TP/SL are never clipped off-chart.
+      const ys = [];
+      candles.forEach(c => { ys.push(c.l, c.h); });
+      [entry, tp, sl, mark].forEach(v => { if (v != null) ys.push(v); });
+      const lo = Math.min(...ys), hi = Math.max(...ys), pad = (hi - lo) * 0.06 || (hi ? hi * 0.01 : 1);
+      const mkLine = (v, color, text, dashed) => ({
+        yAxis: v, lineStyle: { color, width: 1.3, type: dashed ? 'dashed' : 'solid' },
+        label: { formatter: text, color, fontFamily: 'JetBrains Mono', fontSize: 9, position: 'insideEndTop', backgroundColor: 'rgba(5,7,10,0.72)', padding: [1, 3], borderRadius: 3 }
+      });
+      const lines = [];
+      if (entry != null) lines.push(mkLine(entry, '#e6edf3', 'Entry ' + pxF(entry)));
+      if (sl != null) lines.push(mkLine(sl, down, 'SL ' + pxF(sl)));
+      if (tp != null) lines.push(mkLine(tp, up, 'TP ' + pxF(tp)));
+      if (mark != null) lines.push(mkLine(mark, '#2dd4ff', 'Mark ' + pxF(mark), true));
+      return {
+        backgroundColor: 'transparent', animation: false,
+        grid: { left: 8, right: 72, top: 12, bottom: 24, containLabel: true },
+        tooltip: { trigger: 'axis', axisPointer: { type: 'cross' }, backgroundColor: 'rgba(10,14,20,0.95)', borderColor: 'rgba(120,160,200,0.2)',
+          textStyle: { color: '#e6edf3', fontFamily: 'JetBrains Mono', fontSize: 11 },
+          formatter: ps => { const i = ps[0].dataIndex, c = candles[i]; return c ? `${x[i]}<br/>O <b>${pxF(c.o)}</b>　H <b>${pxF(c.h)}</b><br/>L <b>${pxF(c.l)}</b>　C <b>${pxF(c.c)}</b>` : ''; } },
+        xAxis: { type: 'category', data: x, boundaryGap: true, axisLine: { lineStyle: { color: 'rgba(120,160,200,0.18)' } }, axisLabel: { color: '#50637a', fontFamily: 'JetBrains Mono', fontSize: 9, hideOverlap: true }, splitLine: { show: false } },
+        yAxis: { scale: true, min: lo - pad, max: hi + pad, position: 'right', axisLine: { lineStyle: { color: 'rgba(120,160,200,0.18)' } }, axisLabel: { color: '#50637a', fontFamily: 'JetBrains Mono', fontSize: 9, formatter: axPx }, splitLine: { lineStyle: { color: 'rgba(120,160,200,0.06)' } } },
+        series: [{ type: 'candlestick', data: k, barMaxWidth: 14,
+          itemStyle: { color: up, color0: down, borderColor: up, borderColor0: down, borderWidth: 1 },
+          markLine: { silent: true, symbol: 'none', data: lines } }]
+      };
+    }
+
+    async function drawPosChart(key, p) {
+      const st = posExpanded[key];
+      if (!st || !st.el.isConnected) return;
+      if (!st.chart) st.chart = echarts.init(st.el, null, { renderer: 'canvas' });
+      const candles = await getCandles(p.symbol, st.iv);
+      if (!posExpanded[key]) return;        // collapsed while the fetch was in flight
+      if (!candles.length) {
+        st.chart.setOption({ backgroundColor: 'transparent', xAxis: { show: false }, yAxis: { show: false }, series: [],
+          graphic: [{ type: 'text', left: 'center', top: 'middle', silent: true,
+            style: { text: 'price chart unavailable for ' + (p.symbol || ''), fill: 'rgba(138,160,180,0.6)', fontFamily: 'JetBrains Mono', fontSize: 11 } }] }, true);
+      } else {
+        st.chart.setOption(buildCandleOption(candles, p), true);
+      }
+      st.chart.resize();
+    }
+
+    function togglePosChart(idx) {
+      const p = (window._lastPositions || [])[idx]; if (!p) return;
+      const key = posKey(p);
+      if (posExpanded[key]) { if (posExpanded[key].chart) posExpanded[key].chart.dispose(); delete posExpanded[key]; }
+      else { const d = document.createElement('div'); d.className = 'pos-chart'; posExpanded[key] = { el: d, chart: null, iv: '1hour' }; }
+      renderPositions(window._lastPositions);
+    }
+
+    function setPosChartIv(idx, iv) {
+      const p = (window._lastPositions || [])[idx]; if (!p) return;
+      const key = posKey(p); if (!posExpanded[key] || posExpanded[key].iv === iv) return;
+      posExpanded[key].iv = iv;
+      renderPositions(window._lastPositions);
+    }
+
     function renderPositions(positions) {
       const box = el('positionsBox');
+      window._lastPositions = positions || [];
+      // Drop charts for positions that have since closed, freeing their ECharts instance.
+      const liveKeys = new Set((positions || []).map(posKey));
+      Object.keys(posExpanded).forEach(k => {
+        if (!liveKeys.has(k)) { if (posExpanded[k].chart) posExpanded[k].chart.dispose(); delete posExpanded[k]; }
+      });
+
       if (!positions || !positions.length) { box.innerHTML = '<div class="empty">No open positions</div>'; return; }
       const px = v => (v == null || isNaN(v)) ? '—' : Number(v).toPrecision(6);
-      box.innerHTML = positions.map(p => {
+      box.innerHTML = positions.map((p, i) => {
         const sym = esc((p.symbol || '').replace('-USDT', ''));
         const mark = Number(p.currentPrice), entry = Number(p.avgEntry);
         const tp = p.tpPrice != null ? Number(p.tpPrice) : null;
@@ -576,16 +709,36 @@
           brk = `<div class="pos-stops1"><span class="mono-x">no active TP/SL</span></div>`;
         }
 
-        return `<div class="pos">
+        const open = !!posExpanded[posKey(p)];
+        const iv = open ? posExpanded[posKey(p)].iv : '1hour';
+        const ivBtns = ['15min', '1hour', '4hour'].map(v =>
+          `<button class="pos-iv-btn${v === iv ? ' active' : ''}" data-idx="${i}" data-iv="${v}">${v.replace('min', 'm').replace('hour', 'h')}</button>`).join('');
+
+        return `<div class="pos" data-idx="${i}">
           <div class="pos-top">
             <span class="sym-cell">${coinIcon(p.symbol, 18)}${sym}</span>
             <span class="tags"><span class="tag ${p.side === 'long' ? 'long' : 'short'}">${esc(p.side || '')}</span><span class="tag ${p.venue === 'futures' ? 'futures' : 'spot'}">${esc(p.venue || '')}</span></span>
             <span class="pos-ret ${cls(p.returnPct)}">${fmtPct(p.returnPct)}</span>
+            <button class="pos-chart-btn${open ? ' open' : ''}" data-idx="${i}" aria-expanded="${open}" title="Toggle price chart">${CHART_ICON}<span>${open ? 'Hide' : 'Chart'}</span></button>
           </div>
           <div class="pos-px"><span>entry <b>${px(entry)}</b></span><span>mark <b>${px(mark)}</b></span>${p.lastTs ? `<span>· ${relTime(p.lastTs)}</span>` : ''}</div>
           ${brk}
+          <div class="pos-chart-wrap" data-idx="${i}"${open ? '' : ' style="display:none"'}>
+            <div class="seg pos-iv">${ivBtns}</div>
+            <div class="pos-chart-slot" data-idx="${i}"></div>
+          </div>
         </div>`;
       }).join('');
+
+      // Re-attach each expanded position's persistent chart element into its fresh slot, then redraw.
+      // Moving the node (appendChild) preserves the live ECharts canvas, so the 30s refresh updates
+      // the overlay lines (entry/mark/TP/SL) in place rather than tearing the chart down and back up.
+      positions.forEach((p, i) => {
+        const key = posKey(p);
+        if (!posExpanded[key]) return;
+        const slot = box.querySelector(`.pos-chart-slot[data-idx="${i}"]`);
+        if (slot) { slot.appendChild(posExpanded[key].el); drawPosChart(key, p); }
+      });
     }
 
     function renderFeed(feed) {
@@ -784,6 +937,13 @@
           b.classList.add('active');
           loadEquity(b.dataset.p);
         });
+      });
+      // Delegated so it survives the positions panel being re-rendered every 30s.
+      el('positionsBox').addEventListener('click', e => {
+        const cb = e.target.closest('.pos-chart-btn');
+        if (cb) { togglePosChart(Number(cb.dataset.idx)); return; }
+        const ib = e.target.closest('.pos-iv-btn');
+        if (ib) { setPosChartIv(Number(ib.dataset.idx), ib.dataset.iv); }
       });
       loadLive();
       loadEquity('all');

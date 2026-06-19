@@ -32,6 +32,7 @@ from TrAIde.azurestorage import (
     get_closed_trades as traide_get_closed_trades,
     get_plans as traide_get_plans,
 )
+from TrAIde.market import get_candles as traide_get_candles
 
 app = Flask(__name__)
 
@@ -430,6 +431,18 @@ def traide_plans():
         days = 3
     start = int(_time.time() // 86400) - days + 1   # inclusive window of the last `days` days
     return jsonify({"items": traide_get_plans(limit, start_day=start)})
+
+
+@app.route('/traide/candles', methods=['GET'])
+def traide_candles():
+    """Public OHLC candles for an open position's coin, proxied server-side (no CORS) so the
+    dashboard can overlay entry/TP/SL on real price action. Price data only — same privacy
+    envelope as the rest of the page."""
+    if not _traide_guard():
+        return jsonify({"error": "forbidden"}), 403
+    symbol = request.args.get('symbol', '')
+    interval = request.args.get('interval', '1hour')
+    return jsonify(traide_get_candles(symbol, interval))
 
 
 @app.route('/')
