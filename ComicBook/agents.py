@@ -18,6 +18,7 @@ set_tracing_disabled(True)
 from openai import AsyncAzureOpenAI
 
 from ComicBook.azurestorage import (
+    close_arc,
     get_active_arc,
     get_arc_glossary,
     get_arc_story_outline,
@@ -606,6 +607,32 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
     )
 
     arc = get_active_arc()
+
+    # ARC TRANSITION GUARD ------------------------------------------------------
+    # If the active arc has already published all of its planned episodes, today is
+    # NOT a continuation — it is the first day of a brand-new arc. Close the finished
+    # arc deterministically right here and drop it, so the rest of the pipeline runs
+    # as "no active arc": the Director invents a fresh arc and the Storyteller/
+    # Cartoonist start from episode 1 with a clean slate.
+    #
+    # Why this matters: the whole run is seeded from `arc` (recap, episode number,
+    # story outline, reference panel images). If we kept the completed arc here, that
+    # old-arc context would flow down the handoff chain and the Storyteller would
+    # write the NEXT episode of the FINISHED story (e.g. "Episode 9") which then got
+    # saved under the newly-created arc's metadata — the exact bug that mislabeled an
+    # old-arc continuation as episode 1 of the new arc.
+    if arc:
+        planned_eps = int(arc.get("planned_episodes", 0) or arc.get("target_days", 0) or 0)
+        episodes_done = int(arc.get("episodes_count", 0))
+        if planned_eps > 0 and episodes_done >= planned_eps:
+            logger.info(
+                "Active arc '%s' (%s) is complete (%d/%d episodes) — closing it; "
+                "today begins a NEW arc from episode 1.",
+                arc.get("title", ""), arc["RowKey"], episodes_done, planned_eps,
+            )
+            close_arc(arc["RowKey"], end_date=target_date)
+            arc = None
+
     episode_number = (int(arc.get("episodes_count", 0)) + 1) if arc else 1
     recent = get_recent_episodes(arc["RowKey"], limit=5, hydrate_html=False) if arc else []
 
