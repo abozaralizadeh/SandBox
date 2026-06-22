@@ -1,8 +1,14 @@
-import os, json, re
+import os, json, re, threading
 from dotenv import load_dotenv
 import requests
 from langsmith import traceable
-from GenBox.azurestorage import get_last_n_rows, get_row, insert_history
+from GenBox.azurestorage import (
+    get_last_n_rows,
+    get_row,
+    insert_history,
+    try_acquire_decision_lock,
+    release_decision_lock,
+)
 from GenBox.research import research_real_world
 from utils import get_flat_date, get_readable_date
 
@@ -77,8 +83,36 @@ def get_llm_response(date=None):
       # Today's row exists but is empty/malformed -> no content (don't crash / re-generate).
       return f"{output}\n\n{get_readable_date()}" if output else ""
 
-  # Cache miss — call the LLM (only this path emits a LangSmith trace).
-  return _call_llm_decision(date)
+  # Cache miss — generate today's decision in the BACKGROUND (topic + web research + the
+  # detailed decision is slow) so this request returns immediately. The TV shows static and
+  # keeps polling /get-string until the bulletin is ready.
+  _ensure_decision_generation(date)
+  return ""
+
+
+def _ensure_decision_generation(date=None):
+    """Non-blocking, idempotent trigger for today's decision text. Starts a daemon thread
+    guarded by an Azure-table single-flight lock so only one worker generates a given day,
+    and never blocks the HTTP request. Only 'today' (the live channel) is generated."""
+    flat = get_flat_date(date) if date else get_flat_date()
+    if flat != get_flat_date():
+        return  # past/other days never generate (they're 'no content' if absent)
+    if not try_acquire_decision_lock(flat):
+        return  # another worker/thread is already generating this day
+
+    def _run():
+        try:
+            _call_llm_decision(date)
+        except SystemExit as e:
+            # _call_llm_decision raises SystemExit on a failed upstream request; in a
+            # background thread that would just kill the thread — log and release instead.
+            print(f"GenBox decision generation failed: {e}")
+        except Exception as e:
+            print(f"GenBox decision generation error: {e}")
+        finally:
+            release_decision_lock(flat)
+
+    threading.Thread(target=_run, daemon=True).start()
 
 
 def _post_chat(messages, max_completion_tokens=2000, temperature=0.75):

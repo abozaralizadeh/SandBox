@@ -442,6 +442,7 @@
     let audioAvailable = false;   // a ready TTS narration exists for currentDate
     let currentAudioUrl = '';
     let statusPollTimer = null;
+    let textPollTimer = null;     // re-polls /get-string while today's bulletin is still generating
     const NARRATION_RATE = 1.3;   // play the narration faster (pitch preserved); also speeds
                                   // up already-cached audio with no regeneration needed
     const videoEl = document.getElementById('tvVideo');
@@ -790,6 +791,7 @@
       paused = false;
       textRevealed = false;
       stopTextAudio();               // silence the previous channel's narration immediately
+      clearInterval(textPollTimer);  // cancel any pending text re-poll from the previous channel
       // Hide the current text INSTANTLY (no fade) before fetching the next channel, so
       // switching channels never flashes the old, now-unstyled text. The fade-in transition
       // is restored right after. We also drop the static here so changing between two empty
@@ -810,38 +812,64 @@
         contentDiv.appendChild(scrollingText);
       }
 
-      const serverText = await fetchServerText(date);
       const titleHTML = '<div class="tv-title">International<br>Artificial Intelligence<br>Government</div>';
       const discoverLink = '\n<a href="https://abozar-alizadeh.medium.com/giving-the-ai-government-a-face-and-a-voice-building-genboxs-self-producing-newsroom-db7f57b9e1c7" target="_blank" class="custom-link">Discover More!</a>';
-      const clean = (serverText || '').trim();
-      const noContent = !clean || clean === 'Error fetching content';
+      const channelDay = date ? new Date(date) : new Date();   // snapshot of this channel's day (currentDate mutates in place)
+      const isToday = sameDay(channelDay, new Date());
 
-      if (noContent) {
-        // No signal on this channel -> roll TV static behind a "no content" message and show
-        // it immediately (there is nothing to wait for / no video on an empty channel).
-        // Keep the date + "Discover More!" at the end, like a normal channel.
-        startTvStatic();
-        contentEl.classList.add('no-signal');   // center the title + message in the screen
-        const readableDate = (date ? new Date(date) : new Date())
-          .toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
-        scrollingText.innerHTML = titleHTML
-          + '\n📡 No content found on this channel.\nKeep turning the dial to change the channel…'
-          + '\n\n' + readableDate
-          + discoverLink;
+      // Swap real content in once it's available (clears the no-signal static/centering).
+      const showRealContent = (serverText) => {
+        const clean = (serverText || '').trim();
+        if (!clean || clean === 'Error fetching content') return false;
+        stopTvStatic();
+        contentEl.classList.remove('no-signal');
+        scrollingText.innerHTML = titleHTML + serverText + discoverLink;
+        setupScroll(scrollingText);   // size the scroll to this text's length
         textRevealed = true;
         contentEl.style.opacity = '1';
-        setupScroll(scrollingText);
+        return true;
+      };
+
+      const serverText = await fetchServerText(date);
+      if (showRealContent(serverText)) {
         startStatusPolling(date);
         return;
       }
 
-      // Real content -> clear any leftover no-signal static/centering from the previous channel.
-      stopTvStatic();
-      contentEl.classList.remove('no-signal');
-      scrollingText.innerHTML = titleHTML + serverText + discoverLink; // Only update the text content
-      setupScroll(scrollingText);   // size the scroll to this text's length
+      // No content yet. NEVER block on a blank screen: roll TV static immediately. For TODAY
+      // the bulletin is just still being prepared (topic + web research + decision run in the
+      // background), so show a "tuning in" message and keep re-polling /get-string until it's
+      // ready. For past days an empty channel is genuinely empty, so show "no content".
+      startTvStatic();
+      contentEl.classList.add('no-signal');   // center the title + message in the screen
+      const readableDate = channelDay
+        .toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+      scrollingText.innerHTML = titleHTML
+        + (isToday
+            ? '\n📡 Tuning in…\nToday’s bulletin is being prepared.'
+            : '\n📡 No content found on this channel.\nKeep turning the dial to change the channel…')
+        + '\n\n' + readableDate
+        + discoverLink;
+      textRevealed = true;
+      contentEl.style.opacity = '1';
+      setupScroll(scrollingText);
+      startStatusPolling(date);   // video/narration backfill once the decision row exists
 
-      startStatusPolling(date);
+      if (isToday) {
+        // Re-poll the decision text until the background generation finishes, then swap it in
+        // and (re)start video/narration polling now that the decision row exists. Bail if the
+        // user turned the dial to another day (also re-checked after the await, to avoid an
+        // in-flight fetch clobbering the new channel).
+        textPollTimer = setInterval(async () => {
+          if (!sameDay(channelDay, currentDate)) { clearInterval(textPollTimer); return; }
+          const t = await getContent(date);
+          if (!sameDay(channelDay, currentDate)) { clearInterval(textPollTimer); return; }
+          if (showRealContent(t)) {
+            clearInterval(textPollTimer);
+            startStatusPolling(date);
+          }
+        }, 5000);
+      }
     }
 
     const button1 = document.getElementById('button1');

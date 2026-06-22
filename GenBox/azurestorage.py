@@ -218,3 +218,14 @@ def try_acquire_audio_lock(flat_date: str) -> bool:
 
 def release_audio_lock(flat_date: str):
     _release_lock("audio_lock", flat_date)
+
+
+def try_acquire_decision_lock(flat_date: str) -> bool:
+    """Single-flight lock for the daily decision text generation, so /get-string can kick
+    off the (slow) topic+research+decision work in the background without two workers
+    racing to generate the same day."""
+    return _try_acquire_lock("decision_lock", flat_date)
+
+
+def release_decision_lock(flat_date: str):
+    _release_lock("decision_lock", flat_date)
