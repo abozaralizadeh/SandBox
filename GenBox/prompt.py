@@ -1,4 +1,4 @@
-import os, json
+import os, json, re
 from dotenv import load_dotenv
 import requests
 from langsmith import traceable
@@ -12,17 +12,49 @@ API_KEY = os.getenv('AZURE_OPENAI_API_KEY')
 ENDPOINT = os.getenv('OAIENDPOINT')
 HISTORY_LEN = os.getenv('HISTORY_LEN')
 
-def _extract_output(row):
-    """Return the decision's 'output' text from a history row, or '' when the row is missing,
-    its content is not valid JSON, or it has no usable 'output' (so callers can treat any
-    broken/empty row as 'no content' instead of crashing)."""
-    if not row:
+def _salvage_string_field(content, field):
+    """Best-effort extraction of a JSON string field from `content` whose JSON is invalid —
+    typically because the model hit its token limit and the value was cut off mid-string
+    (an "Unterminated string" error). Decodes the common JSON escapes and returns the
+    (possibly partial) value, or '' if the field isn't present at all."""
+    m = re.search(r'"%s"\s*:\s*"' % re.escape(field), content or "")
+    if not m:
+        return ""
+    rest = content[m.end():]
+    chars, i, n = [], 0, len(rest)
+    _esc = {"n": "\n", "t": "\t", "r": "\r", '"': '"', "\\": "\\", "/": "/", "b": "\b", "f": "\f"}
+    while i < n:
+        c = rest[i]
+        if c == "\\" and i + 1 < n:
+            chars.append(_esc.get(rest[i + 1], rest[i + 1]))
+            i += 2
+            continue
+        if c == '"':            # closing quote of the field's value
+            break
+        chars.append(c)
+        i += 1
+    return "".join(chars).strip()
+
+
+def _decision_output(content):
+    """The decision's 'output' text from a saved row's content. Tolerates JSON the model
+    truncated at its token limit by salvaging the partial 'output' instead of returning ''."""
+    content = (content or "").strip()
+    if not content:
         return ""
     try:
-        data = json.loads((row.get("content") or "").strip().replace("\n", " "))
-        return (data.get("output") or "").strip()
+        return (json.loads(content.replace("\n", " ")).get("output") or "").strip()
     except Exception:
+        return _salvage_string_field(content, "output")
+
+
+def _extract_output(row):
+    """Return the decision's 'output' text from a history row, or '' when the row is missing
+    or has no usable 'output' (so callers can treat any broken/empty row as 'no content'
+    instead of crashing). Truncated-but-present output is salvaged, not dropped."""
+    if not row:
         return ""
+    return _decision_output(row.get("content"))
 
 
 def get_llm_response(date=None):
@@ -65,13 +97,13 @@ def _post_chat(messages, max_completion_tokens=2000, temperature=0.75):
 
 
 def _recent_topics(last_n_rows, limit=15):
-    """Short snippets of recently decided topics, so the picker can avoid repeats."""
+    """Short snippets of recently decided topics, so the picker can avoid repeats. Prefers
+    the saved `topic` field, falling back to the start of the decision's output (and
+    tolerating rows whose JSON was truncated by the token limit)."""
     topics = []
     for row in (last_n_rows or [])[-limit:]:
-        try:
-            snippet = (json.loads(row["content"].strip().replace("\n", " ")).get("output") or "").strip()
-        except Exception:
-            snippet = ""
+        content = row.get("content")
+        snippet = _salvage_string_field(content, "topic") or _decision_output(content)
         if snippet:
             topics.append(snippet[:160])
     return topics
@@ -229,28 +261,23 @@ Consider implementing a new taxation policy focused on environmental sustainabil
     ],
     "temperature": 0.75,
     "top_p": 0.95,
-    "max_completion_tokens": 2000
+    # Research-grounded decisions are longer; 2000 truncated the JSON mid-string (the output
+    # then failed to parse and the TV went blank). Give the full decision room to complete.
+    "max_completion_tokens": 4000
   }
 
   last_n_rows = get_last_n_rows(int(HISTORY_LEN)) or []
 
-  # Prior decisions as assistant turns (continuity); skip any malformed/legacy rows.
+  # Prior decisions as assistant turns (continuity); salvage truncated rows, skip empty ones.
   last_n_prompts = []
   for row in last_n_rows:
-      try:
-          out = json.loads(row["content"].strip().replace("\n", " "))["output"]
-      except Exception:
-          continue
-      last_n_prompts.append({"role": "assistant", "content": [{"text": out, "type": "text"}]})
+      out = _decision_output(row.get("content"))
+      if out:
+          last_n_prompts.append({"role": "assistant", "content": [{"text": out, "type": "text"}]})
 
   # Phase A — choose today's fresh topic, BEFORE any research or detailing. Yesterday's
   # "prompt" handoff is only an optional hint; the picker diversifies away from recent topics.
-  handoff_hint = None
-  if last_n_rows:
-      try:
-          handoff_hint = json.loads(last_n_rows[-1]["content"].strip().replace("\n", " ")).get("prompt")
-      except Exception:
-          handoff_hint = None
+  handoff_hint = _salvage_string_field(last_n_rows[-1].get("content"), "prompt") if last_n_rows else ""
   topic = _choose_topic(_recent_topics(last_n_rows), handoff_hint)
   print(f"GenBox topic for {get_readable_date()}: {topic}")
 
