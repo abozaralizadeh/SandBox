@@ -2,6 +2,38 @@
 
 These projects are not isolated tools but rather facets of a broader exploration into AI autonomy. The presence of these three distinct yet related projects reveals a cohesive vision. My work is not merely about code but about exploring the potential of agentic AI to interact with and reason about the real world in increasingly sophisticated ways. The repository's associated topics, such as AI governance, ethics, and simulation, underscore this focus on the higher-order implications of autonomous systems.
 
+## ComicBook
+
+Multi-Agent AI Comic Strip Generator  
+ComicBook produces a daily AI-generated comic strip on the **OpenAI Agents SDK**, orchestrated as a **handoff chain**: Director → Storyteller → Cartoonist → Reteller. A single `Runner.run(Director)` drives the whole episode; each agent calls its `transfer_to_<next>` tool to pass control on, and a **deterministic recovery** runs any stage a missed handoff skipped — so a comic always ships. The Director also consults an **OriginalityCritic** sub-agent (via `as_tool`) before starting a new arc.
+[Read more](https://medium.com/towards-artificial-intelligence/the-comic-that-draws-itself-building-a-daily-ai-graphic-novel-studio-da4f7a61e39c)
+
+📐 **Architecture:** [Technical flow and Mermaid diagrams](ComicBook/architecture.md)
+
+#### Agent Pipeline
+- **Director** (temp 1.2) — Invents original story arcs. For a new arc it **web-searches for fresh inspiration**, forms a candidate, calls `check_arc_originality`, and retries until it's distinct from recent arcs; decides arc length organically; writes the story outline; plans each episode's panels and tone. Then hands off to the Storyteller.
+- **OriginalityCritic** (temp 0.2, `as_tool`) — Reads recent arcs and judges a candidate's core story (plot shape, conflict, archetypes, setting, art style), returning `ok` / `too_similar` + retry guidance. `start_new_arc` additionally refuses a recently-used art style.
+- **Storyteller** (temp 0.5) — Transforms the Director's plan into a panel-by-panel script (dialogue, captions, SFX, camera angles, per-panel size), then hands off to the Cartoonist.
+- **Cartoonist** — Pulls the full arc roster, generates a **character reference sheet** for visual consistency, then draws each panel sequentially using the reference via Azure OpenAI image editing, assembles the English HTML page, and hands off to the Reteller.
+- **Reteller** (temp 0.9) — In one run, **retells** the episode natively in Italian and Persian over the same fixed images (not a translation), adapting + saving the localized outline on episode 1 and maintaining a per-language glossary.
+
+#### Key Features
+- **Dynamic Story Arcs**: arcs run for as many episodes as they need (3, 8, 15…), then close and a completely fresh arc begins. A **three-layer originality guard** (prompt-mandated search + the OriginalityCritic + an art-style refusal) keeps each arc genuinely different.
+- **Character Consistency**: one character reference sheet per arc (cached), then every panel is drawn sequentially with that reference (plus mid-arc key panels and prior-episode anchors).
+- **Multi-language editions**: English is native; the Reteller produces it/fa over the shared art. The **main title comes from the arc** (consistent every episode) with the episode's native title shown as a **subtitle**.
+- **Readability guard**: the page's color theme is contrast-checked at render time — any low-contrast text is auto-flipped to near-black/near-white, so a box is never light-on-light or dark-on-dark.
+- **Local debug mode**: `DEBUG=true` isolates all reads/writes to a separate `arc_debug` partition (and lock) so local tests never touch production; `DEBUG_SAVE=false` is a pure dry run.
+- **Arc Memory**: Azure Table Storage tracks arc metadata, outlines, glossaries, key panels, and episode summaries so each strip honors continuity.
+- **Responsive Comic Layout**: comic-book styling (speech bubbles, caption boxes, SFX) that adapts to mobile and desktop.
+- **Frontend**: `/comicbook` fetches the latest strip (or a selected date) and renders the comic page.
+
+#### Tech Stack
+- **OpenAI Agents SDK** (`openai-agents`) — agent definitions, `@function_tool` tools (deterministic only), **handoffs** with `input_filter` + `prompt_with_handoff_instructions`, sub-agents via `Agent.as_tool`, `Runner.run()`
+- **Azure OpenAI** — chat model (configurable, e.g. `gpt-5.4`) for the agents, `gpt-image` for image generation (1-hour client timeouts, override via `COMICBOOK_LLM_TIMEOUT` / `COMICBOOK_IMAGE_TIMEOUT`)
+- **Azure Table & Blob Storage** — arc/episode persistence (with `DEBUG` partition isolation), image and HTML hosting
+
+![ComicBook](https://github.com/abozaralizadeh/SandBox/blob/main/static/ComicBook.png?raw=true)
+
 ## AI Open Problem Solver
 
 Autonomous Creative Mathematician & Deep-Research Agent  
@@ -56,7 +88,7 @@ https://SandBoxes.Live/aiblog
 AI-Driven News Prediction and Decision-Making
 TomorrowNews is an experimental open-source project that uses LangChain Agents and Azure OpenAI to generate speculative, AI-driven news predictions based on real-world events. The project aims to simulate decision-making for the future, providing a creative glimpse into what might happen in various sectors, such as politics, economy, society, and the environment.
 
-By feeding real news as input, this project generates predictions and outcomes for the following day, creating speculative headlines and decisions related to global topics. [Read more](https://ai.gopubby.com/tomorrow-news-how-ai-crafts-futures-headlines-and-stories-8f2b37fd841e)
+By feeding real news as input, this project generates predictions and outcomes for the following day, creating speculative headlines and decisions related to global topics. [Read more](https://medium.com/@abozar-alizadeh/tomorrow-news-speaks-three-languages-how-ai-reports-the-future-in-multiple-languages-473f2303b284)
 
 📐 **Architecture:** [Technical flow and Mermaid diagrams](TomorrowNews/architecture.md)
 
@@ -104,7 +136,7 @@ https://SandBoxes.Live/tomorrownews
 
 ## GenBox
 
-This experimental project explores the potential of AI as an autonomous decision-maker for a virtual world. Using Azure OpenAI and a structured prompt-response loop, the system generates daily high-level decisions on critical areas such as economy, society, environment, and global politics. Each decision is designed to be realistic, impactful, and ethically informed, balancing immediate outcomes with long-term sustainability. The goal is to create an engaging and evolving narrative that demonstrates the capabilities of generative AI while inviting users to reflect on governance and the complexities of decision-making in a simulated world. [Read more](https://abozar-alizadeh.medium.com/exploring-ai-driven-governance-building-a-virtual-world-where-ai-rules-22419690a409)
+This experimental project explores the potential of AI as an autonomous decision-maker for a virtual world. Using Azure OpenAI and a structured prompt-response loop, the system generates daily high-level decisions on critical areas such as economy, society, environment, and global politics. Each decision is designed to be realistic, impactful, and ethically informed, balancing immediate outcomes with long-term sustainability. The goal is to create an engaging and evolving narrative that demonstrates the capabilities of generative AI while inviting users to reflect on governance and the complexities of decision-making in a simulated world. [Read more](https://medium.com/@abozar-alizadeh/giving-the-ai-government-a-face-and-a-voice-building-genboxs-self-producing-newsroom-db7f57b9e1c7)
 
 **Grounded in the real world:** each decision is built in two phases. First the AI **picks a fresh topic** for the day (diversified away from recent ones). Once the topic is set — but *before* writing the decision — GenBox runs an internet research step using the model's **native web search** (the Azure OpenAI Responses API `web_search` tool, the same approach AIBlog and ComicBook use), gathering the current real-world **achievements, challenges, blockers, and limits** on that topic. That briefing is fed into the second phase, so the AI's decision proposes concrete, actionable solutions to *real* current problems rather than abstract policy; the chosen topic and the source URLs it grounded on are saved alongside the decision. The research is best-effort: if web search is unavailable, the decision is still produced (just ungrounded).
 
@@ -160,37 +192,6 @@ AZURE_OPENAI_MODEL_SORA=sora-2   # single value applies to all, or give one per 
 - **Sora 2 on Azure OpenAI** — text/image-to-video with native audio (`/openai/v1/videos`)
 - **imageio-ffmpeg** — bundled static `ffmpeg` for last-frame extraction and clip concatenation
 - **Azure Table & Blob Storage** — per-date video status/metadata and merged MP4 hosting
-
-## ComicBook
-
-Multi-Agent AI Comic Strip Generator  
-ComicBook produces a daily AI-generated comic strip on the **OpenAI Agents SDK**, orchestrated as a **handoff chain**: Director → Storyteller → Cartoonist → Reteller. A single `Runner.run(Director)` drives the whole episode; each agent calls its `transfer_to_<next>` tool to pass control on, and a **deterministic recovery** runs any stage a missed handoff skipped — so a comic always ships. The Director also consults an **OriginalityCritic** sub-agent (via `as_tool`) before starting a new arc.
-
-📐 **Architecture:** [Technical flow and Mermaid diagrams](ComicBook/architecture.md)
-
-#### Agent Pipeline
-- **Director** (temp 1.2) — Invents original story arcs. For a new arc it **web-searches for fresh inspiration**, forms a candidate, calls `check_arc_originality`, and retries until it's distinct from recent arcs; decides arc length organically; writes the story outline; plans each episode's panels and tone. Then hands off to the Storyteller.
-- **OriginalityCritic** (temp 0.2, `as_tool`) — Reads recent arcs and judges a candidate's core story (plot shape, conflict, archetypes, setting, art style), returning `ok` / `too_similar` + retry guidance. `start_new_arc` additionally refuses a recently-used art style.
-- **Storyteller** (temp 0.5) — Transforms the Director's plan into a panel-by-panel script (dialogue, captions, SFX, camera angles, per-panel size), then hands off to the Cartoonist.
-- **Cartoonist** — Pulls the full arc roster, generates a **character reference sheet** for visual consistency, then draws each panel sequentially using the reference via Azure OpenAI image editing, assembles the English HTML page, and hands off to the Reteller.
-- **Reteller** (temp 0.9) — In one run, **retells** the episode natively in Italian and Persian over the same fixed images (not a translation), adapting + saving the localized outline on episode 1 and maintaining a per-language glossary.
-
-#### Key Features
-- **Dynamic Story Arcs**: arcs run for as many episodes as they need (3, 8, 15…), then close and a completely fresh arc begins. A **three-layer originality guard** (prompt-mandated search + the OriginalityCritic + an art-style refusal) keeps each arc genuinely different.
-- **Character Consistency**: one character reference sheet per arc (cached), then every panel is drawn sequentially with that reference (plus mid-arc key panels and prior-episode anchors).
-- **Multi-language editions**: English is native; the Reteller produces it/fa over the shared art. The **main title comes from the arc** (consistent every episode) with the episode's native title shown as a **subtitle**.
-- **Readability guard**: the page's color theme is contrast-checked at render time — any low-contrast text is auto-flipped to near-black/near-white, so a box is never light-on-light or dark-on-dark.
-- **Local debug mode**: `DEBUG=true` isolates all reads/writes to a separate `arc_debug` partition (and lock) so local tests never touch production; `DEBUG_SAVE=false` is a pure dry run.
-- **Arc Memory**: Azure Table Storage tracks arc metadata, outlines, glossaries, key panels, and episode summaries so each strip honors continuity.
-- **Responsive Comic Layout**: comic-book styling (speech bubbles, caption boxes, SFX) that adapts to mobile and desktop.
-- **Frontend**: `/comicbook` fetches the latest strip (or a selected date) and renders the comic page.
-
-#### Tech Stack
-- **OpenAI Agents SDK** (`openai-agents`) — agent definitions, `@function_tool` tools (deterministic only), **handoffs** with `input_filter` + `prompt_with_handoff_instructions`, sub-agents via `Agent.as_tool`, `Runner.run()`
-- **Azure OpenAI** — chat model (configurable, e.g. `gpt-5.4`) for the agents, `gpt-image` for image generation (1-hour client timeouts, override via `COMICBOOK_LLM_TIMEOUT` / `COMICBOOK_IMAGE_TIMEOUT`)
-- **Azure Table & Blob Storage** — arc/episode persistence (with `DEBUG` partition isolation), image and HTML hosting
-
-![ComicBook](https://github.com/abozaralizadeh/SandBox/blob/main/static/ComicBook.png?raw=true)
 
 ---
 ## Command to run the project
