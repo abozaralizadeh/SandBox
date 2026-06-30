@@ -40,6 +40,21 @@ def _escape_html(text: str) -> str:
     return (text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
 
 
+def _escape_html_multiline(text: str) -> str:
+    """Escape HTML and render line breaks as <br>.
+
+    The model frequently writes multi-line text (notably the long episode-1 setup
+    recap, in every language) using LITERAL backslash-n sequences rather than real
+    newlines. Plain _escape_html leaves those untouched, so the page shows a stray
+    "\\n". Here we normalize both literal "\\r\\n"/"\\n"/"\\r" escapes and real
+    CR/LF into <br> so the recap reads as the intended separate lines.
+    """
+    escaped = _escape_html(text)
+    escaped = escaped.replace("\\r\\n", "\n").replace("\\n", "\n").replace("\\r", "\n")
+    escaped = escaped.replace("\r\n", "\n").replace("\r", "\n")
+    return escaped.replace("\n", "<br>")
+
+
 def _panel_grid_area(index: int, size: str, total: int) -> str:
     """Assign CSS grid-area name based on panel index, size, and total count."""
     return f"p{index + 1}"
@@ -291,7 +306,7 @@ def _assemble_html(
 
     panels_block = "\n".join(panel_html_parts)
     safe_title = _escape_html(arc_title)
-    safe_recap = _escape_html(recap)
+    safe_recap = _escape_html_multiline(recap)
     safe_teaser = _escape_html(teaser)
     subtitle_block = (
         f'\n    <div class="comic-subtitle">{_escape_html(subtitle)}</div>' if subtitle else ""
