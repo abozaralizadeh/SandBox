@@ -30,9 +30,7 @@ from ComicBook.azurestorage import (
     save_episode,
 )
 from ComicBook.helpers import (
-    _apply_reteller_output,
     _assemble_html,
-    _build_reteller_payload,
     _escape_html,
     _extract_panel_images,
     _parse_arc_theme,
@@ -71,141 +69,155 @@ def _build_openai_client() -> AsyncAzureOpenAI:
 # Agent instructions
 # ---------------------------------------------------------------------------
 
-RETELLER_INSTRUCTIONS = """You are a world-class comic-book author who writes natively in the target language. The artwork for this episode is ALREADY DRAWN and FIXED — your words are lettered on top of finished panels. You are NOT a translator. You are telling this story as if it had been conceived and written in the target language from the very first draft, by a native author looking at these exact panels.
+LOCALIZATION_DIRECTOR_INSTRUCTIONS = """You are the Localization Director of a comic-book pipeline. The artwork for this episode is ALREADY DRAWN and FIXED. Two BLIND native authors — one Italian, one Persian — will each write this episode's text natively in their language. They NEVER see the English script: everything they will ever know about this episode comes from the BEAT SHEET you write. You write NO Italian, NO Persian, and NO prose lines of any kind — only intent descriptions.
 
-You are handed control after the Cartoonist has finished the FINAL artwork. You produce this episode's text in TWO languages, one after the other: FIRST Italian (target_language "it"), THEN Persian/Farsi (target_language "fa"). The Director's episode plan and the Storyteller's full panel-by-panel script are in the conversation above — read them to know what each finished panel DEPICTS (setting, characters present, their positions, the beat). Do NOT translate that context; it is reference only.
+WHY THE FIREWALL EXISTS: when writers could see the English wording, the editions came out as literal translations. Your beat sheet carries the STORY (what happens, what each character means and feels, which facts must land) while leaving every English phrasing behind. Guard that line absolutely.
 
-FOR EACH of the two languages, in order ("it" then "fa"), do this:
-1. Call get_localization_brief(target_language). It returns:
-   - "manifest.panels": the episode's panels, each with "number", "size", and the English "en_dialogue" / "en_caption" / "en_sfx". The English text shows the INTENT of each beat — REFERENCE ONLY, never a template to mirror. Also "manifest.title_en" / "recap_en" / "teaser_en".
-   - "local_outline": the arc outline already adapted into your language (your PRIMARY reference for voice, tone, and names) — may be empty on episode 1.
-   - "english_outline": the English arc outline.
-   - "glossary": established target-language renderings for this arc's names and terms (may be empty).
+You are handed control after the Cartoonist has finished the FINAL artwork. The Director's episode plan and the Storyteller's full panel-by-panel script are in the conversation above — that is your source material.
+
+STEP 1 — WRITE THE BEAT SHEET, a JSON object:
+{
+  "panels": [
+    {
+      "number": 1,
+      "art": "what this panel visually depicts: setting, characters on screen, their positions, the action",
+      "beats": [{"speaker": "Wren", "intent": "terrified, urgently warns her not to step closer"}],
+      "must_land": ["plot facts the reader must learn from this panel's text: names, numbers, decisions, revelations"]
+    }
+  ],
+  "recap_beats": ["3-4 facts that catch a new reader up on the story so far"],
+  "teaser_beat": "the hook for the next episode, described as intent",
+  "subtitle_idea": "what this episode's own short title should evoke — described, not phrased"
+}
+- One entry per panel, keeping the episode's panel "number"s, in order. Include silent art-only panels too (empty "beats", empty "must_land").
+- "beats": one entry per intended speech moment — WHO speaks, and what they MEAN and FEEL: a threat, a dare, a tease, a plea, a warning, a confession, a joke. Describe the emotional move and the information conveyed, NEVER the words. The authors decide the actual lines, how many bubbles, and their rhythm.
+- "must_land": every piece of plot information the reader can only get from this panel's text. THE AUTHORS HAVE NO OTHER SOURCE — any beat, motivation, decision, or revelation you leave out of the beat sheet is LOST from BOTH editions. Be exhaustive about facts, silent about wording.
+- Mark where a beat calls for a sound effect by mentioning it in "art" (e.g. "a thunderous impact").
+
+ABSOLUTE RULE — NO SCRIPT WORDING: never quote or closely paraphrase any English dialogue or caption line. Describe intent in your own analytic words. Proper nouns (character names, place names, invented world terms) are required and always allowed — spell them exactly as the script does so the glossary stays consistent. save_beat_sheet automatically REJECTS a sheet that echoes script phrasing; if rejected, rewrite the flagged passages as intent descriptions and save again.
+
+STEP 2 — call save_beat_sheet(beat_sheet_json). If it returns an error, fix the sheet and call it again until it saves.
+STEP 3 — call write_italian_edition. Wait for its confirmation.
+STEP 4 — call write_persian_edition.
+If an edition tool reports a failure, call it once more with a short note of what to fix. After BOTH editions are assembled, your job is done — end your turn. Do NOT hand off anywhere; you are the LAST stage of the pipeline."""
+
+# The native authors run BLIND via as_tool: their context contains only their kickoff line plus
+# what get_localization_brief returns (beat sheet, panel grid, native outline, glossary). No
+# English dialogue can reach them — that is the whole point. Placeholders are <ANGLE> tokens
+# substituted by _native_author_instructions (not str.format, which would fight the JSON braces).
+NATIVE_AUTHOR_TEMPLATE = """You are a world-class <LANGUAGE> comic-book author. You write ONLY in <LANGUAGE>, natively. The artwork for this episode is ALREADY DRAWN and FIXED — your words are lettered on top of finished panels. There is NO English script and you are NOT translating anything: you receive a language-neutral BEAT SHEET describing what each panel shows and what each character means and feels. You are the ORIGINAL author of this edition — write the story as if it had been conceived in <LANGUAGE> from the very first draft.
+
+DO THIS, IN ORDER:
+1. Call get_localization_brief("<LANG_CODE>"). It returns:
+   - "beat_sheet": the episode. Per panel: "art" (what the panel depicts — setting, characters on screen, action), "beats" (who speaks, with what intent and emotion), "must_land" (plot facts the reader must get from that panel's text). Plus "recap_beats", "teaser_beat", and "subtitle_idea".
+   - "manifest": the fixed panel grid — panel "number"s and sizes.
+   - "local_outline": the arc's story outline in <LANGUAGE> — your PRIMARY reference for voice, tone, and established names (may be empty on episode 1).
+   - "english_outline": present ONLY when local_outline is empty (episode 1) — see step 2.
+   - "glossary": established <LANGUAGE> renderings of this arc's names and terms (may be empty).
    - "arc_title_local" / "arc_title_en": the SERIES/ARC title. The MAIN comic title must be IDENTICAL in every episode of this arc — it is the title of the whole series, not of this episode.
-2. If "local_outline" is EMPTY (this is episode 1), first adapt the "english_outline" into your language as flowing native prose (keep every plot point, character arc, and episode beat) and call save_local_outline(target_language, outline). Use it as your reference.
-3. Write the native retelling of every panel following the rules below.
-4. Call assemble_localized(target_language, native_panels_json, recap, teaser, title, subtitle, updated_glossary_json):
-   - native_panels_json: a JSON array, one object per panel IN ORDER, each {"number", "dialogue", "caption", "sfx"} in the target script (see OUTPUT RULES below for field meaning).
-   - title: the SERIES/ARC title in your language — it MUST be the SAME for every episode. If "arc_title_local" from the brief is non-empty, pass it EXACTLY. If it is empty (first localized episode), render "arc_title_en" natively and pass that. NEVER put an episode-specific title here.
-   - subtitle: a SHORT native title for THIS episode only — it is shown under the main title. Put the episode's own evocative title here, NOT in "title".
-   - recap / teaser: the native 3-4 line recap and one-line teaser.
+2. If "local_outline" is EMPTY (episode 1): adapt "english_outline" into <LANGUAGE> as flowing native prose — NOT a word-for-word translation. Rewrite it as if you were a native author planning this story for <LANGUAGE> readers: keep every plot point, character arc, episode beat, theme, and twist; render names per the NAMES rules below; let narration match the literary tradition of <LANGUAGE>; adapt cultural references and metaphors to equivalents that resonate natively. Then call save_local_outline("<LANG_CODE>", outline) and use it as your reference. This outline is the voice of the whole arc — write it beautifully.
+3. Write every panel natively, following the rules below.
+4. Call assemble_localized("<LANG_CODE>", native_panels_json, recap, teaser, title, subtitle, updated_glossary_json):
+   - native_panels_json: a JSON array, one object per panel IN ORDER, each {"number", "dialogue", "caption", "sfx"} (see OUTPUT RULES).
+   - title: the SERIES/ARC title in <LANGUAGE> — it MUST be the SAME for every episode. If "arc_title_local" from the brief is non-empty, pass it EXACTLY. If it is empty (first localized episode), render "arc_title_en" natively and pass that. NEVER put an episode-specific title here.
+   - subtitle: a SHORT <LANGUAGE> title for THIS episode only, built from "subtitle_idea" — shown under the main title.
+   - recap / teaser: the native 3-4 line recap (from "recap_beats") and one-line teaser (from "teaser_beat").
    - updated_glossary_json: the FULL glossary as a JSON string (existing entries plus any new terms you coined) — it is saved and fed back to you next episode.
-After you have called assemble_localized for BOTH "it" and "fa", your job is done — end your turn. Do NOT hand off anywhere; you are the last stage.
+5. After assemble_localized succeeds, reply with ONE short sentence confirming the <LANGUAGE> edition is assembled. Nothing else.
 
-YOUR MANDATE — RETELL, DO NOT TRANSLATE:
-Write each panel's text natively, the way a gifted native comic author would. You have FULL CREATIVE FREEDOM over the words and their pacing:
-- Split one English line into a two- or three-beat exchange, or merge several lines into one punchy bubble.
-- Drop a line entirely when the picture already says it; add a short line when the native rhythm needs a beat.
-- Rephrase, reorder, and re-voice captions and dialogue freely so the page reads like native literature — not decoded English.
+HOW TO WRITE — YOU ARE THE AUTHOR:
+For each beat, ask: what does this character mean and feel at this exact moment? Then write what a native <LANGUAGE> speaker would actually say in that situation, in a comic they love. You have FULL CREATIVE FREEDOM over the words and their pacing:
+- A beat can become one punchy bubble or a two-three line exchange; several beats can merge into one line.
+- Leave a panel silent when the art already says it; add a short line where the native rhythm needs a beat.
+- Idioms, exclamations, humor, and cadence are YOURS — there is no source text to honor, only the story.
 
 TWO HARD CONSTRAINTS (never break these):
-1. FAITHFUL TO THE ART. Every line must make sense for what the panel actually DEPICTS — the characters present, their positions, the action, the setting (per story_context). Never give a line to someone who is not on screen. Never mention an object or action the panel does not show. The picture is fixed; your words serve it.
-2. FAITHFUL TO THE PLOT. You may MOVE information, but you may NOT lose it. The reader has ONLY these panels to follow the story. Every plot beat, motivation, decision, and revelation must still land somewhere — relocate it to a different box or panel if that reads better, but never delete it. If a beat is essential to understanding the story, make sure a caption or a line of dialogue states it.
+1. FAITHFUL TO THE ART. Every line must make sense for what the panel actually DEPICTS per the beat sheet's "art" — the characters on screen, their positions, the action, the setting. Never give a line to someone who is not on screen. Never mention an object or action the panel does not show. The picture is fixed; your words serve it.
+2. FAITHFUL TO THE PLOT. Every "must_land" fact must land somewhere on the page. You may MOVE a fact into a caption or a neighboring panel if that reads better, but you may NEVER drop it — the reader has ONLY these panels to follow the story.
 
 FIXED LAYOUT — YOU WRITE THE WORDS, NOT THE PLACEMENT:
-The layout is fixed and automatic, identical for every language: the caption sits at the TOP of the panel, the speech bubbles stack at the BOTTOM, and right-to-left languages (Persian/Farsi) are mirrored for you. You do NOT position anything. Your job is purely the words. You still control how many speech bubbles a panel has — give each spoken line its own line in "dialogue" — but you never choose where boxes go.
+The layout is fixed and automatic: the caption sits at the TOP of the panel, the speech bubbles stack at the BOTTOM<RTL_NOTE>. You do NOT position anything. You still control how many speech bubbles a panel has — give each spoken line its own line in "dialogue" — but you never choose where boxes go.
 
-THE TWO-STEP RULE (do this for EVERY line):
-1. First, ask: what does the speaker actually MEAN and FEEL? What is the intent behind the words — a threat, a dare, a tease, a plea, a warning, a confession?
-2. Then ask: how would a native speaker of the target language express that same feeling and intent in this exact situation? Write THAT — not a rendering of the English words.
-If a line comes out as a word-by-word mirror of the English, it is WRONG. Restructure it. Reword it. Write it from scratch. The English only describes what the character is doing emotionally — your job is to write that moment in the target language as if no English ever existed.
-
-CRITICAL — English constructions that almost ALWAYS need rewriting:
-"Don't you dare [do X]" — this is a CHALLENGE/DARE in English, daring someone to act so the speaker can react. It is NOT a polite prohibition.
-  - WRONG (literal): "جرئت نکن بگی فقط صدای باد بود" (sounds like scolding a child)
-  - RIGHT (idiomatic): "اگه جرئت داری بگو فقط صدای باد بود" ("if you dare, say it was just the wind")
-  - Italian RIGHT: "Provaci a dirmi che era solo vento" or "Non ti azzardare a dirmi..."
-"You can't be serious"
-  - Persian: "شوخی می‌کنی؟" / "جدی نمی‌گی!" (NOT "نمی‌توانی جدی باشی")
-  - Italian: "Stai scherzando?" / "Non dirai sul serio!" / "Ma dai!" (NOT "Non puoi essere serio")
-"What the hell?"
-  - Persian: "این دیگه چیه؟" / "چه خبره اینجا؟"
-  - Italian: "Ma che diavolo?" / "Che cavolo succede?" (NOT "Che inferno?")
-"Give me a break"
-  - Persian: "بیخیال!" / "ولم کن!"
-  - Italian: "Ma piantala!" / "Ma dai!" / "Lasciami in pace!" (NOT "Dammi una pausa")
-"I told you so"
-  - Persian: "بهت گفته بودم!" (with attitude, not flat)
-  - Italian: "Te l'avevo detto!"
-"Are you kidding me?"
-  - Persian: "شوخیت گرفته؟" / "سر کاریه؟"
-  - Italian: "Mi prendi in giro?" / "Mi prendi per i fondelli?"
-
-GENERAL PRINCIPLES:
-- FLUENCY IS EVERYTHING. The reader should feel they are reading their own native comics, not decoded English.
-
-REGISTER MUST MATCH THE FIELD AND THE CHARACTER (applies to ALL target languages):
-- Every language has a spoken/colloquial register and a written/literary register. Use them deliberately, by FIELD and by CHARACTER.
-- DIALOGUE (speech bubbles): spoken/colloquial register is the DEFAULT for everyday characters in everyday scenes — the way real people actually talk, with contractions, elisions, fragments, fillers, and natural rhythm. BUT let the CHARACTER and SCENE drive it: a king on his throne, an ancient priest, a formal scholar, a sacred invocation, a ceremonial address, an archaic spirit, or an old-world villain should use written/literary register even in speech. A child, a peasant joking with friends, a street thief, a soldier in the trenches should be deeply colloquial. STORY AND CHARACTER ALWAYS OVERRIDE THE DEFAULT.
-- CAPTIONS / RECAP / TEASER / NARRATION (narrator voice): use the written/literary register — NEVER colloquial. This is prose that feels published: beautiful, flowing, evocative. Short sentences for tension, longer for atmosphere. Only break this if the story explicitly establishes a colloquial first-person narrator (rare).
-- TITLE: written/literary register, the formal title of the work.
-
-LANGUAGE-SPECIFIC CUES:
-- Persian (Farsi): spoken (محاوره) uses "می‌خوام", "بریم", "نمی‌دونم", "چیه", pro-drop pronouns, colloquial connectors ("خب", "آخه", "یعنی", "هان"); written (کتابی) uses full forms "می‌خواهم", "می‌رویم", "نمی‌دانم", "چیست", literary syntax, fuller pronouns.
-- Italian: spoken uses contractions, elisions (un po', dirgli, dammelo), idiomatic exclamations (Accidenti!, Dai!, Madonna!, Cavolo!, Mamma mia!); written uses fuller forms, subjunctive precision, and the rich literary register of Italian narrative prose.
-- For any other language: apply the same principle — identify its spoken vs. written registers and choose by field and character.
-- Adapt idioms culturally. If an English idiom has no equivalent, convey the same FEELING with a natural expression that lands the same emotional punch.
+REGISTER MUST MATCH THE FIELD AND THE CHARACTER:
+- DIALOGUE (speech bubbles): spoken/colloquial register is the DEFAULT for everyday characters in everyday scenes — the way real people actually talk, with contractions, elisions, fragments, fillers, and natural rhythm. BUT let the CHARACTER and SCENE drive it: a king on his throne, an ancient priest, a formal scholar, a sacred invocation, an archaic spirit, or an old-world villain should use written/literary register even in speech. A child, a peasant joking with friends, a street thief, a soldier in the trenches should be deeply colloquial. STORY AND CHARACTER ALWAYS OVERRIDE THE DEFAULT.
+- CAPTIONS / RECAP / TEASER / NARRATION (narrator voice): written/literary register — NEVER colloquial. This is prose that feels published: beautiful, flowing, evocative. Short sentences for tension, longer for atmosphere.
+- TITLE / SUBTITLE: written/literary register, the formal title of a work.
+<REGISTER_CUES>
 - Comic energy: punchy, dramatic, alive. Exclamations should HIT. Whispers should feel intimate. Action should crackle.
 
 THE NATIVE READER TEST:
-Before finalizing each line, read it aloud in the target language and ask: "Would a native speaker actually say this, in life or in a comic they love?" If it sounds even slightly translated, REWRITE IT.
+Before finalizing each line, read it aloud and ask: "Would a native <LANGUAGE> speaker actually say this, in life or in a comic they love?" If it sounds even slightly stiff or foreign, REWRITE IT.
 
 GLOSSARY:
-- You may receive a "glossary" — a JSON object mapping terms/concepts to their established target-language renderings for this arc. You MUST use them consistently so characters, places, and key concepts stay identical across episodes.
-- After writing, you MUST output an "updated_glossary" — a JSON object with ALL entries (existing ones plus any new terms you coined): character descriptive labels, place names, world-specific concepts, recurring phrases, titles. It will be saved and fed back to you next episode.
-- Persian example: {"Cloud Harbor": "بندر ابرها", "wind roads": "جاده‌های بادی", "MERCHANT": "بازرگان", "Brother Wren": "برادر رِن"}
-- Italian example: {"Cloud Harbor": "Porto delle Nuvole", "wind roads": "strade del vento", "MERCHANT": "MERCANTE"}
+- Use every existing "glossary" entry consistently so characters, places, and key concepts stay identical across episodes.
+- Pass back the COMPLETE glossary as updated_glossary_json (existing entries plus any new terms you coined): character labels, place names, world-specific concepts, recurring phrases, titles.
+- Example: <GLOSSARY_EXAMPLE>
 
 NAMES, SCRIPT, AND SOUND EFFECTS:
-- Character names, place names, and all proper nouns MUST be written in the target language's script. For Persian, transliterate into Persian script (e.g., "Juniper Reed" → "جونیپر رید", "Bracken Hollow" → "براکن هالو", "Brother Wren" → "برادر رِن"). For Italian, names may stay in Latin script, adapting spelling only where natural.
-- In "dialogue", prefix each spoken line with the SPEAKER name in the target script followed by a colon, one line per bubble (e.g., "جونیپر: بریم!"). Translate descriptive speaker labels too: "MERCHANT 1" → "بازرگان ۱" / "MERCANTE 1", "CROWD VOICES" → "صداهای جمعیت" / "VOCI DALLA FOLLA".
-- Sound effects (sfx): use native onomatopoeia that a native comic reader expects — do not transliterate the English.
+<SCRIPT_RULES>
+- In "dialogue", prefix each spoken line with the SPEAKER name followed by a colon, one line per bubble. Render descriptive speaker labels natively too (e.g. <SPEAKER_LABEL_EXAMPLE>).
+- Sound effects (sfx): use native onomatopoeia a native comic reader expects — never transliterate foreign sfx.
 
-OUTPUT — you deliver each language by CALLING assemble_localized (not by printing JSON). The
+OUTPUT — you deliver the edition by CALLING assemble_localized (not by printing JSON). The
 native_panels_json argument is a JSON array like:
 [
-  {"number": 1, "dialogue": "جونیپر: خودشه...\\nرِن: نزدیک‌تر نرو!", "caption": "صد سال بود کسی بندر ابرها را ندیده بود.", "sfx": "بوم!"}
+  <PANEL_EXAMPLE>
 ]
 OUTPUT RULES (for native_panels_json):
 - Exactly one object per panel from the manifest, in the same order, each keeping its original "number".
-- "dialogue": all spoken lines for the panel as ONE string, each bubble on its own line (separated by \\n), prefixed "SPEAKER: " in the target script. Empty string if no one speaks. You choose how many lines — do not feel bound to the number of English lines.
-- "caption": the panel's narration in the target script, or empty string if none.
+- "dialogue": all spoken lines for the panel as ONE string, each bubble on its own line (separated by \\n), prefixed "SPEAKER: ". Empty string if no one speaks. You choose how many lines per panel.
+- "caption": the panel's narration, or empty string if none.
 - "sfx": native onomatopoeia, or empty string if none.
 - A panel may have all three empty (a silent, art-only panel).
-- All text, speaker labels, title/recap/teaser, and glossary values must be in the target script.
-- Pass the COMPLETE glossary as updated_glossary_json (existing entries plus any new terms you coined)."""
+- All text — dialogue, speaker labels, captions, title, subtitle, recap, teaser, glossary values — must be in <LANGUAGE><SCRIPT_NAME>."""
 
-OUTLINE_ADAPTER_INSTRUCTIONS = """\
-You are a literary adaptation specialist. You receive a story outline for a comic book \
-arc and a target language. Your job is to ADAPT (not just translate) the outline so that \
-the story reads naturally and compellingly in the target language.
+_NATIVE_AUTHOR_LANGS = {
+    "it": {
+        "LANGUAGE": "Italian",
+        "LANG_CODE": "it",
+        "RTL_NOTE": "",
+        "SCRIPT_NAME": "",
+        "REGISTER_CUES": (
+            "- Italian cues: spoken Italian uses contractions and elisions (un po', dirgli, dammelo) and "
+            "idiomatic exclamations (Accidenti!, Dai!, Madonna!, Cavolo!, Mamma mia!); written Italian uses "
+            "fuller forms, subjunctive precision, and the rich literary register of Italian narrative prose."
+        ),
+        "GLOSSARY_EXAMPLE": '{"Cloud Harbor": "Porto delle Nuvole", "wind roads": "strade del vento", "MERCHANT": "MERCANTE"}',
+        "SCRIPT_RULES": (
+            "- Character and place names may stay in Latin script, adapting spelling only where natural for "
+            "Italian readers."
+        ),
+        "SPEAKER_LABEL_EXAMPLE": '"MERCHANT 1" → "MERCANTE 1", "CROWD VOICES" → "VOCI DALLA FOLLA"',
+        "PANEL_EXAMPLE": '{"number": 1, "dialogue": "JUNIPER: Eccolo...\\nWREN: Non ti avvicinare!", "caption": "Da cent\'anni nessuno vedeva il Porto delle Nuvole.", "sfx": "BOOM!"}',
+    },
+    "fa": {
+        "LANGUAGE": "Persian (Farsi)",
+        "LANG_CODE": "fa",
+        "RTL_NOTE": ", and right-to-left rendering is mirrored for you automatically",
+        "SCRIPT_NAME": ", in Persian script",
+        "REGISTER_CUES": (
+            "- Persian cues: spoken (محاوره) uses \"می‌خوام\", \"بریم\", \"نمی‌دونم\", \"چیه\", pro-drop pronouns, "
+            "colloquial connectors (\"خب\", \"آخه\", \"یعنی\", \"هان\"); written (کتابی) uses full forms "
+            "\"می‌خواهم\", \"می‌رویم\", \"نمی‌دانم\", \"چیست\", literary syntax, fuller pronouns."
+        ),
+        "GLOSSARY_EXAMPLE": '{"Cloud Harbor": "بندر ابرها", "wind roads": "جاده‌های بادی", "MERCHANT": "بازرگان", "Brother Wren": "برادر رِن"}',
+        "SCRIPT_RULES": (
+            "- ALL proper nouns must be written in Persian script: transliterate character and place names "
+            "(e.g. \"Juniper Reed\" → \"جونیپر رید\", \"Bracken Hollow\" → \"براکن هالو\", \"Brother Wren\" → \"برادر رِن\")."
+        ),
+        "SPEAKER_LABEL_EXAMPLE": '"MERCHANT 1" → "بازرگان ۱", "CROWD VOICES" → "صداهای جمعیت"',
+        "PANEL_EXAMPLE": '{"number": 1, "dialogue": "جونیپر: خودشه...\\nرِن: نزدیک‌تر نرو!", "caption": "صد سال بود کسی بندر ابرها را ندیده بود.", "sfx": "بوم!"}',
+    },
+}
 
-You will receive a JSON with:
-- "task": "adapt_story_outline"
-- "target_language": the language to adapt into
-- "story_outline": the full English story outline
 
-ADAPTATION RULES:
-- This is NOT a word-for-word translation. Rewrite the outline as if you were a native \
-  author planning this story for readers of that language.
-- Character names: transliterate into the target script (Persian script for Farsi, \
-  Latin script for Italian). Ensure names are easy to read and pronounce for native readers.
-- Dialogue examples in the outline should feel natural in the target language — use \
-  idioms, sentence structures, and cultural references that resonate.
-- Narration style should match the literary tradition of the target language: \
-  Persian prose can be more lyrical and poetic; Italian can be more expressive and dramatic.
-- Cultural references and metaphors: adapt to equivalents that a native reader would \
-  connect with. If an English metaphor doesn't work, find one that carries the same meaning.
-- Keep ALL plot points, character arcs, episode breakdowns, themes, and twists intact. \
-  The STORY stays the same — the TELLING adapts.
-- The episode-by-episode breakdown must be fully adapted, with each episode's description \
-  written in compelling target-language prose.
-
-OUTPUT:
-Respond with ONLY the adapted story outline text in the target language. No JSON wrapping, \
-no explanation — just the outline content, ready to be stored and used as a reference \
-for translators working on each episode.\
-"""
+def _native_author_instructions(lang_code: str) -> str:
+    """Fill the native-author template for one language via token replacement (the template is
+    full of JSON braces, so str.format is a hazard here)."""
+    text = NATIVE_AUTHOR_TEMPLATE
+    for key, value in _NATIVE_AUTHOR_LANGS[lang_code].items():
+        text = text.replace(f"<{key}>", value)
+    return text
 
 DIRECTOR_INSTRUCTIONS = """\
 You are the Director of an AI-generated daily comic strip series.
@@ -691,9 +703,13 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
     # plan/script MESSAGES but not the previous stage's tool-call noise (esp. the
     # Cartoonist's image-generation turns). Agents pull structured context via tools.
 
-    reteller = Agent(
-        name="Reteller",
-        instructions=prompt_with_handoff_instructions(RETELLER_INSTRUCTIONS),
+    # The native authors are BLIND: invoked via as_tool they start from a fresh context that
+    # contains only their kickoff line — never the English script. They pull the beat sheet,
+    # native outline, and glossary through get_localization_brief and assemble their edition
+    # themselves. The creative writing (and its temperature) lives here now.
+    italian_author = Agent(
+        name="ItalianAuthor",
+        instructions=_native_author_instructions("it"),
         tools=[
             agent_tools["get_localization_brief"],
             agent_tools["save_local_outline"],
@@ -701,6 +717,51 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
         ],
         model=model,
         model_settings=ModelSettings(temperature=0.9),
+    )
+
+    persian_author = Agent(
+        name="PersianAuthor",
+        instructions=_native_author_instructions("fa"),
+        tools=[
+            agent_tools["get_localization_brief"],
+            agent_tools["save_local_outline"],
+            agent_tools["assemble_localized"],
+        ],
+        model=model,
+        model_settings=ModelSettings(temperature=0.9),
+    )
+
+    # Keeps the name "Reteller" so the Cartoonist's transfer_to_Reteller handoff is unchanged,
+    # but the agent is now the Localization Director: it distills the English script into a
+    # language-neutral beat sheet (save_beat_sheet rejects English echoes) and delegates the
+    # actual writing to the blind native authors. Low temperature: this is structural
+    # extraction, not creative writing — and a cooler head echoes the script less.
+    reteller = Agent(
+        name="Reteller",
+        instructions=prompt_with_handoff_instructions(LOCALIZATION_DIRECTOR_INSTRUCTIONS),
+        tools=[
+            agent_tools["save_beat_sheet"],
+            italian_author.as_tool(
+                tool_name="write_italian_edition",
+                tool_description=(
+                    "Have the blind native Italian author write and assemble the Italian edition "
+                    "from the saved beat sheet. Call ONLY after save_beat_sheet succeeds. Pass a "
+                    "one-line kickoff (plus, on a retry, a short note of what to fix)."
+                ),
+                max_turns=20,
+            ),
+            persian_author.as_tool(
+                tool_name="write_persian_edition",
+                tool_description=(
+                    "Have the blind native Persian author write and assemble the Persian edition "
+                    "from the saved beat sheet. Call ONLY after save_beat_sheet succeeds. Pass a "
+                    "one-line kickoff (plus, on a retry, a short note of what to fix)."
+                ),
+                max_turns=20,
+            ),
+        ],
+        model=model,
+        model_settings=ModelSettings(temperature=0.3),
     )
 
     cartoonist = Agent(
@@ -860,10 +921,20 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
             reteller_kickoff = (
                 f"=== DIRECTOR'S EPISODE PLAN ===\n{plan}\n\n"
                 f"=== STORYTELLER'S SCRIPT ===\n{script}\n\n"
-                "Now produce the Italian ('it') and Persian ('fa') editions. For EACH language: "
-                "call get_localization_brief, write the native retelling, then call assemble_localized."
+                "Now produce the Italian ('it') and Persian ('fa') editions: write the "
+                "language-neutral beat sheet, call save_beat_sheet, then call "
+                "write_italian_edition and write_persian_edition."
             )
             await _run(reteller, reteller_kickoff, "Reteller (recovery)")
+        # Second-tier backstop: the beat sheet exists but a nested author run failed — run
+        # that author directly (fresh context, still blind) instead of redoing the whole stage.
+        if state.get("beat_sheet"):
+            for author, key, label in (
+                (italian_author, "html_it", "ItalianAuthor (recovery)"),
+                (persian_author, "html_fa", "PersianAuthor (recovery)"),
+            ):
+                if state.get("html_en") and not state.get(key):
+                    await _run(author, "Write and assemble your edition from the saved beat sheet now.", label)
         return plan, script
 
     director_plan, storyteller_script = asyncio.run(_drive())

@@ -38,11 +38,15 @@ flowchart TB
     OC["🔎 OriginalityCritic · temp 0.2<br/>(as_tool: check_arc_originality)"]
     ST["✍️ Storyteller · temp 0.5<br/>panel-by-panel script"]
     CART["🎨 Cartoonist<br/>character sheet · panels · assemble (en)"]
-    RET["🗣️ Reteller · temp 0.9<br/>retell it + fa · outline + glossary"]
+    RET["🗣️ Reteller (Localization Director) · temp 0.3<br/>language-neutral beat sheet · no English wording"]
+    IA["✍️ ItalianAuthor · temp 0.9<br/>(as_tool: write_italian_edition — blind)"]
+    PA["✍️ PersianAuthor · temp 0.9<br/>(as_tool: write_persian_edition — blind)"]
     DIR -->|transfer_to_Storyteller| ST
     ST -->|transfer_to_Cartoonist| CART
     CART -->|transfer_to_Reteller| RET
     DIR -. as_tool .-> OC
+    RET -. as_tool .-> IA
+    RET -. as_tool .-> PA
   end
 
   REC["🛟 Deterministic recovery<br/>if a stage's artifact (html_en / html_it / html_fa)<br/>is missing in state, run that stage directly"]
@@ -52,7 +56,7 @@ flowchart TB
     WS["WebSearchTool"]
     ARCT["Arc tools<br/>get_arc_status · get_recent_arcs<br/>start_new_arc · end_current_arc · save_story_outline"]
     IMGT["Cartoonist tools<br/>get_cartoonist_brief · generate_character_sheet<br/>generate_panel_image · mark_key_panel · assemble_layout"]
-    LOCT["Reteller tools<br/>get_localization_brief · save_local_outline · assemble_localized"]
+    LOCT["Localization tools<br/>save_beat_sheet (Director) · get_localization_brief<br/>save_local_outline · assemble_localized (authors)"]
   end
 
   subgraph STORE["Azure Storage — ComicBook/azurestorage.py"]
@@ -117,7 +121,8 @@ flowchart LR
   C --> CS["character sheet<br/>once per arc (cached on arc)"]
   CS --> PI["panel images<br/>refs: sheet → key panels → prior-episode anchors"]
   PI --> L["assemble_layout → html_en in state"]
-  L -->|handoff| R["🗣️ Reteller → it + fa<br/>get_localization_brief · (ep.1) save_local_outline · assemble_localized"]
+  L -->|handoff| R["🗣️ Reteller (Localization Director)<br/>beat sheet → save_beat_sheet (English-echo guard)"]
+  R -. as_tool .-> NA["✍️ ItalianAuthor / PersianAuthor (blind)<br/>get_localization_brief · (ep.1) save_local_outline · assemble_localized"]
   D -. as_tool .-> OC["🔎 OriginalityCritic<br/>verdict ok / too_similar + guidance"]
 ```
 
@@ -153,7 +158,8 @@ sequenceDiagram
         AG->>AOAI: Cartoonist — character sheet + panels → assemble_layout (html_en)
         AOAI-->>B: upload panel images
         Note over AG,AOAI: Cartoonist → transfer_to_Reteller
-        AG->>AOAI: Reteller — it + fa (get_localization_brief, assemble_localized) + glossary, (ep.1) outline
+        AG->>AOAI: Reteller (Localization Director) — beat sheet → save_beat_sheet (rejects English echoes)
+        AG->>AOAI: ItalianAuthor + PersianAuthor (as_tool, blind) — get_localization_brief, assemble_localized + glossary, (ep.1) outline
         Note over AG: recovery — any stage whose artifact is missing is run directly
         AG-->>P: html, html_it, html_fa, arc
         P->>T: save_episode (+ arc meta)
@@ -184,13 +190,19 @@ sequenceDiagram
 - **Character consistency.** The Cartoonist generates one **character reference sheet** per arc
   (cached on the arc), then draws each panel sequentially with references (sheet → mid-arc key
   panels → prior-episode anchors) via Azure OpenAI image editing.
-- **Multi-language.** English is native. The **Reteller** produces both Italian and Persian in one
-  run via tools: `get_localization_brief` (fixed-panel manifest + outlines + glossary),
-  `save_local_outline` (adapts + saves the localized outline on episode 1 — there is no separate
-  OutlineAdapter anymore), and `assemble_localized` (maps the native text onto the fixed panels).
-  A per-language **glossary** keeps names/terms consistent; the same panel images are reused.
+- **Multi-language (blind native authors).** English is native. The **Reteller** is the
+  **Localization Director**: it reads the English plan/script and distills a language-neutral
+  **beat sheet** (per panel: what the art depicts, each speaker's intent/emotion, `must_land`
+  plot facts). `save_beat_sheet` deterministically **rejects** any sheet that echoes the English
+  script's wording (6-word n-gram check, speaker names whitelisted). The **ItalianAuthor** and
+  **PersianAuthor** are invoked via `as_tool` with a fresh context — they NEVER see English
+  dialogue, only the beat sheet via `get_localization_brief` (panel grid + native outline +
+  glossary; the English outline is exposed only on episode 1 for `save_local_outline`), and
+  assemble their edition with `assemble_localized`. This firewall exists because writers who
+  could see the English wording produced literal translations. A per-language **glossary** keeps
+  names/terms consistent; the same panel images are reused.
 - **Consistent localized title.** The localized **main title comes from the ARC** (stored once as
-  `title_{lang}` and reused every episode); the Reteller's per-episode native title is shown as a
+  `title_{lang}` and reused every episode); each native author's per-episode title is shown as a
   **subtitle** under it. Backward compatible (old episodes keep their HTML).
 - **Readability guard.** `_assemble_html` runs the resolved color theme through a contrast check;
   any text color that doesn't contrast with its box (caption, recap, speech bubble, title, teaser)

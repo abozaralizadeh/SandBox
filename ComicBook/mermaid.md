@@ -60,18 +60,29 @@ flowchart TD
 
     STORY ==>|"transfer_to_Cartoonist\n(script in conversation)"| TOON
 
-    %% ── Reteller ─────────────────────────────────────────────────────────
-    subgraph TRANS ["🗣️  Reteller   temp=0.9   (one run, both languages: IT then FA)"]
-        T_resp["Responsibility\n─────────────────────────\n• RETELLS the episode natively over the\n  shared images — not a translation\n• Full freedom over WORDS & pacing; faithful\n  to the fixed art + every plot beat\n• MAIN title = the ARC title (consistent);\n  episode title becomes a SUBTITLE\n• ep.1: adapts + saves the localized outline\n  (no separate OutlineAdapter agent)\n• Maintains the per-language glossary\n• Last stage — does NOT hand off"]
+    %% ── Reteller (Localization Director) + blind native authors ─────────
+    subgraph TRANS ["🗣️  Reteller = Localization Director   temp=0.3   (writes NO prose — briefs the authors)"]
+        T_resp["Responsibility\n─────────────────────────\n• Distills the English plan+script into a\n  language-neutral BEAT SHEET: per panel\n  art, speaker intents, must_land facts\n• NEVER quotes English wording —\n  save_beat_sheet REJECTS echoes\n  (6-word n-gram guard, names whitelisted)\n• Then calls the two author tools\n• Last stage — does NOT hand off"]
 
-        subgraph T_TOOLS ["Tools (per language)"]
+        subgraph T_TOOLS ["Tools"]
             direction TB
-            RT1["get_localization_brief\n— manifest + outlines + glossary\n+ arc_title_local / arc_title_en"]
-            RT2["save_local_outline\n— ep.1 only, when none exists"]
-            RT3["assemble_localized\n— title + subtitle + native panels\n→ writes html_it / html_fa to state"]
-            RT1 --> RT2 --> RT3
+            RT0["save_beat_sheet\n— validates coverage + English-echo guard\n→ writes beat_sheet to state"]
+            RT_IT["write_italian_edition\n(ItalianAuthor as_tool · temp 0.9 · BLIND)"]
+            RT_FA["write_persian_edition\n(PersianAuthor as_tool · temp 0.9 · BLIND)"]
+            RT0 --> RT_IT --> RT_FA
         end
     end
+
+    subgraph AUTH ["✍️  Native authors (fresh context — the English script never reaches them)"]
+        direction TB
+        RT1["get_localization_brief\n— beat sheet + panel grid + native outline\n+ glossary + arc_title_local / arc_title_en\n(english_outline only on ep.1)"]
+        RT2["save_local_outline\n— ep.1 only, when none exists"]
+        RT3["assemble_localized\n— title + subtitle + native panels\n→ writes html_it / html_fa to state"]
+        RT1 --> RT2 --> RT3
+    end
+
+    RT_IT -. "fresh context" .-> AUTH
+    RT_FA -. "fresh context" .-> AUTH
 
     TOON ==>|"transfer_to_Reteller\n(plan + script in conversation)"| TRANS
 
@@ -137,7 +148,8 @@ flowchart TD
 | **OriginalityCritic** | Judges a candidate arc vs recent arcs | 0.2 | get_recent_arcs | no — invoked via `as_tool` |
 | **Storyteller** | Panel-by-panel script writer | 0.5 | — | → Cartoonist |
 | **Cartoonist** | Image generation + HTML assembly (en) | 1.0 | get_cartoonist_brief, generate_character_sheet, generate_panel_image, mark_key_panel, assemble_layout | → Reteller |
-| **Reteller** | Native retelling IT + FA (one run) | 0.9 | get_localization_brief, save_local_outline, assemble_localized | terminus |
+| **Reteller (Localization Director)** | Language-neutral beat sheet (no English wording) + delegates to blind authors | 0.3 | save_beat_sheet, write_italian_edition (as_tool), write_persian_edition (as_tool) | terminus |
+| **ItalianAuthor / PersianAuthor** | Blind native writing of one edition from the beat sheet | 0.9 | get_localization_brief, save_local_outline, assemble_localized | (as_tool of Reteller) |
 
 ## Key Design Decisions
 
@@ -146,12 +158,11 @@ flowchart TD
 | **Handoff chain + deterministic recovery** | Agents collaborate via SDK handoffs (Director→Storyteller→Cartoonist→Reteller); if a model fails to call its transfer tool, the pipeline runs the missing stage directly so a comic always ships |
 | **No LLM calls inside a tool** | A `@function_tool` does only deterministic work; model-reasoning steps are Agents reached via `as_tool` (OriginalityCritic) or handoffs |
 | **Three-layer originality guard** | Prompt mandates search→check→retry; the OriginalityCritic (as_tool) judges core-story similarity; `start_new_arc` refuses a recently-used art style |
-| **Temperature split** | Director 1.2 (creative engine) and OriginalityCritic 0.2 (judge); Storyteller 0.5 faithfully executes the plan; Reteller 0.9 |
+| **Temperature split** | Director 1.2 (creative engine) and OriginalityCritic 0.2 (judge); Storyteller 0.5 faithfully executes the plan; Localization Director 0.3 (extraction, not prose); native authors 0.9 (the creative writing) |
 | Panels generated **sequentially** | Each finished panel URL feeds as a reference into the next call, maintaining visual consistency |
 | Character sheet uses **ALL arc characters** at `quality=high` | Generated once on ep. 1 and cached — must cover every character who ever appears |
 | **key_panels** list on the arc | Mid-arc characters get a dedicated reference panel persisted across future episodes |
-| **Reteller does both languages in one run** | Retells IT then FA via tools; adapts + saves the localized outline on ep.1 itself (the separate OutlineAdapter agent was removed) |
-| **Reteller retells natively** | Fragment translation forced English's text architecture onto every language; retelling lets each language restructure dialogue/captions. Box POSITIONS stay fixed (caption top, bubbles bottom, RTL-aware) |
+| **Blind native authors** | Writers who could see the English script produced literal translations, no matter how hard the prompt said "retell". Now the Localization Director distills a language-neutral beat sheet (save_beat_sheet REJECTS English echoes) and the Italian/Persian authors write from it in a fresh as_tool context — English dialogue never reaches them. Each author adapts + saves the localized outline on ep.1 (english_outline is exposed only then). Box POSITIONS stay fixed (caption top, bubbles bottom, RTL-aware) |
 | **Localized title from the ARC + episode subtitle** | The main title is the arc title (stored as `title_{lang}`, consistent every episode); the episode's native title is a subtitle under it |
 | **Readability guard** | `_assemble_html` flips any low-contrast text color to near-black/near-white so a box is never light-on-light or dark-on-dark |
 | **DEBUG / DEBUG_SAVE** | `DEBUG` isolates to an `arc_debug` partition (`debugarc_*` ids, `generation_lock_debug`) so local tests never touch production; `DEBUG_SAVE=false` is a pure dry run |

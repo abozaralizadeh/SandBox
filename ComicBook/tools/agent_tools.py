@@ -22,8 +22,10 @@ from ComicBook.azurestorage import (
 from ComicBook.helpers import (
     _apply_reteller_output,
     _assemble_html,
-    _build_reteller_payload,
+    _build_panel_manifest,
+    _find_english_leaks,
     _normalize,
+    _normalize_words,
     _parse_arc_theme,
     _summarize_episodes,
 )
@@ -391,21 +393,71 @@ def build_comic_tools(state: Dict[str, Any], target_date: datetime) -> Dict[str,
         }
 
     @function_tool
+    async def save_beat_sheet(beat_sheet_json: str) -> Dict[str, Any]:
+        """Save the language-neutral BEAT SHEET the native authors write from. beat_sheet_json is a
+        JSON object: {"panels": [{"number", "art", "beats": [{"speaker", "intent"}], "must_land":
+        [...]}], "recap_beats": [...], "teaser_beat": "...", "subtitle_idea": "..."}. It must cover
+        every panel and describe INTENT only — it is REJECTED if it echoes the English script's
+        wording, or if panel numbers do not match the episode's panels."""
+        logger.info("TOOL save_beat_sheet called (len=%d)", len(beat_sheet_json or ""))
+        panels = state.get("assembled_panels", [])
+        if not panels:
+            return {"error": "No assembled panels yet — the episode layout must be assembled first."}
+        try:
+            sheet = json.loads(beat_sheet_json)
+        except (json.JSONDecodeError, TypeError) as exc:
+            return {"error": f"Invalid beat_sheet_json: {exc}"}
+        if not isinstance(sheet, dict) or not isinstance(sheet.get("panels"), list):
+            return {"error": "beat_sheet_json must be a JSON object with a 'panels' array."}
+        expected = [p.get("number", i + 1) for i, p in enumerate(panels)]
+        got = [bp.get("number") for bp in sheet["panels"] if isinstance(bp, dict)]
+        missing = [n for n in expected if n not in got]
+        extra = [n for n in got if n not in expected]
+        if missing or extra:
+            return {
+                "error": "Beat sheet panels must exactly match the episode's panels.",
+                "missing_panel_numbers": missing,
+                "unexpected_panel_numbers": extra,
+                "expected_panel_numbers": expected,
+            }
+        # Echo guard: the authors must never see script wording, so the beat sheet may not
+        # contain it. Speaker/character names are legitimately repeated — whitelist them.
+        whitelist: set = set()
+        english_texts = []
+        for p in panels:
+            dialogue = str(p.get("dialogue", ""))
+            for line in dialogue.splitlines():
+                if ":" in line:
+                    whitelist.update(_normalize_words(line.split(":", 1)[0]))
+            english_texts.extend([dialogue, p.get("caption", "")])
+        english_texts.extend([state.get("assembled_recap", ""), state.get("assembled_teaser", "")])
+        leaks = _find_english_leaks(beat_sheet_json, english_texts, whitelist)
+        if leaks:
+            logger.info("  -> beat sheet REJECTED: %d echoed phrases", len(leaks))
+            return {
+                "error": "REJECTED — the beat sheet echoes the English script. Rewrite the flagged "
+                         "passages as intent/emotion descriptions in your own words (what the "
+                         "character means and feels, what fact must land), then save again.",
+                "echoed_phrases": leaks,
+            }
+        state["beat_sheet"] = sheet
+        logger.info("  -> beat sheet saved (%d panels)", len(sheet["panels"]))
+        return {"status": "saved", "panel_count": len(sheet["panels"])}
+
+    @function_tool
     async def get_localization_brief(target_language: str) -> Dict[str, Any]:
-        """For a target language ('it' or 'fa'), return the FIXED-panel manifest (panel numbers,
-        sizes, and the English dialogue/caption/sfx as INTENT reference only), the English story
-        outline, any existing localized outline, and the arc glossary. Call this BEFORE writing the
-        native retelling for that language."""
+        """For a target language ('it' or 'fa'), return the language-neutral beat sheet (your ONLY
+        source for the story), the fixed panel grid (numbers and sizes — the artwork is already
+        drawn), any existing localized story outline, and the arc glossary and title. Call this
+        BEFORE writing the native edition."""
         lang = "it" if str(target_language).lower().startswith("it") else "fa"
         logger.info("TOOL get_localization_brief called (lang=%s)", lang)
+        beat_sheet = state.get("beat_sheet")
+        if not beat_sheet:
+            return {"error": "No beat sheet saved yet — the Localization Director must call "
+                             "save_beat_sheet before the native authors can write."}
         a = state["arc"]
-        panels = state.get("assembled_panels", [])
-        manifest = _build_reteller_payload(
-            panels,
-            state.get("assembled_recap", ""),
-            state.get("assembled_teaser", ""),
-            title=(a.get("title", "") if a else ""),
-        )
+        manifest = _build_panel_manifest(state.get("assembled_panels", []))
         local_outline = ""
         english_outline = ""
         glossary: Dict[str, Any] = {}
@@ -413,12 +465,16 @@ def build_comic_tools(state: Dict[str, Any], target_date: datetime) -> Dict[str,
         arc_title_local = ""
         if a:
             local_outline = a.get(f"story_outline_{lang}", "") or get_arc_story_outline(a, lang=lang)
-            english_outline = get_arc_story_outline(a)
+            # The English outline is exposed ONLY for the episode-1 adaptation step; once a
+            # native outline exists it is the sole reference, so no English prose leaks in.
+            if not local_outline:
+                english_outline = get_arc_story_outline(a)
             glossary = get_arc_glossary(a, lang)
             arc_title_en = a.get("title", "")
             arc_title_local = a.get(f"title_{lang}", "")
         return {
             "lang_code": lang,
+            "beat_sheet": beat_sheet,
             "manifest": manifest,
             "english_outline": english_outline,
             "local_outline": local_outline,
@@ -517,6 +573,7 @@ def build_comic_tools(state: Dict[str, Any], target_date: datetime) -> Dict[str,
         "mark_key_panel": mark_key_panel,
         "assemble_layout": assemble_layout,
         "get_cartoonist_brief": get_cartoonist_brief,
+        "save_beat_sheet": save_beat_sheet,
         "get_localization_brief": get_localization_brief,
         "save_local_outline": save_local_outline,
         "assemble_localized": assemble_localized,

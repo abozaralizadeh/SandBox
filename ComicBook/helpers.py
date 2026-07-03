@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import List
 
 # Pure, stateless helpers shared by the pipeline (agents.py) and the agent tools
@@ -359,23 +360,49 @@ def _assemble_html(
 </div>"""
 
 
-def _build_reteller_payload(panels: list, recap: str, teaser: str, title: str = "") -> dict:
-    """Build the per-panel manifest the Reteller rewrites natively.
+def _build_panel_manifest(panels: list) -> dict:
+    """Build the fixed-layout panel manifest for the native authors.
 
-    The English fields are INTENT REFERENCE ONLY — the Reteller may restructure them freely.
-    Per-language fields (target_language, story_context, story_outline_local, glossary) are
-    added by the caller in the language loop.
+    Deliberately carries NO English text — only the panel grid (numbers and sizes). The
+    native authors write from the Localization Director's beat sheet; English wording must
+    never reach them, or it anchors the retelling into literal translation.
     """
     manifest = []
     for i, p in enumerate(panels):
         manifest.append({
             "number": p.get("number", i + 1),
             "size": p.get("size", "square"),
-            "en_dialogue": p.get("dialogue", ""),
-            "en_caption": p.get("caption", ""),
-            "en_sfx": p.get("sfx", ""),
         })
-    return {"title_en": title, "recap_en": recap, "teaser_en": teaser, "panels": manifest}
+    return {"panel_count": len(manifest), "panels": manifest}
+
+
+def _normalize_words(text: str) -> list:
+    """Lowercase, strip punctuation, and split into words for n-gram comparison."""
+    cleaned = re.sub(r"[^\w\s']", " ", str(text).lower())
+    return cleaned.split()
+
+
+def _find_english_leaks(beat_sheet_text: str, english_texts: list, whitelist: set = frozenset(), n: int = 6) -> list:
+    """Return English script phrases (contiguous n-word runs) that appear verbatim in the beat sheet.
+
+    The beat sheet must describe intent, never echo script wording. Runs made mostly of
+    whitelisted words (character/speaker names, which the beat sheet legitimately repeats)
+    are ignored to avoid false positives.
+    """
+    wl = {w.lower() for w in whitelist}
+    sheet_words = _normalize_words(beat_sheet_text)
+    sheet_grams = {" ".join(sheet_words[i:i + n]) for i in range(len(sheet_words) - n + 1)}
+    leaks = []
+    for text in english_texts:
+        words = _normalize_words(text)
+        for i in range(len(words) - n + 1):
+            run = words[i:i + n]
+            if sum(1 for w in run if w in wl) >= n - 1:
+                continue
+            gram = " ".join(run)
+            if gram in sheet_grams and gram not in leaks:
+                leaks.append(gram)
+    return leaks
 
 
 def _apply_reteller_output(panels: list, recap: str, teaser: str, native: dict, title: str = "") -> tuple:
