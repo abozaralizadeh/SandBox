@@ -40,7 +40,7 @@ local prune.
 
 | Store | Name / keys | Contents |
 |---|---|---|
-| Blob | `live.json` | Full current snapshot: KPIs, positions, decision feed, equity tail, notes, research |
+| Blob | `live.json` | Full current snapshot: KPIs, positions, coin universe, decision feed, equity tail, notes, research |
 | Blob | `rollups/{daily,weekly,monthly,alltime}.json` | Pre-bucketed equity series + KPIs |
 | Table | PK `equity`, RK `{day:08d}` | `indexClose`, `drawdownPct`, optional `dayRealizedPnl` |
 | Table | PK `decision`, RK `{ts:010d}-{symbol}` | `data` = JSON of one sanitized decision |

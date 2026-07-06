@@ -138,6 +138,7 @@
     .panel-title.t-cyan .tick { background: var(--cyan); box-shadow: 0 0 10px rgba(45,212,255,0.4); }
     .panel-title.t-violet .tick { background: var(--violet); box-shadow: 0 0 10px rgba(167,139,250,0.4); }
     .panel-title.t-amber .tick { background: var(--amber); box-shadow: 0 0 10px rgba(255,176,32,0.4); }
+    .panel-title.t-green .tick { background: var(--up); box-shadow: 0 0 10px rgba(0,230,168,0.4); }
 
     /* segmented control */
     .seg { display: inline-flex; background: var(--s2); border: 1px solid var(--border); border-radius: 9px; padding: 3px; gap: 2px; }
@@ -372,6 +373,12 @@
         <div class="panel-head"><div class="panel-title t-amber"><span class="tick"></span> Open positions</div></div>
         <div id="positionsBox"><div class="empty">No open positions</div></div>
       </div>
+    </div>
+
+    <!-- Coin universe (what the bot is currently watching / trading) -->
+    <div class="panel">
+      <div class="panel-head"><div class="panel-title t-green"><span class="tick"></span> Coin universe</div></div>
+      <div id="coinsBox"><div class="empty">No coins yet</div></div>
     </div>
 
     <!-- Decision feed + Research/Supervisor -->
@@ -803,6 +810,24 @@
       el('researchPinned').innerHTML = html;
     }
 
+    function renderCoins(coins) {
+      const box = el('coinsBox');
+      if (!box) return;
+      if (!coins || !coins.length) { box.innerHTML = '<div class="empty">No coins yet</div>'; return; }
+      const active = coins.filter(c => (c.status || 'active') === 'active');
+      const removed = coins.filter(c => (c.status || 'active') !== 'active');
+      const chip = (c, on) => {
+        const sym = esc((c.symbol || '').replace('-USDT', ''));
+        const tip = [c.reason, c.ts ? relTime(c.ts) : ''].filter(Boolean).join(' · ');
+        const style = on ? 'color:var(--up)' : 'color:var(--text-2);opacity:.65';
+        return `<span class="chip"${tip ? ` title="${esc(tip)}"` : ''} style="${style}">${coinIcon(c.symbol, 13)}${sym}</span>`;
+      };
+      let html = '';
+      if (active.length) html += `<div class="note"><div class="who">Active · trading now</div><div class="chips">${active.map(c => chip(c, true)).join('')}</div></div>`;
+      if (removed.length) html += `<div class="note"><div class="who">Recently removed</div><div class="chips">${removed.map(c => chip(c, false)).join('')}</div></div>`;
+      box.innerHTML = html || '<div class="empty">No coins yet</div>';
+    }
+
     function renderNotes(notes) {
       const box = el('notesBox');
       notes = notes || {};
@@ -877,6 +902,7 @@
         renderVenue(s.kpis);
         if (!window._tradesLoaded) { renderTrades(s.trades); }   // fast seed; loadTrades() pulls fuller history
         renderPositions(s.positions);
+        renderCoins(s.coins);
         renderFeed(s.feed);
         renderResearch(s.research);
         renderNotes(s.notes);
@@ -923,7 +949,7 @@
       el('modePill').className = 'pill muted';
       el('modePill').innerHTML = '<span class="dot" style="background:var(--amber)"></span> warming up';
       el('updatedPill').textContent = 'no data yet';
-      ['feedBox','positionsBox','researchPlans','notesBox'].forEach(id => {
+      ['feedBox','positionsBox','coinsBox','researchPlans','notesBox'].forEach(id => {
         el(id).innerHTML = '<div class="empty">Agents warming up… data appears once the bot publishes its first snapshot.</div>';
       });
       renderEquity([]); renderDonut({}); renderTrades([]);
