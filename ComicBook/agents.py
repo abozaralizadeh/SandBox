@@ -7,14 +7,18 @@ import os
 from datetime import datetime, timezone
 from typing import Any, Dict, List
 
-from agents import Agent, ModelSettings, Runner, OpenAIResponsesModel, WebSearchTool, handoff, set_tracing_disabled
+from agents import Agent, ModelSettings, Runner, OpenAIResponsesModel, WebSearchTool, handoff, set_trace_processors
 from agents.extensions.handoff_filters import remove_all_tools
 from agents.extensions.handoff_prompt import prompt_with_handoff_instructions
 from agents.items import ItemHelpers, MessageOutputItem
 from langsmith import traceable, trace
-from langsmith.wrappers import wrap_openai
+from langsmith.wrappers import OpenAIAgentsTracingProcessor
 
-set_tracing_disabled(True)
+# Route the OpenAI Agents SDK's native tracing into LangSmith. This is what produces the
+# detailed step tree (agent spans, tool calls, handoffs, per-turn generations) instead of a
+# flat list of raw LLM calls. We do NOT disable SDK tracing or wrap the client with
+# wrap_openai — that would strip the agent/tool structure and only surface HTTP-level calls.
+set_trace_processors([OpenAIAgentsTracingProcessor()])
 from openai import AsyncAzureOpenAI
 
 from ComicBook.azurestorage import (
@@ -60,7 +64,10 @@ def _build_openai_client() -> AsyncAzureOpenAI:
         azure_deployment=os.environ.get("AZURE_OPENAI_MODEL", "gpt-4o"),
         timeout=_LLM_TIMEOUT,
     )
-    return wrap_openai(client)
+    # No wrap_openai: the Agents SDK trace processor (set above) already records every
+    # generation as a proper LLM span under its agent. Wrapping here too would double-log
+    # each call and detach it from the agent/tool tree.
+    return client
 
 
 

@@ -68,7 +68,7 @@ flowchart TB
   subgraph AZ["Azure OpenAI + LangSmith"]
     CHAT["Chat model (configurable, e.g. gpt-5.4)<br/>all agents · timeout COMICBOOK_LLM_TIMEOUT (1h)"]
     IMG["Image model (gpt-image)<br/>AZURE_OPENAI_*_DALLE · timeout COMICBOOK_IMAGE_TIMEOUT (1h)"]
-    LSM["LangSmith<br/>wrap_openai + @traceable"]
+    LSM["LangSmith<br/>OpenAIAgentsTracingProcessor + @traceable"]
   end
 
   CV --> RC
@@ -226,4 +226,7 @@ sequenceDiagram
   definitions and `run_comic_pipeline` in `ComicBook/agents.py`; orchestration/caching/lock in
   `ComicBook/prompt.py`.
 - **Separate deployments.** Chat (configurable, e.g. `gpt-5.4`) for the agents; image (`gpt-image`)
-  via the `AZURE_OPENAI_*_DALLE` resource. LangSmith traces the run (`wrap_openai` + `@traceable`).
+  via the `AZURE_OPENAI_*_DALLE` resource. LangSmith traces the run via the Agents SDK's native
+  tracing routed through `OpenAIAgentsTracingProcessor` (set with `set_trace_processors`), nested
+  under the `@traceable` pipeline / `trace` stage wrappers — so the full agent · tool · handoff ·
+  generation tree shows up, not just flat LLM calls.
