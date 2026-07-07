@@ -5,7 +5,6 @@ never blocks. Status + single-flight lock live in Azure Tables, so any gunicorn 
 can serve the polling endpoint regardless of which worker owns the generating thread.
 """
 import asyncio
-import json
 import logging
 import threading
 from datetime import datetime, timezone
@@ -35,14 +34,17 @@ def _flat(date) -> str:
 
 
 def _decision_text_for(flat_date: str):
-    """The anchor speaks the GenBox decision's 'output' field for that date."""
+    """The anchor speaks the GenBox decision's 'output' field for that date.
+
+    Uses the SAME tolerant extraction as the on-screen text path (`_decision_output`),
+    which salvages the 'output' from JSON the model truncated at its token limit. A strict
+    `json.loads` here would return None for those rows, silently skipping BOTH video and
+    narration while the (salvaged) text still displays — the failure mode this avoids."""
     row = get_row("assistant", flat_date)
     if not row:
         return None
-    try:
-        return json.loads(row["content"].strip().replace("\n", " "))["output"]
-    except Exception:
-        return None
+    from GenBox.prompt import _decision_output
+    return _decision_output(row.get("content")) or None
 
 
 def _is_stale(meta) -> bool:
