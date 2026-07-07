@@ -106,15 +106,23 @@ async def create_video_job(resource: dict, prompt: str, seconds: int, size: str 
     return await _post(_videos_url(resource), resource, parts)
 
 
-async def remix_video_job(resource: dict, base_job_id: str, prompt: str, seconds: int) -> str:
+async def remix_video_job(resource: dict, base_job_id: str, prompt: str, seconds: int = None) -> str:
     """Remix a previously completed video (on the SAME resource that created it).
 
     Remix reuses the source video's framework, scene transitions, and visual layout while
     applying the change in ``prompt`` — the consistency mechanism that needs no face images
     or gated character access. Returns the new job id.
+
+    Unlike ``create``, the remix endpoint takes ONLY a JSON ``prompt`` and INHERITS the
+    source's model, size, and duration. Sending ``seconds`` — or posting multipart
+    form-data as a create call does — is rejected with HTTP 400, so ``seconds`` is kept for
+    call-site symmetry but intentionally NOT sent (the remix matches the base clip's length).
     """
-    parts = {"prompt": (None, prompt), "seconds": (None, str(seconds))}
-    return await _post(_videos_url(resource, f"/{base_job_id}/remix"), resource, parts)
+    url = _videos_url(resource, f"/{base_job_id}/remix")
+    async with httpx.AsyncClient(timeout=180) as client:
+        resp = await client.post(url, headers=_headers(resource), json={"prompt": prompt})
+        resp.raise_for_status()
+        return resp.json()["id"]
 
 
 async def poll_until_complete(resource: dict, job_id: str, interval: float = 6.0,
