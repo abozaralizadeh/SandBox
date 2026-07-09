@@ -38,14 +38,24 @@ _rr_lock = threading.Lock()
 _rr_index = 0
 
 
-def next_resource() -> dict:
-    """Pick the next usable {endpoint, key, model} from the pool, round-robin."""
+def next_resource(exclude_endpoints=None) -> dict:
+    """Pick the next usable {endpoint, key, model} from the pool, round-robin.
+
+    ``exclude_endpoints`` (a set of endpoint URLs) skips resources that already failed
+    the current clip, so a retry lands on a DIFFERENT resource — e.g. one endpoint out
+    of credits (401) must not consume every attempt. Ignored when it would exclude the
+    whole pool, so single-resource setups still retry somewhere.
+    """
     usable = [r for r in config.sora_pool() if r.get("endpoint") and r.get("key")]
     if not usable:
         raise RuntimeError(
             "No Sora resources configured. Set AZURE_OPENAI_ENDPOINT_SORA / "
             "AZURE_OPENAI_API_KEY_SORA (comma-separated for multiple resources)."
         )
+    if exclude_endpoints:
+        remaining = [r for r in usable if r["endpoint"] not in exclude_endpoints]
+        if remaining:
+            usable = remaining
     global _rr_index
     with _rr_lock:
         resource = usable[_rr_index % len(usable)]

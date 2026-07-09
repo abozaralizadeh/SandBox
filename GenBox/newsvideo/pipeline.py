@@ -102,8 +102,11 @@ def _format_http_error(exc: httpx.HTTPStatusError) -> str:
 
 
 async def _safe(factory, label: str):
-    """Run an async clip factory with one retry. Returns (result_or_None, error_detail).
-    Surfaces the real HTTP status + Azure body instead of a generic message."""
+    """Run an async clip factory with one retry ON THE SAME TARGET. Returns
+    (result_or_None, error_detail), surfacing the real HTTP status + Azure body.
+
+    Only for REMIX: a remix job exists solely on the resource that created its base clip,
+    so its retry cannot move. Fresh creates use ``_safe_create``, which rotates resources."""
     last_detail = None
     for attempt in range(2):
         try:
@@ -114,6 +117,34 @@ async def _safe(factory, label: str):
         except Exception as exc:  # network/timeout/etc.
             last_detail = f"{type(exc).__name__}: {exc}"
             logger.warning("%s: error (attempt %d): %s", label, attempt + 1, last_detail)
+    logger.error("%s: failed after retries: %s", label, last_detail)
+    return None, last_detail
+
+
+async def _safe_create(prompt: str, seconds: int, label: str, ref_image_bytes=None):
+    """create_clip with one retry, each attempt on a DIFFERENT resource where the pool
+    allows (round-robin, excluding endpoints that already failed this clip). One resource
+    being dead — e.g. out of credits (401) — then can't consume every attempt.
+
+    Returns ((mp4_bytes, job_id, resource), None) on success — the resource is included so
+    callers can pin later remixes to the resource that actually served the create — or
+    (None, error_detail) after all attempts fail."""
+    tried, last_detail = set(), None
+    for attempt in range(2):
+        resource = sora_client.next_resource(exclude_endpoints=tried)
+        tried.add(resource["endpoint"])
+        try:
+            data, jid = await sora_client.create_clip(resource, prompt, seconds,
+                                                      ref_image_bytes=ref_image_bytes)
+            return (data, jid, resource), None
+        except httpx.HTTPStatusError as exc:
+            last_detail = _format_http_error(exc)
+            logger.warning("%s: HTTP error (attempt %d on %s): %s",
+                           label, attempt + 1, resource["endpoint"], last_detail)
+        except Exception as exc:  # network/timeout/etc.
+            last_detail = f"{type(exc).__name__}: {exc}"
+            logger.warning("%s: error (attempt %d on %s): %s",
+                           label, attempt + 1, resource["endpoint"], last_detail)
     logger.error("%s: failed after retries: %s", label, last_detail)
     return None, last_detail
 
@@ -140,23 +171,16 @@ async def build_news_video(decision_text: str, flat_date: str):
 
         # ---- b-roll: fresh create, face-free, optional frame chaining ----
         if stype == "broll":
-            resource = sora_client.next_resource()
-            ref = prev_last_frame
-            res, err = await _safe(
-                lambda r=resource, rf=ref: sora_client.create_clip(r, _broll_prompt(shot), seconds, ref_image_bytes=rf),
-                label,
-            )
-            if res is None and ref is not None:
+            res, err = await _safe_create(_broll_prompt(shot), seconds, label,
+                                          ref_image_bytes=prev_last_frame)
+            if res is None and prev_last_frame is not None:
                 logger.warning("%s: retrying b-roll without reference frame", label)
-                res, err = await _safe(
-                    lambda r=resource: sora_client.create_clip(r, _broll_prompt(shot), seconds),
-                    label,
-                )
+                res, err = await _safe_create(_broll_prompt(shot), seconds, label)
             if res is None:
                 last_error = err or last_error
                 prev_last_frame = None
                 continue
-            data, _jid = res
+            data, _jid, _resource = res
             clips.append(data)
             if shot.get("frame_chain"):
                 try:
@@ -173,24 +197,28 @@ async def build_news_video(decision_text: str, flat_date: str):
         key = _speaker_key(shot)
         if key in bases:
             # Subsequent clip of a known speaker -> remix their first clip for consistency.
+            # Remix is pinned to the base clip's resource (job affinity) — only its
+            # create-fallback may rotate to other resources.
             resource, base_id = bases[key]
-            res, err = await _safe(
+            remix, err = await _safe(
                 lambda r=resource, b=base_id: sora_client.remix_clip(r, b, _remix_prompt(shot), seconds),
                 f"{label}:remix",
             )
-            if res is None:
+            if remix is not None:
+                data, jid = remix
+                res = (data, jid, resource)
+            else:
                 logger.warning("%s: remix failed (%s); falling back to a fresh create", label, err)
-                res, err = await _safe(
-                    lambda r=resource: sora_client.create_clip(r, _talking_head_prompt(shot), seconds),
-                    f"{label}:create-fallback",
-                )
+                res, err = await _safe_create(_talking_head_prompt(shot), seconds,
+                                              f"{label}:create-fallback")
+                if res is not None:
+                    # Rebase the speaker onto this new clip: the old base (or its resource)
+                    # is misbehaving, so later remixes should use the working one instead
+                    # of failing against the old base every time.
+                    bases[key] = (res[2], res[1])
         else:
             # First clip of this speaker -> fresh create; remember it as the remix base.
-            resource = sora_client.next_resource()
-            res, err = await _safe(
-                lambda r=resource: sora_client.create_clip(r, _talking_head_prompt(shot), seconds),
-                f"{label}:create",
-            )
+            res, err = await _safe_create(_talking_head_prompt(shot), seconds, f"{label}:create")
 
         if res is None:
             last_error = err or last_error
@@ -199,7 +227,7 @@ async def build_news_video(decision_text: str, flat_date: str):
                 raise RuntimeError(f"Anchor lead clip failed for {flat_date}: {err}")
             continue
 
-        data, jid = res
+        data, jid, resource = res
         clips.append(data)
         if key not in bases:
             bases[key] = (resource, jid)
