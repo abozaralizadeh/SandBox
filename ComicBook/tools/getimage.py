@@ -13,6 +13,23 @@ from ComicBook.azurestorage import upload_image_bytes_to_blob, save_photo_to_blo
 
 _client: Optional[AsyncAzureOpenAI] = None
 
+
+class ContentModerationError(Exception):
+    """The image API rejected the PROMPT via its content-safety system (HTTP 400,
+    code 'moderation_blocked'). Unlike a transient/gateway error, retrying the SAME prompt
+    — or falling back to prompt-only generation — fails identically, because the prompt
+    content itself is the problem. Callers must REWRITE the prompt and retry."""
+
+
+def _is_moderation_block(exc: Exception) -> bool:
+    """True if ``exc`` is an image content-safety rejection (so callers can request a prompt
+    rewrite instead of treating it as a transient failure or a dead service)."""
+    if getattr(exc, "code", None) == "moderation_blocked":
+        return True
+    text = str(exc).lower()
+    return "moderation_blocked" in text or "rejected by the safety system" in text
+
+
 _DALLE3_SIZES = {"wide": "1792x1024", "tall": "1024x1792", "square": "1024x1024"}
 _GPT_IMAGE_SIZES = {"wide": "1536x1024", "tall": "1024x1536", "square": "1024x1024"}
 
@@ -43,6 +60,10 @@ async def _call_with_retries(make_coro, attempts: int, label: str):
         try:
             return await make_coro()
         except Exception as exc:
+            if _is_moderation_block(exc):
+                # A content-safety rejection won't change on retry — surface it distinctly so
+                # the caller rewrites the prompt instead of burning retries/fallbacks on it.
+                raise ContentModerationError(str(exc)) from exc
             last_exc = exc
             print(f"[ComicBook:getimage] {label} attempt {i}/{attempts} failed: {str(exc)[:180]}")
             if i < attempts:
@@ -164,6 +185,8 @@ async def create_image_with_reference(prompt: str, reference_url: str, size: str
 
     try:
         return await _call_with_retries(_edit, attempts=1, label="edit(1 ref)")
+    except ContentModerationError:
+        raise  # prompt content is the problem; prompt-only fallback would be blocked too
     except Exception as exc:
         print(f"[ComicBook:getimage] edit failed, falling back to prompt-only generate: {str(exc)[:180]}")
         return await create_image(prompt, size, quality)
@@ -211,6 +234,8 @@ async def create_image_with_references(
 
     try:
         return await _call_with_retries(_edit, attempts=1, label=f"edit({len(ref_bytes)} refs)")
+    except ContentModerationError:
+        raise  # prompt content is the problem; prompt-only fallback would be blocked too
     except Exception as exc:
         print(f"[ComicBook:getimage] multi-ref edit failed, falling back to prompt-only generate: {str(exc)[:180]}")
         return await create_image(prompt, size, quality)

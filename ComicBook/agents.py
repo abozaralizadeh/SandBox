@@ -529,6 +529,15 @@ For every panel in the script, call generate_panel_image with:
 - reference_url: The URL returned from step 2 (the character reference sheet)
 - size: "wide", "tall", or "square" as specified in the script
 
+CONTENT-SAFETY RULE — if generate_panel_image (or generate_character_sheet) returns
+status "content_blocked", the image safety system rejected that PROMPT and NO image was
+made. Do NOT resend the same prompt and do NOT skip the panel. Rewrite the prompt per the
+returned "retry_guidance": keep the same panel intent, characters, and art style, but
+soften or reframe whatever could trip safety (graphic violence, gore/blood, weapons aimed
+at people, wounds, nudity/suggestive content, real public figures, brand names/logos) —
+describe the moment more mildly and symbolically — then call the SAME tool again with the
+revised prompt. Only move on once you get status "success".
+
 NEW CHARACTER RULE — after generating any panel that shows a character who does NOT
 appear on the original character sheet (a mid-arc introduction), immediately call
 mark_key_panel with:

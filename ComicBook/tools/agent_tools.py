@@ -30,11 +30,16 @@ from ComicBook.helpers import (
     _summarize_episodes,
 )
 from ComicBook.tools.getimage import (
+    ContentModerationError,
     create_image,
     create_image_with_reference,
     create_image_with_references,
     make_placeholder_image_url,
 )
+
+# How many CONSECUTIVE content-safety blocks to tolerate before giving a panel/sheet a
+# placeholder, so one stubborn prompt can't loop the run forever. A success resets the count.
+_MAX_CONTENT_BLOCKS = 3
 
 logger = logging.getLogger("ComicBook")
 
@@ -248,6 +253,32 @@ def build_comic_tools(state: Dict[str, Any], target_date: datetime) -> Dict[str,
                 a["character_sheet_url"] = url
                 logger.info("  -> Character sheet URL saved to arc '%s'", a["RowKey"])
             return {"status": "success", "reference_url": url, "style": style}
+        except ContentModerationError as exc:
+            # A blocked sheet must NOT be cached/used as the arc anchor. Ask the agent to soften
+            # the character descriptions and retry; only after repeated blocks fall back so the
+            # run can still proceed (the panels then rely on per-panel references instead).
+            blocks = state.get("sheet_content_blocks", 0) + 1
+            state["sheet_content_blocks"] = blocks
+            logger.warning("  -> Character-sheet prompt BLOCKED by content safety (consecutive=%d): %s",
+                           blocks, str(exc)[:150])
+            if blocks >= _MAX_CONTENT_BLOCKS:
+                state["sheet_content_blocks"] = 0
+                url = await make_placeholder_image_url()
+                logger.error("  -> content safety blocked the character sheet %d times — using placeholder",
+                             _MAX_CONTENT_BLOCKS)
+                return {"status": "success", "reference_url": url, "style": style, "placeholder": True}
+            return {
+                "status": "content_blocked",
+                "error": "The image safety system rejected the character-sheet prompt "
+                         "(moderation_blocked). No sheet was created — do not resend the same text.",
+                "retry_guidance": (
+                    "Soften or rephrase any character/environment details that could trip content "
+                    "safety (weapons, gore, wounds, nudity or suggestive content, real public "
+                    "figures, brand names/logos), keeping each character recognizable, then call "
+                    "generate_character_sheet AGAIN with the revised description."
+                ),
+                "style": style,
+            }
         except Exception as exc:
             state["image_failures"] = state.get("image_failures", 0) + 1
             logger.error("  -> Character sheet generation FAILED (%d): %s — using placeholder",
@@ -303,8 +334,41 @@ def build_comic_tools(state: Dict[str, Any], target_date: datetime) -> Dict[str,
 
             state["generated_panel_urls"].append(url)
             state["image_failures"] = 0
+            state["content_blocks"] = 0
             logger.info("  -> Panel image generated (%d refs): %s", len(image_urls), url[:120])
             return {"status": "success", "image_url": url, "size": size}
+        except ContentModerationError as exc:
+            # PROMPT-content rejection (not a service failure): tell the agent to REWRITE and
+            # retry. Do NOT count this against image_failures (that circuit breaker is for a
+            # dead/failing service) and do NOT return a "success" placeholder — that made the
+            # panel silently finish without art. Only after repeated consecutive blocks do we
+            # fall back to a placeholder so one stubborn panel can't loop the whole run.
+            blocks = state.get("content_blocks", 0) + 1
+            state["content_blocks"] = blocks
+            logger.warning("  -> Panel prompt BLOCKED by content safety (consecutive=%d): %s",
+                           blocks, str(exc)[:150])
+            if blocks >= _MAX_CONTENT_BLOCKS:
+                state["content_blocks"] = 0
+                url = await make_placeholder_image_url()
+                logger.error("  -> content safety blocked %d prompts in a row — using placeholder",
+                             _MAX_CONTENT_BLOCKS)
+                return {"status": "success", "image_url": url, "size": size, "placeholder": True,
+                        "note": "content safety kept blocking this panel; used a placeholder"}
+            return {
+                "status": "content_blocked",
+                "error": "The image safety system rejected this prompt (moderation_blocked). "
+                         "This is NOT a service failure and NO image was created — do not resend "
+                         "the same prompt.",
+                "retry_guidance": (
+                    "Rewrite the image prompt to remove or soften whatever could trip content "
+                    "safety — e.g. graphic violence, gore or blood, weapons pointed at people, "
+                    "wounds/injury, nudity or suggestive content, real public figures, or "
+                    "brand names/logos. Keep the SAME panel intent, characters and art style, but "
+                    "describe the moment more mildly and symbolically, then call "
+                    "generate_panel_image AGAIN with the revised prompt."
+                ),
+                "size": size,
+            }
         except Exception as exc:
             state["image_failures"] = state.get("image_failures", 0) + 1
             logger.error("  -> Panel image generation FAILED (%d): %s — using placeholder",
