@@ -24,8 +24,9 @@ class State(TypedDict):
 llm = AzureChatOpenAI(
     azure_deployment=os.environ["AZURE_OPENAI_MODEL"],
     api_version=os.environ["AZURE_OPENAI_API_VERSION"],
+    output_version="responses/v1",
+    use_responses_api=True,
     temperature=1.3,
-    max_tokens=None,
     timeout=None,
     max_retries=2,
 )
@@ -35,7 +36,9 @@ imagetool = get_image_by_text
 
 def create_news_graph(news_tool):
     tools = [news_tool, imagetool]
-    llm_with_tools = llm.bind_tools(tools)
+    # web_search is an OpenAI server-side tool: bound to the model but never
+    # routed through ToolNode (it produces content blocks, not tool_calls).
+    llm_with_tools = llm.bind_tools(tools + [{"type": "web_search"}])
 
     graph_builder = StateGraph(State)
 

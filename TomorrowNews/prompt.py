@@ -66,6 +66,10 @@ Every headline must be an EVENT THAT MOVED THINGS FORWARD, not a status update o
 
 Method: for each major thread in today's news, ask "what is the most likely NEXT thing to happen?" and then write that next thing \
 as a concrete, finished event. Take a reasonable hypothetical step forward in the chain of cause and effect. \
+Use the web_search tool to check what analysts, experts, and forecasters are currently saying about the major threads, \
+and base your predicted outcomes on that evidence and on what is actually happening in the world. \
+Follow the evidence, not optimism: the most likely outcome is often bad news—escalations, collapses, defeats, disasters, \
+rising death tolls. Report dark events as plainly as good ones; do NOT skew the paper toward positive news. \
 Stay grounded—real names, real places, real institutions, plausible outcomes. No science fiction, no sensationalism, no exaggeration. \
 But you MUST commit to specific outcomes: who won, what number, which decision, what consequence. \
 
@@ -100,6 +104,19 @@ Output: Pure HTML code without anything extra! (not even ```html at start and ``
     return base_prompt + lang_config["prompt_suffix"]
 
 
+def _extract_html(message):
+    """With the Responses API (web_search bound), content arrives as a list of
+    blocks; only text/output_text blocks hold the HTML."""
+    content = message.content
+    if isinstance(content, str):
+        return content
+    return "".join(
+        block.get("text", "")
+        for block in content
+        if isinstance(block, dict) and block.get("type") in ("text", "output_text")
+    )
+
+
 def _try_cache(parsed_date, lang="en"):
     """Check cache for a given date and language. Returns (html_content, timestamp) or None."""
     rowkey = _get_rowkey(parsed_date, lang)
@@ -126,7 +143,7 @@ def _generate_single(parsed_date, lang="en"):
         print("event: ", event)
         for value in event.values():
             print("Assistant:", value["messages"][-1].content)
-    content = value["messages"][-1].content
+    content = _extract_html(value["messages"][-1])
 
     rowkey = _get_rowkey(parsed_date, lang)
     insert_history(rowkey=rowkey, html_content=content, language=lang)
