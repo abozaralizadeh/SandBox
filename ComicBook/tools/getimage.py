@@ -8,6 +8,7 @@ from typing import Optional
 
 import httpx
 from openai import AsyncAzureOpenAI
+from agents import generation_span
 
 from ComicBook.azurestorage import upload_image_bytes_to_blob, save_photo_to_blob
 
@@ -144,18 +145,57 @@ def _upload_result(result) -> str:
     return save_photo_to_blob(image_url)
 
 
+# ---------------------------------------------------------------------------
+# Trace spans for the image-model calls
+# ---------------------------------------------------------------------------
+# images.generate / images.edit are raw REST calls to gpt-image, not chat/response calls, so
+# neither the Agents SDK nor wrap_openai spans them — the trace shows the tool call but nothing
+# about the model that produced the panel. We wrap each call in a generation_span, which
+# OpenAIAgentsTracingProcessor renders as an "llm" run (model + prompt in, image URL out). It is a
+# no-op when there is no active trace, so these helpers are always safe to call.
+
+def _image_gen_span(operation: str, model: str, size: str, quality: str, references: int = 0):
+    return generation_span(
+        model=model,
+        model_config={
+            "operation": operation,
+            "size": size,
+            "quality": quality,
+            "references": references,
+        },
+    )
+
+
+def _set_span_input(span, prompt: str) -> None:
+    try:
+        span.span_data.input = [{"role": "user", "content": prompt}]
+    except Exception:
+        pass
+
+
+def _set_span_output(span, url: str) -> None:
+    try:
+        span.span_data.output = [{"role": "assistant", "content": url}]
+    except Exception:
+        pass
+
+
 async def create_image(prompt: str, size: str = "square", quality: str = "medium") -> str:
     """Generate an image from a text prompt. Returns the blob URL."""
     model = _get_model()
 
     async def _gen():
-        result = await _get_client().images.generate(
-            model=model,
-            prompt=prompt,
-            size=_resolve_size(size),
-            quality=_resolve_quality(quality),
-        )
-        return await asyncio.to_thread(_upload_result, result)
+        with _image_gen_span("generate", model, _resolve_size(size), _resolve_quality(quality)) as span:
+            _set_span_input(span, prompt)
+            result = await _get_client().images.generate(
+                model=model,
+                prompt=prompt,
+                size=_resolve_size(size),
+                quality=_resolve_quality(quality),
+            )
+            url = await asyncio.to_thread(_upload_result, result)
+            _set_span_output(span, url)
+            return url
 
     return await _call_with_retries(_gen, attempts=1, label="generate")
 
@@ -172,16 +212,20 @@ async def create_image_with_reference(prompt: str, reference_url: str, size: str
         return await create_image(prompt, size, quality)
 
     async def _edit():
-        ref = BytesIO(reference_bytes)
-        ref.name = "reference.png"
-        result = await _get_client().images.edit(
-            model=model,
-            prompt=prompt,
-            size=_resolve_size(size),
-            quality=_resolve_quality(quality),
-            image=ref,
-        )
-        return await asyncio.to_thread(_upload_result, result)
+        with _image_gen_span("edit", model, _resolve_size(size), _resolve_quality(quality), references=1) as span:
+            _set_span_input(span, prompt)
+            ref = BytesIO(reference_bytes)
+            ref.name = "reference.png"
+            result = await _get_client().images.edit(
+                model=model,
+                prompt=prompt,
+                size=_resolve_size(size),
+                quality=_resolve_quality(quality),
+                image=ref,
+            )
+            url = await asyncio.to_thread(_upload_result, result)
+            _set_span_output(span, url)
+            return url
 
     try:
         return await _call_with_retries(_edit, attempts=1, label="edit(1 ref)")
@@ -218,19 +262,23 @@ async def create_image_with_references(
         return await create_image(prompt, size, quality)
 
     async def _edit():
-        files = []
-        for idx, data in enumerate(ref_bytes):
-            f = BytesIO(data)
-            f.name = f"ref_{idx}.png"
-            files.append(f)
-        result = await _get_client().images.edit(
-            model=model,
-            prompt=prompt,
-            size=_resolve_size(size),
-            quality=_resolve_quality(quality),
-            image=files if len(files) > 1 else files[0],
-        )
-        return await asyncio.to_thread(_upload_result, result)
+        with _image_gen_span("edit", model, _resolve_size(size), _resolve_quality(quality), references=len(ref_bytes)) as span:
+            _set_span_input(span, prompt)
+            files = []
+            for idx, data in enumerate(ref_bytes):
+                f = BytesIO(data)
+                f.name = f"ref_{idx}.png"
+                files.append(f)
+            result = await _get_client().images.edit(
+                model=model,
+                prompt=prompt,
+                size=_resolve_size(size),
+                quality=_resolve_quality(quality),
+                image=files if len(files) > 1 else files[0],
+            )
+            url = await asyncio.to_thread(_upload_result, result)
+            _set_span_output(span, url)
+            return url
 
     try:
         return await _call_with_retries(_edit, attempts=1, label=f"edit({len(ref_bytes)} refs)")

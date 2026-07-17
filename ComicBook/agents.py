@@ -7,7 +7,17 @@ import os
 from datetime import datetime, timezone
 from typing import Any, Dict, List
 
-from agents import Agent, ModelSettings, Runner, OpenAIResponsesModel, WebSearchTool, handoff, set_trace_processors
+from agents import (
+    Agent,
+    ModelSettings,
+    Runner,
+    RunHooks,
+    OpenAIResponsesModel,
+    WebSearchTool,
+    custom_span,
+    handoff,
+    set_trace_processors,
+)
 from agents.extensions.handoff_filters import remove_all_tools
 from agents.extensions.handoff_prompt import prompt_with_handoff_instructions
 from agents.items import ItemHelpers, MessageOutputItem
@@ -44,6 +54,55 @@ from ComicBook.tools.agent_tools import build_comic_tools
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
 logger = logging.getLogger("ComicBook")
+
+
+# ---------------------------------------------------------------------------
+# Web-search visibility in traces
+# ---------------------------------------------------------------------------
+# WebSearchTool is a HOSTED tool: it runs server-side inside the Responses API call, so the
+# Agents SDK emits no function_span for it and on_tool_start/on_tool_end never fire (the search
+# only exists as a web_search_call item buried inside the model response). To surface each search
+# in the trace tree, we inspect every finished LLM turn in on_llm_end and emit a custom_span per
+# web_search_call; OpenAIAgentsTracingProcessor mirrors that span into LangSmith.
+
+def _web_search_query(item) -> str | None:
+    """Best-effort pull of the query from a web_search_call output item. The query lives under
+    ``.action`` (a pydantic model or a dict, depending on the SDK/openai version)."""
+    action = getattr(item, "action", None)
+    if action is None and isinstance(item, dict):
+        action = item.get("action")
+    if action is None:
+        return getattr(item, "query", None)
+    query = getattr(action, "query", None)
+    if query is None and isinstance(action, dict):
+        query = action.get("query")
+    return query
+
+
+class WebSearchTracingHooks(RunHooks):
+    """Emit a trace span for each hosted web search, which the SDK does not span on its own."""
+
+    async def on_llm_end(self, context, agent, response) -> None:
+        try:
+            for item in getattr(response, "output", None) or []:
+                if getattr(item, "type", None) != "web_search_call":
+                    continue
+                query = _web_search_query(item)
+                with custom_span(
+                    name=f"Web search: {query}" if query else "Web search",
+                    data={
+                        "tool": "web_search",
+                        "query": query,
+                        "status": getattr(item, "status", None),
+                        "agent": getattr(agent, "name", None),
+                    },
+                ):
+                    pass
+        except Exception:
+            logger.debug("Failed to emit web-search trace span", exc_info=True)
+
+
+_WEB_SEARCH_HOOKS = WebSearchTracingHooks()
 
 
 # ---------------------------------------------------------------------------
@@ -915,7 +974,7 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
         async def _run(agent, stage_input, label):
             logger.info("STAGE → %s", label)
             with trace(name=f"Stage-{agent.name}", run_type="chain"):
-                res = await Runner.run(agent, stage_input, max_turns=MAX_TURNS)
+                res = await Runner.run(agent, stage_input, max_turns=MAX_TURNS, hooks=_WEB_SEARCH_HOOKS)
             all_items.extend(res.new_items)
             logger.info("STAGE done: %s (last_agent=%s, html_en=%s, html_it=%s, html_fa=%s)",
                          label, getattr(res.last_agent, "name", "?"),
