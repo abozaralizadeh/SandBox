@@ -381,6 +381,12 @@
       <div id="coinsBox"><div class="empty">No coins yet</div></div>
     </div>
 
+    <!-- Recently closed positions: entry/exit on candles + the best exit that was available -->
+    <div class="panel">
+      <div class="panel-head"><div class="panel-title t-violet"><span class="tick"></span> Recently closed</div></div>
+      <div id="closedBox"><div class="empty">No closed positions yet</div></div>
+    </div>
+
     <!-- Decision feed + Research/Supervisor -->
     <div class="grid">
       <div class="panel feed-panel">
@@ -675,6 +681,106 @@
       renderPositions(window._lastPositions);
     }
 
+    // ── Recently closed positions: entry/exit on candles + the best exit that was on offer ──
+    const _closedCharts = {};   // cidx -> ECharts instance
+    let _closedSig = '';
+
+    function pickClosedIv(c) {
+      const d = (c.openTs && c.closeTs) ? (c.closeTs - c.openTs) : 3600;
+      return d <= 6 * 3600 ? '15min' : (d <= 36 * 3600 ? '1hour' : '4hour');
+    }
+
+    function buildClosedOption(candles, c) {
+      const up = '#00e6a8', down = '#ff3b5c';
+      const x = candles.map(k => fmtCandleTime(k.t));
+      const kd = candles.map(k => [k.o, k.c, k.l, k.h]);
+      const nearest = ts => { if (ts == null) return -1; let bi = -1, bd = Infinity; candles.forEach((cc, ii) => { const d = Math.abs(cc.t - ts); if (d < bd) { bd = d; bi = ii; } }); return bi; };
+      const oi = nearest(c.openTs), ci = nearest(c.closeTs);
+      const entry = fnum(c.entryPrice), exit = fnum(c.exitPrice);
+      const isLong = (c.side || '') !== 'short';
+      // Best exit that was actually available while the trade was open: highest high (long) / lowest
+      // low (short) between open and close. Shows profit left on the table vs where it actually closed.
+      let best = null, bestIdx = -1;
+      candles.forEach((cc, ii) => {
+        if (c.openTs && c.closeTs && (cc.t < c.openTs || cc.t > c.closeTs)) return;
+        const v = isLong ? cc.h : cc.l;
+        if (best == null || (isLong ? v > best : v < best)) { best = v; bestIdx = ii; }
+      });
+      const ys = []; candles.forEach(cc => ys.push(cc.l, cc.h)); [entry, exit, best].forEach(v => { if (v != null) ys.push(v); });
+      const lo = Math.min(...ys), hi = Math.max(...ys), pad = (hi - lo) * 0.06 || (hi ? hi * 0.01 : 1);
+      const hLine = (v, color, text) => ({ yAxis: v, lineStyle: { color, width: 1.2, type: 'dashed' }, label: { formatter: text, color, fontFamily: 'JetBrains Mono', fontSize: 9, position: 'insideEndTop', backgroundColor: 'rgba(5,7,10,0.72)', padding: [1, 3], borderRadius: 3 } });
+      const vLine = (idx, color, text) => ({ xAxis: idx, lineStyle: { color, width: 1, type: 'dotted' }, label: { formatter: text, color, fontFamily: 'JetBrains Mono', fontSize: 9, position: 'insideEndTop' } });
+      const lines = [];
+      if (entry != null) lines.push(hLine(entry, '#e6edf3', 'Entry ' + pxF(entry)));
+      if (exit != null) lines.push(hLine(exit, '#2dd4ff', 'Exit ' + pxF(exit)));
+      if (best != null && exit != null && Math.abs(best - exit) / (exit || 1) > 0.0005) lines.push(hLine(best, up, 'Best ' + pxF(best)));
+      if (oi >= 0) lines.push(vLine(oi, 'rgba(230,237,243,0.35)', 'open'));
+      if (ci >= 0) lines.push(vLine(ci, 'rgba(45,212,255,0.55)', 'close'));
+      const points = [];
+      if (bestIdx >= 0 && best != null) points.push({ coord: [bestIdx, best], symbol: 'pin', symbolSize: 24, itemStyle: { color: up }, label: { show: false } });
+      return {
+        backgroundColor: 'transparent', animation: false,
+        grid: { left: 8, right: 72, top: 12, bottom: 24, containLabel: true },
+        tooltip: { trigger: 'axis', axisPointer: { type: 'cross' }, backgroundColor: 'rgba(10,14,20,0.95)', borderColor: 'rgba(120,160,200,0.2)', textStyle: { color: '#e6edf3', fontFamily: 'JetBrains Mono', fontSize: 11 },
+          formatter: ps => { const i = ps[0].dataIndex, cc = candles[i]; return cc ? `${x[i]}<br/>O <b>${pxF(cc.o)}</b>　H <b>${pxF(cc.h)}</b><br/>L <b>${pxF(cc.l)}</b>　C <b>${pxF(cc.c)}</b>` : ''; } },
+        xAxis: { type: 'category', data: x, boundaryGap: true, axisLine: { lineStyle: { color: 'rgba(120,160,200,0.18)' } }, axisLabel: { color: '#50637a', fontFamily: 'JetBrains Mono', fontSize: 9, hideOverlap: true }, splitLine: { show: false } },
+        yAxis: { scale: true, min: lo - pad, max: hi + pad, position: 'right', axisLine: { lineStyle: { color: 'rgba(120,160,200,0.18)' } }, axisLabel: { color: '#50637a', fontFamily: 'JetBrains Mono', fontSize: 9, formatter: axPx }, splitLine: { lineStyle: { color: 'rgba(120,160,200,0.06)' } } },
+        series: [{ type: 'candlestick', data: kd, barMaxWidth: 14,
+          itemStyle: { color: up, color0: down, borderColor: up, borderColor0: down, borderWidth: 1 },
+          markLine: { silent: true, symbol: 'none', data: lines }, markPoint: { silent: true, data: points } }]
+      };
+    }
+
+    async function renderClosed(closed) {
+      const box = el('closedBox'); if (!box) return;
+      closed = (closed || []).filter(c => c && c.symbol && c.closeTs).slice(0, 3);
+      if (!closed.length) {
+        box.innerHTML = '<div class="empty">No closed positions yet</div>';
+        Object.values(_closedCharts).forEach(ch => ch.dispose && ch.dispose());
+        for (const k in _closedCharts) delete _closedCharts[k];
+        _closedSig = '';
+        return;
+      }
+      const sig = closed.map(c => c.symbol + '|' + c.closeTs).join(',');
+      if (sig !== _closedSig) {
+        _closedSig = sig;
+        Object.values(_closedCharts).forEach(ch => ch.dispose && ch.dispose());
+        for (const k in _closedCharts) delete _closedCharts[k];
+        box.innerHTML = closed.map((c, i) => {
+          const sym = esc((c.symbol || '').replace('-USDT', ''));
+          const dur = (c.openTs && c.closeTs) ? Math.max(0, c.closeTs - c.openTs) : null;
+          const durTxt = dur != null ? (dur >= 3600 ? (dur / 3600).toFixed(1) + 'h' : Math.round(dur / 60) + 'm') : '';
+          const roe = c.roePct != null ? `<span class="pos-ret ${c.win ? 'up' : 'down'}">${fmtPct(c.roePct)}</span>` : `<span class="pos-ret ${c.win ? 'up' : 'down'}">${c.win ? 'win' : 'loss'}</span>`;
+          const when = c.openTs ? `${fmtCandleTime(c.openTs)} → ${fmtCandleTime(c.closeTs)}` : `closed ${relTime(c.closeTs)}`;
+          return `<div class="pos">
+            <div class="pos-top">
+              <span class="sym-cell">${coinIcon(c.symbol, 18)}${sym}</span>
+              <span class="tags"><span class="tag ${c.side === 'long' ? 'long' : 'short'}">${esc(c.side || '')}</span></span>
+              ${roe}
+            </div>
+            <div class="pos-px"><span>${when}</span>${durTxt ? `<span>· held ${durTxt}</span>` : ''}</div>
+            <div class="pos-chart" data-cidx="${i}"></div>
+          </div>`;
+        }).join('');
+      }
+      for (let i = 0; i < closed.length; i++) {
+        const c = closed[i];
+        const slot = box.querySelector(`.pos-chart[data-cidx="${i}"]`);
+        if (!slot) continue;
+        const key = 'c' + i;
+        if (!_closedCharts[key]) _closedCharts[key] = echarts.init(slot, null, { renderer: 'canvas' });
+        const chart = _closedCharts[key];
+        const candles = await getCandles(c.symbol, pickClosedIv(c));
+        if (!candles.length) {
+          chart.setOption({ backgroundColor: 'transparent', xAxis: { show: false }, yAxis: { show: false }, series: [],
+            graphic: [{ type: 'text', left: 'center', top: 'middle', silent: true, style: { text: 'price chart unavailable for ' + (c.symbol || ''), fill: 'rgba(138,160,180,0.6)', fontFamily: 'JetBrains Mono', fontSize: 11 } }] }, true);
+        } else {
+          chart.setOption(buildClosedOption(candles, c), true);
+        }
+        chart.resize();
+      }
+    }
+
     function renderPositions(positions) {
       const box = el('positionsBox');
       window._lastPositions = positions || [];
@@ -903,6 +1009,7 @@
         if (!window._tradesLoaded) { renderTrades(s.trades); }   // fast seed; loadTrades() pulls fuller history
         renderPositions(s.positions);
         renderCoins(s.coins);
+        renderClosed(s.closedPositions);
         renderFeed(s.feed);
         renderResearch(s.research);
         renderNotes(s.notes);
@@ -949,7 +1056,7 @@
       el('modePill').className = 'pill muted';
       el('modePill').innerHTML = '<span class="dot" style="background:var(--amber)"></span> warming up';
       el('updatedPill').textContent = 'no data yet';
-      ['feedBox','positionsBox','coinsBox','researchPlans','notesBox'].forEach(id => {
+      ['feedBox','positionsBox','coinsBox','closedBox','researchPlans','notesBox'].forEach(id => {
         el(id).innerHTML = '<div class="empty">Agents warming up… data appears once the bot publishes its first snapshot.</div>';
       });
       renderEquity([]); renderDonut({}); renderTrades([]);
