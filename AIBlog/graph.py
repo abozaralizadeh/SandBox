@@ -60,5 +60,7 @@ async def get_react_agent():
     )
 
     from langgraph.prebuilt import create_react_agent
-    react_agent = create_react_agent(llm, tools=tools)
+    # Name the agent so LangSmith traces show "AIBlog" instead of the default
+    # "LangGraph" root run name.
+    react_agent = create_react_agent(llm, tools=tools, name="AIBlog")
     return react_agent, browser_aclose

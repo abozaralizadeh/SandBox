@@ -12,9 +12,7 @@ import os
 
 from dotenv import load_dotenv
 
-from agents import Agent, ModelSettings, OpenAIResponsesModel, Runner, WebSearchTool, set_tracing_disabled
-
-set_tracing_disabled(True)
+from agents import Agent, ModelSettings, OpenAIResponsesModel, RunConfig, Runner, WebSearchTool
 from openai import AsyncAzureOpenAI
 from langsmith.wrappers import wrap_openai
 
@@ -205,7 +203,16 @@ async def produce_shot_list(decision_text: str) -> dict:
         model=model,
         model_settings=ModelSettings(temperature=0.6),
     )
-    result = await Runner.run(agent, decision_text, max_turns=2)
+    # Disable the Agents SDK's own exporter for this run only.  Do not call the
+    # process-global set_tracing_disabled(True): this module is loaded lazily in a
+    # long-lived web worker, and that global switch also suppresses ComicBook's
+    # OpenAIAgentsTracingProcessor spans in every later pipeline run.
+    result = await Runner.run(
+        agent,
+        decision_text,
+        max_turns=2,
+        run_config=RunConfig(tracing_disabled=True),
+    )
     raw = str(result.final_output)
     try:
         data = _extract_json(raw)

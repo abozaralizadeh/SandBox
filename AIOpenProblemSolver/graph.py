@@ -81,10 +81,13 @@ You are not a research assistant. You are an independent mathematical mind. You 
 """.strip()
 
     try:
+        # Name the agent so LangSmith traces show "AI Open Problem Solver" instead
+        # of the default "LangGraph" root run name.
         agent = create_deep_agent(
             model=llm,
             tools=tools,
             system_prompt=instructions,
+            name="AI Open Problem Solver",
         )
         return agent, browser_aclose
     except TypeError as exc:
@@ -96,6 +99,7 @@ You are not a research assistant. You are an independent mathematical mind. You 
             llm,
             tools=tools,
             prompt=instructions,
+            name="AI Open Problem Solver",
         ), browser_aclose
 
 

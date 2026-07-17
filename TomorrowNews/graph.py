@@ -34,7 +34,7 @@ llm = AzureChatOpenAI(
 imagetool = get_image_by_text
 
 
-def create_news_graph(news_tool):
+def create_news_graph(news_tool, name="Tomorrow News"):
     tools = [news_tool, imagetool]
     # web_search is an OpenAI server-side tool: bound to the model but never
     # routed through ToolNode (it produces content blocks, not tool_calls).
@@ -51,11 +51,13 @@ def create_news_graph(news_tool):
     graph_builder.add_conditional_edges("agent", tools_condition)
     graph_builder.add_edge("tools", "agent")
     graph_builder.set_entry_point("agent")
-    return graph_builder.compile()
+    # Name the compiled graph so LangSmith traces show the project (e.g. "Tomorrow News")
+    # instead of the default "LangGraph" root run name.
+    return graph_builder.compile(name=name)
 
 
 news_graphs = {
-    lang: create_news_graph(create_news_feed_tool(rss_url))
+    lang: create_news_graph(create_news_feed_tool(rss_url), name=f"Tomorrow News ({lang})")
     for lang, rss_url in RSS_URLS.items()
 }
 

@@ -238,6 +238,8 @@ graph_builder.add_conditional_edges("tools", next_condition)
 
 graph_builder.set_entry_point("editor")
 
-ma_graph = graph_builder.compile()
+# Name the compiled graph so LangSmith traces show the project ("Tomorrow News")
+# instead of the default "LangGraph" root run name.
+ma_graph = graph_builder.compile(name="Tomorrow News (Supervisor)")
 
 #ma_graph.get_graph().draw_mermaid_png(output_file_path="TomorrowNews/NewMultiAgent.png")
