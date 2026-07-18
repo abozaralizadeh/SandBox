@@ -139,6 +139,9 @@
     .panel-title.t-violet .tick { background: var(--violet); box-shadow: 0 0 10px rgba(167,139,250,0.4); }
     .panel-title.t-amber .tick { background: var(--amber); box-shadow: 0 0 10px rgba(255,176,32,0.4); }
     .panel-title.t-green .tick { background: var(--up); box-shadow: 0 0 10px rgba(0,230,168,0.4); }
+    .section-label { font-family: var(--mono); font-size: 0.68rem; font-weight: 600; letter-spacing: 1.5px;
+      text-transform: uppercase; color: var(--text-3); margin: 20px 2px 10px; display: flex; align-items: center; gap: 10px; }
+    .section-label::after { content: ""; flex: 1; height: 1px; background: var(--border); }
 
     /* segmented control */
     .seg { display: inline-flex; background: var(--s2); border: 1px solid var(--border); border-radius: 9px; padding: 3px; gap: 2px; }
@@ -342,7 +345,8 @@
       <div class="kpi k-down"><div class="label">Drawdown (today)</div><div class="value" id="kDD">—</div><div class="sub">from day open</div></div>
     </div>
 
-    <!-- Equity + Win/Loss -->
+    <!-- ═══════════ PERFORMANCE ═══════════ -->
+    <div class="section-label">Performance</div>
     <div class="grid">
       <div class="panel">
         <div class="panel-head">
@@ -356,37 +360,45 @@
         </div>
         <div class="chart" id="equityChart"></div>
       </div>
-      <div class="panel">
-        <div class="panel-head"><div class="panel-title t-cyan"><span class="tick"></span> Win / Loss</div></div>
-        <div class="chart sm" id="donutChart"></div>
-        <div class="vbreak" id="venueBreak"></div>
+      <div>
+        <div class="panel">
+          <div class="panel-head"><div class="panel-title t-cyan"><span class="tick"></span> Win / Loss</div></div>
+          <div class="chart sm" id="donutChart"></div>
+          <div class="vbreak" id="venueBreak"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><div class="panel-title t-violet"><span class="tick"></span> Recent trade outcomes</div></div>
+          <div class="chart sm" id="tradesChart"></div>
+        </div>
       </div>
     </div>
 
-    <!-- Per-trade + Positions -->
-    <div class="grid">
-      <div class="panel">
-        <div class="panel-head"><div class="panel-title t-violet"><span class="tick"></span> Recent trade outcomes</div></div>
-        <div class="chart sm" id="tradesChart"></div>
-      </div>
+    <!-- ═══════════ LIVE BOOK — what the bot has working right now ═══════════ -->
+    <div class="section-label">Live book</div>
+    <div class="grid-2">
       <div class="panel">
         <div class="panel-head"><div class="panel-title t-amber"><span class="tick"></span> Open positions</div></div>
         <div id="positionsBox"><div class="empty">No open positions</div></div>
       </div>
+      <div class="panel">
+        <div class="panel-head"><div class="panel-title t-cyan"><span class="tick"></span> Pending orders</div></div>
+        <div id="pendingBox"><div class="empty">No resting orders</div></div>
+      </div>
     </div>
-
-    <!-- Coin universe (what the bot is currently watching / trading) -->
     <div class="panel">
       <div class="panel-head"><div class="panel-title t-green"><span class="tick"></span> Coin universe</div></div>
       <div id="coinsBox"><div class="empty">No coins yet</div></div>
     </div>
 
-    <!-- Recently closed positions: entry/exit on candles + the best exit that was available -->
+    <!-- ═══════════ TRADE HISTORY ═══════════ -->
+    <div class="section-label">Trade history</div>
     <div class="panel">
-      <div class="panel-head"><div class="panel-title t-violet"><span class="tick"></span> Recently closed</div></div>
+      <div class="panel-head"><div class="panel-title t-violet"><span class="tick"></span> Recently closed <span style="color:var(--text-3);font-weight:400;font-family:var(--mono);font-size:0.7rem">· entry/exit vs the best exit on offer</span></div></div>
       <div id="closedBox"><div class="empty">No closed positions yet</div></div>
     </div>
 
+    <!-- ═══════════ AGENTS ═══════════ -->
+    <div class="section-label">Agents</div>
     <!-- Decision feed + Research/Supervisor -->
     <div class="grid">
       <div class="panel feed-panel">
@@ -934,6 +946,32 @@
       box.innerHTML = html || '<div class="empty">No coins yet</div>';
     }
 
+    function renderPending(orders) {
+      const box = el('pendingBox');
+      if (!box) return;
+      orders = (orders || []).filter(o => o && o.symbol);
+      if (!orders.length) { box.innerHTML = '<div class="empty">No resting orders</div>'; return; }
+      const px = v => (v == null || isNaN(v)) ? '—' : Number(v).toPrecision(6);
+      box.innerHTML = orders.map(o => {
+        const sym = esc((o.symbol || '').replace('-USDT', ''));
+        const buy = (o.side || '') === 'buy';
+        const sideTag = `<span class="tag ${buy ? 'long' : 'short'}">${esc(o.side || '')}</span>`;
+        const venueTag = `<span class="tag ${o.venue === 'futures' ? 'futures' : 'spot'}">${esc(o.venue || '')}</span>`;
+        const kindTag = o.kind === 'reduce'
+          ? '<span class="tag" style="color:var(--cyan);background:rgba(45,212,255,0.1)">reduce-only</span>'
+          : '<span class="tag" style="color:var(--amber);background:rgba(255,176,32,0.1)">entry</span>';
+        const waitFor = o.price != null ? `${esc((o.type || 'limit'))} @ <b>${px(o.price)}</b>` : esc(o.type || 'limit');
+        return `<div class="pos">
+          <div class="pos-top">
+            <span class="sym-cell">${coinIcon(o.symbol, 18)}${sym}</span>
+            <span class="tags">${sideTag}${venueTag}${kindTag}</span>
+            ${o.ts ? `<span class="a-meta" style="margin-left:auto">${relTime(o.ts)}</span>` : ''}
+          </div>
+          <div class="pos-px"><span>waiting: ${waitFor}</span>${o.botEntry ? '<span>· bot entry</span>' : ''}</div>
+        </div>`;
+      }).join('');
+    }
+
     function renderNotes(notes) {
       const box = el('notesBox');
       notes = notes || {};
@@ -1008,6 +1046,7 @@
         renderVenue(s.kpis);
         if (!window._tradesLoaded) { renderTrades(s.trades); }   // fast seed; loadTrades() pulls fuller history
         renderPositions(s.positions);
+        renderPending(s.pendingOrders);
         renderCoins(s.coins);
         renderClosed(s.closedPositions);
         renderFeed(s.feed);
@@ -1056,7 +1095,7 @@
       el('modePill').className = 'pill muted';
       el('modePill').innerHTML = '<span class="dot" style="background:var(--amber)"></span> warming up';
       el('updatedPill').textContent = 'no data yet';
-      ['feedBox','positionsBox','coinsBox','closedBox','researchPlans','notesBox'].forEach(id => {
+      ['feedBox','positionsBox','pendingBox','coinsBox','closedBox','researchPlans','notesBox'].forEach(id => {
         el(id).innerHTML = '<div class="empty">Agents warming up… data appears once the bot publishes its first snapshot.</div>';
       });
       renderEquity([]); renderDonut({}); renderTrades([]);
