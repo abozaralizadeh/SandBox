@@ -264,6 +264,13 @@
     .pos-chart-slot { width: 100%; }
     .pos-chart { width: 100%; height: 240px; }
 
+    /* recently-closed: explicit entry→exit prices + entry/exit-quality feedback line */
+    .pos-exline { align-items: baseline; }
+    .pos-exline .arrow { color: var(--text-3); }
+    .pos-fb { font-family: var(--mono); font-size: 0.68rem; color: var(--text-2); margin-top: 6px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .pos-fb .up { color: var(--up); } .pos-fb .down { color: var(--down); }
+    .pos-fb .fb-warn { color: var(--amber, #f5b83d); }
+
     /* ── research / notes — only plan messages scroll; sentiment/watch-list pinned below ── */
     #researchPlans { max-height: 320px; overflow-y: auto; padding-right: 4px; }
     #researchPinned { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
@@ -485,7 +492,7 @@
       equityChart = echarts.init(el('equityChart'), null, { renderer: 'canvas' });
       donutChart = echarts.init(el('donutChart'), null, { renderer: 'canvas' });
       tradesChart = echarts.init(el('tradesChart'), null, { renderer: 'canvas' });
-      window.addEventListener('resize', () => { equityChart.resize(); donutChart.resize(); tradesChart.resize(); Object.values(posExpanded).forEach(s => s.chart && s.chart.resize()); });
+      window.addEventListener('resize', () => { equityChart.resize(); donutChart.resize(); tradesChart.resize(); Object.values(posExpanded).forEach(s => s.chart && s.chart.resize()); Object.values(pendExpanded).forEach(s => s.chart && s.chart.resize()); });
     }
 
     function renderEquity(points) {
@@ -604,6 +611,7 @@
 
     /* ---------- open-position candlestick (expandable) ---------- */
     const posExpanded = {};    // posKey -> { el, chart, iv }  (presence === expanded)
+    const pendExpanded = {};   // pendKey -> { el, chart, iv }  (resting-order candle charts)
     const _candleCache = {};   // "SYMBOL|iv" -> { ts, candles }
     const CHART_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><rect x="7" y="10" width="3" height="7"/><rect x="14" y="6" width="3" height="11"/></svg>';
 
@@ -691,6 +699,51 @@
       renderPositions(window._lastPositions);
     }
 
+    // ── Pending (resting) orders: same expandable candlestick as open positions, with the resting
+    //    limit price overlaid so you can see how far price must travel to fill it. ──
+    function pendKey(o) { return (o.symbol || '') + '|' + (o.venue || '') + '|' + (o.price || ''); }
+
+    function buildPendingOption(candles, o) {
+      // Reuse the position chart option, mapping the resting order's limit price onto the entry line
+      // and drawing the latest close as "mark" so the gap to fill is obvious. No TP/SL for a resting order.
+      const last = candles.length ? candles[candles.length - 1].c : null;
+      const opt = buildCandleOption(candles, { avgEntry: o.price, currentPrice: last, tpPrice: null, slPrice: null });
+      const line = (opt.series[0].markLine.data || []).find(l => Math.abs(l.yAxis - Number(o.price)) < 1e-12);
+      if (line) line.label.formatter = ((o.side || '') === 'buy' ? 'Buy @ ' : 'Sell @ ') + pxF(o.price);  // relabel Entry→order
+      return opt;
+    }
+
+    async function drawPendChart(key, o) {
+      const st = pendExpanded[key];
+      if (!st || !st.el.isConnected) return;
+      if (!st.chart) st.chart = echarts.init(st.el, null, { renderer: 'canvas' });
+      const candles = await getCandles(o.symbol, st.iv);
+      if (!pendExpanded[key]) return;
+      if (!candles.length) {
+        st.chart.setOption({ backgroundColor: 'transparent', xAxis: { show: false }, yAxis: { show: false }, series: [],
+          graphic: [{ type: 'text', left: 'center', top: 'middle', silent: true,
+            style: { text: 'price chart unavailable for ' + (o.symbol || ''), fill: 'rgba(138,160,180,0.6)', fontFamily: 'JetBrains Mono', fontSize: 11 } }] }, true);
+      } else {
+        st.chart.setOption(buildPendingOption(candles, o), true);
+      }
+      st.chart.resize();
+    }
+
+    function togglePendChart(idx) {
+      const o = (window._lastPending || [])[idx]; if (!o) return;
+      const key = pendKey(o);
+      if (pendExpanded[key]) { if (pendExpanded[key].chart) pendExpanded[key].chart.dispose(); delete pendExpanded[key]; }
+      else { const d = document.createElement('div'); d.className = 'pos-chart'; pendExpanded[key] = { el: d, chart: null, iv: '1hour' }; }
+      renderPending(window._lastPending);
+    }
+
+    function setPendChartIv(idx, iv) {
+      const o = (window._lastPending || [])[idx]; if (!o) return;
+      const key = pendKey(o); if (!pendExpanded[key] || pendExpanded[key].iv === iv) return;
+      pendExpanded[key].iv = iv;
+      renderPending(window._lastPending);
+    }
+
     // ── Recently closed positions: entry/exit on candles + the best exit that was on offer ──
     const _closedCharts = {};   // cidx -> ECharts instance
     let _closedSig = '';
@@ -743,7 +796,7 @@
 
     async function renderClosed(closed) {
       const box = el('closedBox'); if (!box) return;
-      closed = (closed || []).filter(c => c && c.symbol && c.closeTs).slice(0, 3);
+      closed = (closed || []).filter(c => c && c.symbol && c.closeTs).slice(0, 12);
       if (!closed.length) {
         box.innerHTML = '<div class="empty">No closed positions yet</div>';
         Object.values(_closedCharts).forEach(ch => ch.dispose && ch.dispose());
@@ -756,19 +809,35 @@
         _closedSig = sig;
         Object.values(_closedCharts).forEach(ch => ch.dispose && ch.dispose());
         for (const k in _closedCharts) delete _closedCharts[k];
+        const cpx = v => (v == null || isNaN(v)) ? '—' : Number(v).toPrecision(6);
+        const sgn = v => (v >= 0 ? '+' : '') + v;
         box.innerHTML = closed.map((c, i) => {
           const sym = esc((c.symbol || '').replace('-USDT', ''));
           const dur = (c.openTs && c.closeTs) ? Math.max(0, c.closeTs - c.openTs) : null;
           const durTxt = dur != null ? (dur >= 3600 ? (dur / 3600).toFixed(1) + 'h' : Math.round(dur / 60) + 'm') : '';
           const roe = c.roePct != null ? `<span class="pos-ret ${c.win ? 'up' : 'down'}">${fmtPct(c.roePct)}</span>` : `<span class="pos-ret ${c.win ? 'up' : 'down'}">${c.win ? 'win' : 'loss'}</span>`;
           const when = c.openTs ? `${fmtCandleTime(c.openTs)} → ${fmtCandleTime(c.closeTs)}` : `closed ${relTime(c.closeTs)}`;
+          const eNum = fnum(c.entryPrice), xNum = fnum(c.exitPrice);
+          // Explicit entry → exit prices as text (the chart labels alone were hard to read).
+          const exLine = (eNum != null || xNum != null)
+            ? `<div class="pos-px pos-exline"><span>entry <b>${cpx(eNum)}</b></span><span class="arrow">→</span><span>exit <b>${cpx(xNum)}</b></span></div>` : '';
+          // Entry/exit-quality feedback (unitless R + ATR): outcome, how far it went against the entry
+          // before working (MAE), and how stretched the entry was — so a spectator sees WHY it worked.
+          const fb = [];
+          if (c.realizedR != null) fb.push(`<span class="${c.realizedR >= 0 ? 'up' : 'down'}">${sgn(c.realizedR)}R</span>`);
+          if (c.maeR != null) fb.push(`<span title="max adverse excursion before it worked">MAE ${c.maeR}R</span>`);
+          if (c.entryExtensionAtr != null) fb.push(`<span title="how stretched the entry was vs the 15m VWAP">entry ${sgn(c.entryExtensionAtr)} ATR</span>`);
+          const fbLine = fb.length
+            ? `<div class="pos-fb">${fb.join('')}${c.betterEntryAvailable ? '<span class="fb-warn">· better entry was available</span>' : ''}</div>` : '';
           return `<div class="pos">
             <div class="pos-top">
               <span class="sym-cell">${coinIcon(c.symbol, 18)}${sym}</span>
               <span class="tags"><span class="tag ${c.side === 'long' ? 'long' : 'short'}">${esc(c.side || '')}</span></span>
               ${roe}
             </div>
+            ${exLine}
             <div class="pos-px"><span>${when}</span>${durTxt ? `<span>· held ${durTxt}</span>` : ''}</div>
+            ${fbLine}
             <div class="pos-chart" data-cidx="${i}"></div>
           </div>`;
         }).join('');
@@ -948,9 +1017,15 @@
       const box = el('pendingBox');
       if (!box) return;
       orders = (orders || []).filter(o => o && o.symbol);
+      window._lastPending = orders;
+      // Drop charts for orders that are no longer resting (filled/cancelled), freeing their ECharts instance.
+      const liveKeys = new Set(orders.map(pendKey));
+      Object.keys(pendExpanded).forEach(k => {
+        if (!liveKeys.has(k)) { if (pendExpanded[k].chart) pendExpanded[k].chart.dispose(); delete pendExpanded[k]; }
+      });
       if (!orders.length) { box.innerHTML = '<div class="empty">No resting orders</div>'; return; }
       const px = v => (v == null || isNaN(v)) ? '—' : Number(v).toPrecision(6);
-      box.innerHTML = orders.map(o => {
+      box.innerHTML = orders.map((o, i) => {
         const sym = esc((o.symbol || '').replace('-USDT', ''));
         const buy = (o.side || '') === 'buy';
         const sideTag = `<span class="tag ${buy ? 'long' : 'short'}">${esc(o.side || '')}</span>`;
@@ -959,15 +1034,32 @@
           ? '<span class="tag" style="color:var(--cyan);background:rgba(45,212,255,0.1)">reduce-only</span>'
           : '<span class="tag" style="color:var(--amber);background:rgba(255,176,32,0.1)">entry</span>';
         const waitFor = o.price != null ? `${esc((o.type || 'limit'))} @ <b>${px(o.price)}</b>` : esc(o.type || 'limit');
-        return `<div class="pos">
+        const open = !!pendExpanded[pendKey(o)];
+        const iv = open ? pendExpanded[pendKey(o)].iv : '1hour';
+        const ivBtns = ['15min', '1hour', '4hour'].map(v =>
+          `<button class="pos-iv-btn${v === iv ? ' active' : ''}" data-idx="${i}" data-iv="${v}">${v.replace('min', 'm').replace('hour', 'h')}</button>`).join('');
+        return `<div class="pos" data-idx="${i}">
           <div class="pos-top">
             <span class="sym-cell">${coinIcon(o.symbol, 18)}${sym}</span>
             <span class="tags">${sideTag}${venueTag}${kindTag}</span>
             ${o.ts ? `<span class="a-meta" style="margin-left:auto">${relTime(o.ts)}</span>` : ''}
+            <button class="pos-chart-btn${open ? ' open' : ''}" data-idx="${i}" aria-expanded="${open}" title="Toggle price chart">${CHART_ICON}<span>${open ? 'Hide' : 'Chart'}</span></button>
           </div>
           <div class="pos-px"><span>waiting: ${waitFor}</span>${o.botEntry ? '<span>· bot entry</span>' : ''}</div>
+          <div class="pos-chart-wrap pend-chart-wrap" data-idx="${i}"${open ? '' : ' style="display:none"'}>
+            <div class="seg pos-iv">${ivBtns}</div>
+            <div class="pos-chart-slot pend-chart-slot" data-idx="${i}"></div>
+          </div>
         </div>`;
       }).join('');
+      // Re-attach each expanded order's persistent chart element into its fresh slot, then redraw
+      // (same pattern as open positions, so the 30s refresh updates in place instead of tearing down).
+      orders.forEach((o, i) => {
+        const key = pendKey(o);
+        if (!pendExpanded[key]) return;
+        const slot = box.querySelector(`.pend-chart-slot[data-idx="${i}"]`);
+        if (slot) { slot.appendChild(pendExpanded[key].el); drawPendChart(key, o); }
+      });
     }
 
     function renderNotes(notes) {
@@ -1114,6 +1206,15 @@
         if (cb) { togglePosChart(Number(cb.dataset.idx)); return; }
         const ib = e.target.closest('.pos-iv-btn');
         if (ib) { setPosChartIv(Number(ib.dataset.idx), ib.dataset.iv); }
+      });
+      // Same delegation for the resting-orders panel (scoped to #pendingBox, so the shared
+      // .pos-chart-btn/.pos-iv-btn classes route to the pending-order chart, not the position one).
+      const pendBox = el('pendingBox');
+      if (pendBox) pendBox.addEventListener('click', e => {
+        const cb = e.target.closest('.pos-chart-btn');
+        if (cb) { togglePendChart(Number(cb.dataset.idx)); return; }
+        const ib = e.target.closest('.pos-iv-btn');
+        if (ib) { setPendChartIv(Number(ib.dataset.idx), ib.dataset.iv); }
       });
       loadLive();
       loadEquity('all');
