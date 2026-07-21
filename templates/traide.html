@@ -277,8 +277,11 @@
     #researchPinned:empty { margin-top: 0; padding-top: 0; border-top: 0; }
     #researchPinned .note { margin-bottom: 8px; } #researchPinned .note:last-child { margin-bottom: 0; }
     #notesBox { max-height: 200px; overflow-y: auto; padding-right: 4px; }
-    #researchPlans::-webkit-scrollbar, #notesBox::-webkit-scrollbar { width: 7px; }
-    #researchPlans::-webkit-scrollbar-thumb, #notesBox::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 6px; }
+    /* Recently closed can list up to 12 trades (each with a chart), so cap its height and scroll it
+       in place — same pattern as the decision feed — instead of stretching the whole page. */
+    #closedBox { max-height: 560px; overflow-y: auto; padding-right: 4px; }
+    #researchPlans::-webkit-scrollbar, #notesBox::-webkit-scrollbar, #closedBox::-webkit-scrollbar { width: 7px; }
+    #researchPlans::-webkit-scrollbar-thumb, #notesBox::-webkit-scrollbar-thumb, #closedBox::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 6px; }
     .note .acts { margin: 8px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
     .note .acts li { font-family: var(--mono); font-size: 0.68rem; color: var(--text-2); line-height: 1.34; padding-left: 14px; position: relative; }
     .note .acts li::before { content: '▸'; position: absolute; left: 0; color: var(--up); opacity: 0.7; }
@@ -305,7 +308,7 @@
       /* Let the page scroll as one column. The inner max-height scrollers (decision feed, research,
          supervisor notes) become cramped boxes on a phone and clip their lists after scroll — expand
          them so each list flows with the page instead of being cut off inside a nested scroller. */
-      .feed, #researchPlans, #notesBox { max-height: none; overflow: visible; }
+      .feed, #researchPlans, #notesBox, #closedBox { max-height: none; overflow: visible; }
 
       .pos-chart { height: 200px; }
       /* Icon-only chart toggle on phones so the position header never overflows; the cyan
