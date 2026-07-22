@@ -305,10 +305,15 @@
       .bg-glow.g2 { background: radial-gradient(circle, rgba(45,212,255,0.13), rgba(45,212,255,0) 70%); }
       .bg-grid { -webkit-mask-image: none; mask-image: none; }
 
-      /* Let the page scroll as one column. The inner max-height scrollers (decision feed, research,
-         supervisor notes) become cramped boxes on a phone and clip their lists after scroll — expand
-         them so each list flows with the page instead of being cut off inside a nested scroller. */
-      .feed, #researchPlans, #notesBox, #closedBox { max-height: none; overflow: visible; }
+      /* Keep the long lists (decision feed, recently closed, research, notes) SCROLLABLE on mobile
+         instead of expanding them — otherwise each grows to its full length and the page becomes
+         enormous. Viewport-relative caps adapt to the phone; momentum scrolling keeps it smooth. The
+         compositing/"content disappears" bug that once motivated expanding them is fixed above by
+         dropping the fixed-layer blur/mask, so a nested scroller is safe here. */
+      .feed { max-height: 55vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+      #closedBox { max-height: 60vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+      #researchPlans { max-height: 45vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+      #notesBox { max-height: 40vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
 
       .pos-chart { height: 200px; }
       /* Icon-only chart toggle on phones so the position header never overflows; the cyan
