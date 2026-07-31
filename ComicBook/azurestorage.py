@@ -318,6 +318,65 @@ def get_arc_glossary(arc: dict, lang: str) -> dict:
     return {}
 
 
+def save_arc_style_card(
+    arc_id: str,
+    card_json: str,
+    family: str,
+    construction: str,
+    medium: str,
+    version: int,
+):
+    """Persist the arc's StyleCard.
+
+    Stored as ONE JSON property rather than exploded into a column per field: the arc row
+    already carries story_outline, three glossaries and key_panels against Azure Table's 1 MB
+    entity ceiling. `family` and `construction` are denormalized alongside it because the
+    rotation query selects on them (see get_recent_arc_summaries) and parsing ten JSON blobs
+    to compute an LRU would be wasteful.
+
+    The card runs 2-4 KB so the blob offload below should never fire; it is here because
+    MAX_TABLE_PROPERTY_CHARS is a hard failure, not a soft one.
+    """
+    if not _PERSIST:
+        return
+    entity = {
+        "PartitionKey": _ARC_PARTITION,
+        "RowKey": arc_id,
+        "style_family": family,
+        "style_construction": construction,
+        # Denormalized for the collision check, which compares how two arcs were physically
+        # produced rather than what their labels happen to say. Truncated: it is a comparison
+        # key here, not the authoritative copy (that lives inside style_card).
+        "medium_and_process": (medium or "")[:1024],
+        "style_card_version": version,
+    }
+    if len(card_json) > MAX_TABLE_PROPERTY_CHARS:
+        blob_name = upload_text_to_blob(card_json, extension=".json")
+        entity["style_card"] = ""
+        entity["style_card_blob_name"] = blob_name
+    else:
+        entity["style_card"] = card_json
+        entity["style_card_blob_name"] = ""
+    arcs_table.upsert_entity(entity=entity, mode=UpdateMode.MERGE)
+
+
+def hydrate_arc_style_card(arc: dict) -> dict:
+    """Fetch the style card back out of blob storage when it was offloaded.
+
+    Returns the arc dict with `style_card` populated in place, so callers can hand it
+    straight to ComicBook.style.load_style_card.
+    """
+    if not arc:
+        return arc
+    blob_name = arc.get("style_card_blob_name", "")
+    if blob_name and not arc.get("style_card"):
+        try:
+            arc["style_card"] = download_html_from_blob(blob_name)
+        except Exception as exc:
+            print(f"[ComicBook] Unable to fetch style card blob '{blob_name}': {exc}")
+    return arc
+
+
 def ensure_active_arc(target_date: Optional[datetime] = None, min_days: int = 7, max_days: int = 10) -> dict:
     target_date = target_date or datetime.utcnow()
     arc = get_latest_arc()
@@ -458,10 +517,19 @@ def get_arc_list() -> List[dict]:
 
 
 def get_recent_arc_summaries(limit: int = 10) -> List[dict]:
-    """Return the most recent arcs with title, logline, genre, and art_style (newest first)."""
+    """Return the most recent arcs with title, logline, genre, and style axes (newest first).
+
+    NOTE: `select` is explicit. A field added to the arc entity but NOT listed here comes back
+    empty with no error — which would silently make the style rotation believe every family is
+    unused. Any new style axis must be added in BOTH places below.
+    """
     arcs = list(arcs_table.query_entities(
         f"PartitionKey eq '{_ARC_PARTITION}'",
-        select=["RowKey", "title", "logline", "genre", "art_style", "start_date", "status"],
+        select=[
+            "RowKey", "title", "logline", "genre", "art_style", "start_date", "status",
+            "style_family", "style_construction", "style_card_version",
+            "medium_and_process",
+        ],
         results_per_page=100,
     ))
     arcs.sort(key=lambda x: x.get("start_date", ""), reverse=True)
@@ -471,6 +539,11 @@ def get_recent_arc_summaries(limit: int = 10) -> List[dict]:
             "logline": a.get("logline", ""),
             "genre": a.get("genre", ""),
             "art_style": a.get("art_style", ""),
+            # Style axes — empty on arcs that predate the StyleCard, which the rotation
+            # helpers treat as "unknown" rather than counting them.
+            "style_family": a.get("style_family", ""),
+            "style_construction": a.get("style_construction", ""),
+            "medium_and_process": a.get("medium_and_process", ""),
         }
         for a in arcs[:limit]
     ]

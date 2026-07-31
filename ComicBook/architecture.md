@@ -32,9 +32,16 @@ flowchart TB
     SAVE["save_episode<br/>(blob offload if > 32K)"]
   end
 
+  subgraph PRE["Pre-chain — runs deterministically when arc is None or a restyle is requested"]
+    direction TB
+    AD["🎨 ArtDirector · temp 1.2<br/>web-search a production tradition<br/>commit_style_card → StyleCard for the arc"]
+    SF["🔬 StyleForensics · temp 0.2<br/>sees ONLY the sheet image — blind cataloguer"]
+    SA["⚖️ StyleAuditor · temp 0.1<br/>sees the two cards, NEVER the image<br/>pass / fail + intensified directive"]
+  end
+
   subgraph PIPE["Handoff chain — ComicBook/agents.py · run_comic_pipeline · Runner.run(Director)"]
     direction TB
-    DIR["🎭 Director · temp 1.2<br/>web-search inspiration · originality check<br/>create / continue arc + episode plan"]
+    DIR["🎭 Director · temp 1.2<br/>web-search inspiration · originality check<br/>create / continue arc + episode plan<br/>(art style is ASSIGNED, not chosen)"]
     OC["🔎 OriginalityCritic · temp 0.2<br/>(as_tool: check_arc_originality)"]
     ST["✍️ Storyteller · temp 0.5<br/>panel-by-panel script"]
     CART["🎨 Cartoonist<br/>character sheet · panels · assemble (en)"]
@@ -49,13 +56,19 @@ flowchart TB
     RET -. as_tool .-> PA
   end
 
+  AD -->|assigned_style in the Director's input| DIR
+  CART -->|character sheet URL| SF
+  SF -->|observed card| SA
+  SA -->|fail → intensified directive, regenerate sheet (max 2)| SF
+
   REC["🛟 Deterministic recovery<br/>if a stage's artifact (html_en / html_it / html_fa)<br/>is missing in state, run that stage directly"]
 
   subgraph TOOLS["Function tools — deterministic only (no LLM inside a tool)"]
     direction TB
     WS["WebSearchTool"]
     ARCT["Arc tools<br/>get_arc_status · get_recent_arcs<br/>start_new_arc · end_current_arc · save_story_outline"]
-    IMGT["Cartoonist tools<br/>get_cartoonist_brief · generate_character_sheet<br/>generate_panel_image · mark_key_panel · assemble_layout"]
+    STYT["Style tools (ArtDirector)<br/>get_style_history (LRU families + banned constructions)<br/>commit_style_card (refuses axis collisions)"]
+    IMGT["Cartoonist tools<br/>get_cartoonist_brief · generate_character_sheet<br/>generate_panel_image · mark_key_panel · assemble_layout<br/>(style block applied in code by ComicBook/style.py)"]
     LOCT["Localization tools<br/>save_beat_sheet (Director) · get_localization_brief<br/>save_local_outline · assemble_localized (authors)"]
   end
 
@@ -178,18 +191,48 @@ sequenceDiagram
   Because LLMs don't always call their transfer tool, a **deterministic recovery** runs any stage
   whose artifact (`html_en` / `html_it` / `html_fa`) is missing in `state` directly with a clean
   input — so the comic always completes.
-- **Originality (three-layer guard).** New arcs are kept fresh by: (1) the Director's prompt
+- **Story originality (three-layer guard).** New arcs are kept fresh by: (1) the Director's prompt
   mandates web search and a candidate→check→retry loop; (2) `check_arc_originality` is the
   **OriginalityCritic** agent exposed via `as_tool` (it reads recent arcs with `get_recent_arcs`
-  and returns `ok`/`too_similar` + guidance); (3) `start_new_arc` refuses an art style that
-  collides with a recent arc. The Director is the creative engine (temp 1.2); the Storyteller is
-  cool (temp 0.5) so it faithfully executes the plan.
+  and returns `ok`/`too_similar` + guidance); (3) `start_new_arc` refuses when no style has been
+  assigned, or when the Director tried to substitute its own. The critic judges the **story only**
+  — visual originality is owned by the Art Director below. The Director is the creative engine
+  (temp 1.2); the Storyteller is cool (temp 0.5) so it faithfully executes the plan.
+- **Art style = a researched Style Card, applied in code** (`ComicBook/style.py`). The
+  **ArtDirector** runs *before* the chain whenever `arc is None` (or a restyle is requested),
+  web-searches for a physical production tradition, and commits a `StyleCard`: medium and
+  process, linework, palette, light model, texture, figure construction, a 90-160-word
+  `render_directive` and positive `contrastive_assertions`. `compose_image_prompt` /
+  `compose_sheet_prompt` paste that spec into **every** image prompt from code, so the style no
+  longer depends on the Cartoonist retyping a label. Three things follow from hard-won detail:
+  the directive must be **brand-free** (the safety layer rejects style-mimicry by studio name);
+  "avoid X" is never sent to the image model (**no negation channel** — naming a thing summons
+  it, so the avoid-list lives in `generic_tells`, used only by the audit); and the reference
+  sheet is framed as an **artefact of the medium** via `sheet_conceit`, never "a character
+  reference sheet", because that phrase carries a stronger visual prior than any style adjective
+  and this one image anchors the whole arc.
+- **Visual anti-repetition is computed, not remembered.** `starved_families` / `banned_constructions`
+  derive a least-recently-used rotation from real arc history over two axes — production family
+  and figure construction — and `commit_style_card` refuses a card colliding on family (last 2),
+  construction (last 3), or physical process (token overlap, last 5). Style *names* are never
+  the test: a different label is not a different image.
+- **Style audit — the only check on actual pixels.** Two structurally blind agents:
+  **StyleForensics** sees the generated sheet and nothing else (it does not know what it was
+  meant to be), and **StyleAuditor** compares the declared and observed cards and never sees the
+  image. A single "does this match?" judge would be handed the answer and agree — the same
+  firewall logic as the beat sheet. On `fail` the auditor rewrites the whole `render_directive`
+  and the sheet is regenerated (max 2). It runs post-chain, so it corrects the anchor for
+  episodes 2..N; use `COMICBOOK_RESTYLE_ARC=true` to change a running arc's look today. The
+  audit can never fail a comic — every error path logs and continues.
 - **No LLM calls inside tools.** A `@function_tool` only does deterministic work (storage,
   assembly, image generation, string logic). Anything that reasons with the model is an Agent,
   reached via `as_tool` or a handoff.
 - **Character consistency.** The Cartoonist generates one **character reference sheet** per arc
   (cached on the arc), then draws each panel sequentially with references (sheet → mid-arc key
-  panels → prior-episode anchors) via Azure OpenAI image editing.
+  panel → prior-episode anchor) via Azure OpenAI image editing. The reference stack is capped at
+  **4** images: each reference also pulls the render toward its own look, so a deep stack
+  averages panels toward the mean and flattens the texture the style lives in. Panels render at
+  `COMICBOOK_PANEL_QUALITY` (default `high`) for the same reason.
 - **Multi-language (blind native authors).** English is native. The **Reteller** is the
   **Localization Director**: it reads the English plan/script and distills a language-neutral
   **beat sheet** (per panel: what the art depicts, each speaker's intent/emotion, `must_land`

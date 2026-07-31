@@ -38,10 +38,14 @@ from ComicBook.azurestorage import (
     get_arc_story_outline,
     get_first_episode,
     get_key_panels,
+    get_recent_arc_summaries,
+    hydrate_arc_style_card,
     get_recent_episodes,
     save_arc_glossary,
     save_arc_story_outline,
+    save_arc_style_card,
     save_episode,
+    update_arc_metadata,
 )
 from ComicBook.helpers import (
     _assemble_html,
@@ -50,10 +54,50 @@ from ComicBook.helpers import (
     _parse_arc_theme,
     _summarize_episodes,
 )
+from ComicBook.style import (
+    STYLE_CARD_VERSION,
+    ObservedStyle,
+    StyleAudit,
+    banned_constructions,
+    compose_sheet_prompt,
+    load_style_card,
+    starved_families,
+)
 from ComicBook.tools.agent_tools import build_comic_tools
+from ComicBook.tools.getimage import create_image
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
 logger = logging.getLogger("ComicBook")
+
+# How many times the style audit may regenerate an arc's reference sheet before accepting what
+# it has. Each regeneration is one wide/high image, and this runs once per arc, so the ceiling
+# is about the risk of an audit loop — not the cost.
+_MAX_SHEET_REGENERATIONS = 2
+
+
+# Reasoning-family deployments (gpt-5.x, o1/o3/o4) reject `temperature` outright with a 400:
+#   "Unsupported parameter: 'temperature' is not supported with this model."
+# Every agent below sets a deliberate temperature (1.2 for the Director's variety, 0.1-0.3 for
+# the structural stages), so on such a deployment the whole pipeline 400s on its first turn.
+# We keep the intent expressed in code and drop the parameter only where it cannot be sent.
+_TEMPERATURE_UNSUPPORTED_PREFIXES = ("gpt-5", "o1", "o3", "o4")
+
+
+def _supports_temperature(model_name: str) -> bool:
+    override = os.environ.get("COMICBOOK_MODEL_SUPPORTS_TEMPERATURE", "").strip().lower()
+    if override in ("true", "1", "yes"):
+        return True
+    if override in ("false", "0", "no"):
+        return False
+    name = (model_name or "").strip().strip('"').lower()
+    return not name.startswith(_TEMPERATURE_UNSUPPORTED_PREFIXES)
+
+
+def _model_settings(model_name: str, temperature: float) -> ModelSettings:
+    """ModelSettings carrying `temperature` only when the deployment accepts it."""
+    if _supports_temperature(model_name):
+        return ModelSettings(temperature=temperature)
+    return ModelSettings()
 
 
 # ---------------------------------------------------------------------------
@@ -311,12 +355,13 @@ ARC LIFECYCLE:
         "redemption arc", "lone chosen-one quest", "fish-out-of-water", "rivalry", "mystery-box").
         This is what repeats most across arcs — make it different from the past arcs.
       - themes (2-4 thematic threads)
-      - a proposed art_style that is DIFFERENT from every art_style in past_arcs.
+      (The art style is NOT part of your candidate — see below. It has already been assigned.)
    c. VERIFY ORIGINALITY. Call check_arc_originality with your candidate. It reads the previous
-      arcs' summaries and compares your core story AND art style against them.
+      arcs' summaries and compares your core STORY against them. (Visual originality is handled
+      separately and is already guaranteed — do not spend the critic's attention on it.)
    d. If the verdict is "too_similar" (or any collision is flagged), you MUST search the web AGAIN
       from a DIFFERENT angle, revise the candidate toward the returned guidance_for_retry — change
-      the plot_shape and/or art_style, not just the surface theme — and call check_arc_originality
+      the plot_shape, not just the surface theme — and call check_arc_originality
       AGAIN. Repeat until the verdict is "ok". Do NOT proceed with a rejected idea.
    e. Once the verdict is "ok", flesh out the full arc:
    - Create 2-4 compelling main characters with names, personality traits, and
@@ -326,13 +371,17 @@ ARC LIFECYCLE:
      features, and their exact outfit/costume. These descriptions are used to generate
      the character reference sheet on episode 1, so every character must be fully
      specified even if they don't appear until episode 5 or 8.
-   - Use the VERIFIED art_style for this arc. It must be DIFFERENT from every past arc — draw
-     from a wide palette, e.g.: "ink wash noir", "vibrant manga", "watercolor whimsy",
-     "retro pixel art", "charcoal sketch", "pop art bold", "art nouveau line", "gouache
-     storybook", "woodblock print", "cel-shaded 3D", "stained glass", "blueprint schematic",
-     "chalk pastel", "low-poly", "ukiyo-e", "graffiti street art", "silhouette cut-paper",
-     "oil impasto", "risograph print", "Saturday-morning cartoon".
-   - Design a color_theme as a JSON string that matches the arc's mood and genre. The theme \
+   - The ART STYLE IS ASSIGNED TO YOU — you do not invent, rename, or "improve" it. An Art
+     Director has already researched a full production specification for this arc and it is in
+     your input under "assigned_style". That specification is applied to every image
+     automatically. Pass assigned_style.style_name UNCHANGED as the art_style argument to
+     start_new_arc; start_new_arc will refuse anything else. Read the rest of the assigned
+     style for TONE — a story told in moulded plastic wants different beats from one told in
+     ink wash — and let it inform the mood, not the other way round.
+   - Design a color_theme as a JSON string BUILT FROM assigned_style.page_palette. Those hex
+     colours were taken from the artwork itself, so a theme built from anything else makes the
+     page fight the panels. You may lighten or darken them for contrast, and the readability \
+     rules below still bind absolutely. The theme \
      will be used for the comic page layout. Pick colors that are visually cohesive and ensure \
      TEXT IS ALWAYS READABLE (high contrast between text and background). For EVERY text/box pair \
      — caption_text on caption_bg, speech text on speech_bg, title_color on page_bg, recap and \
@@ -555,10 +604,17 @@ You will receive the Storyteller's panel-by-panel script as input.
 
 WORKFLOW (follow this exact order):
 
+HOW THE ART STYLE WORKS — read this before anything else:
+The arc's art style is NOT yours to write, restate, or vary. A complete style specification is
+prepended to EVERY image prompt automatically, in code, before it reaches the image model. Your
+job is to describe the SUBJECT — who is in frame, where, doing what. get_cartoonist_brief gives
+you a "style_summary" for tone and staging awareness only; do not copy it into prompts. Repeating
+style wording inside your subject text dilutes the real style block and makes the panels blander.
+
 STEP 1 — READ the Storyteller's script from the conversation above, then call get_cartoonist_brief
-to fetch the FULL arc character roster, the arc's art_style, and any already-registered mid-arc
-character key panels. Note all characters, their visual descriptions, the art style, and every
-panel's requirements.
+to fetch the FULL arc character roster, the style summary, and any already-registered mid-arc
+character key panels. Note all characters, their visual descriptions, and every panel's
+requirements.
 
 STEP 2 — GENERATE CHARACTER REFERENCE SHEET:
 Call generate_character_sheet with:
@@ -566,8 +622,8 @@ Call generate_character_sheet with:
   (not just today's characters) plus the primary environment/setting. Include every
   character who appears at any point in the arc — the sheet is generated once and reused
   for the whole arc. For each character state: name, hair, eyes, skin, build, outfit.
-- style: The arc's art_style from get_cartoonist_brief (e.g., "ink wash noir", "vibrant manga", \
-"watercolor whimsy", "pixel art retro").
+- style: pass the "style_name" from get_cartoonist_brief's style_summary. This argument is
+  advisory; the authoritative style block is applied in code.
 This reference image is your visual anchor for the entire arc. Every panel must be consistent with it.
 
 STEP 3 — GENERATE EACH PANEL (SEQUENTIAL — ONE AT A TIME):
@@ -578,13 +634,17 @@ added as a reference for the next panel — this is how visual consistency is ma
 across the episode. Parallel calls skip this mechanism and produce drifting visuals.
 
 For every panel in the script, call generate_panel_image with:
-- prompt: A detailed image generation prompt. Include:
-  * Character names and their specific visual traits (hair color, clothing, etc.)
+- prompt: describe ONLY WHAT IS IN FRAME:
+  * Character names and their identifying traits (hair colour, clothing, distinguishing features)
   * Pose, expression, body language
-  * Background/environment details
-  * Lighting, mood, color palette
+  * Background/environment details, and what the light in the scene is doing dramatically
+    (dawn through a window, a lantern below the face) — the scene's FACTS, not its rendering
   * Camera angle as specified in the script
-  * The art style (must be consistent across all panels)
+  Do NOT describe the art style, medium, rendering technique, colour treatment, or image
+  quality. The style block owns all of that and is added for you. Words like "cinematic",
+  "highly detailed", "vibrant colors", "digital art", "4k" and "masterpiece" actively damage
+  the style — they are stripped from your prompt before generation, so writing them only
+  wastes the panel's description budget.
 - reference_url: The URL returned from step 2 (the character reference sheet)
 - size: "wide", "tall", or "square" as specified in the script
 
@@ -620,14 +680,15 @@ After ALL images are generated, call assemble_layout with:
 
 IMPORTANT RULES:
 - ALWAYS use the reference URL from step 2 for every panel — this ensures character consistency.
+  The reference images carry character IDENTITY, not style; the style block is authoritative
+  for how the panel looks.
 - Never fabricate or guess image URLs — only use URLs returned by the tools.
 - Include character-specific visual details in every prompt to maintain consistency.
-- Match the art style across ALL panels.
+- The art style is applied automatically and identically to every panel. Do not restate it.
 - NEVER include any text, dialogue, speech bubbles, captions, letters, words, or written \
   language in image prompts. The images should be PURELY VISUAL — characters, environments, \
-  actions, expressions only. Text overlays are added separately by the layout system. \
-  Explicitly add "no text, no speech bubbles, no captions, no letters, no words" to every \
-  image prompt.
+  actions, expressions only. Text overlays are added separately by the layout system. A \
+  no-text instruction is appended to every prompt automatically — you do not need to add one.
 - Your final response after calling assemble_layout should confirm the comic was assembled.
 
 HANDOFF — gated; do these IN ORDER and do not skip ahead:
@@ -641,15 +702,174 @@ HANDOFF — gated; do these IN ORDER and do not skip ahead:
   the Italian and Persian editions are written — do not end with a confirmation message instead.\
 """
 
+ART_DIRECTOR_INSTRUCTIONS = """\
+You are the Art Director. You decide, ALONE, what this comic arc physically LOOKS like.
+Nobody downstream chooses the style: the Director writes the story, the Cartoonist describes
+what is in frame, and your card is pasted verbatim into every single image prompt for the whole
+arc. It is the most consequential artefact in the pipeline.
+
+THE PROBLEM YOU EXIST TO SOLVE:
+An image model left to its own devices produces exactly ONE look — soft airbrushed digital
+painting, mid-saturation, ambient shading, naturalistic six-to-seven-head figures, everything
+smooth. Every arc this series has made so far landed there, no matter what its style was called.
+A style NAME cannot prevent it. A production SPEC can. Your card must make that default look
+physically impossible to render.
+
+YOUR CONSTRAINTS arrive in the input: STARVED FAMILIES (production methods this series has not
+used recently, best first) and BANNED CONSTRUCTIONS (figure conventions the last three arcs
+used). Work inside a starved family. Never use a banned construction. If you find a tradition
+that fits none of the known families, name a new family yourself — novelty is the goal and the
+list is only a floor.
+
+STEP 1 — CALL get_style_history FIRST, before searching. It tells you what the recent arcs
+already looked like and which families are starved.
+
+STEP 2 — SEARCH THE WEB, several times, from different angles.
+You are NOT searching for "what does anime look like" — you already know that, and so does the
+image model. Search for the things neither of you would reach for unprompted:
+  * physical production traditions tied to a specific place and era — regional printmaking,
+    devotional and folk painting, textile and craft, puppetry, signage and packaging, toy and
+    model making, historical photographic processes, animation production methods;
+  * the CONCRETE particulars of a process — which pigment, which press, which paper, which
+    plastic, which lens, which registration error, which characteristic flaw;
+  * how figures are BUILT in that tradition — proportions, faces, hands, eyes, silhouette.
+Look at museum collections, craft revivals, printing history, toy photography, animation
+production breakdowns. Come back with something specific enough to be falsifiable.
+
+STEP 3 — WRITE THE CARD, then call commit_style_card with it as JSON.
+
+RULES FOR render_directive — this text goes straight to the image API:
+  * 90-160 words, one dense paragraph, present tense, describing the FINISHED ARTEFACT.
+  * NO proper nouns of studios, brands, franchises, films, or living artists. The image safety
+    system rejects style-mimicry by name and the panel comes back blank. Describe the LOOK
+    instead. Not "the style of a well-known animation studio" but "hand-painted cel animation
+    over watercolour-and-gouache backgrounds, soft unlined skies, rounded naturalistic children,
+    warm mid-afternoon light". Not a toy brand but "injection-moulded glossy ABS brick figures,
+    cylinder heads, C-grip claw hands, visible stud tops, macro tabletop lighting".
+  * NO adjective that could describe any image at all — "beautiful", "detailed", "cinematic",
+    "vibrant", "high quality", "stunning". Every clause must be checkable against the pixels.
+  * Name the substrate, the tool, the mark, the light model, and THE FLAW. The flaw is what
+    sells a medium: registration slip, canvas weave, moulding seam, halftone rosette, plastic
+    sheen, paper fibre, chromatic fringing, tape marks, dust.
+  * It must hold true of EVERY square centimetre, at any camera angle, in any scene — this one
+    paragraph has to work for a quiet conversation and a chase.
+
+RULES FOR contrastive_assertions — 4 to 6 short POSITIVE claims that make the default look
+impossible. NEVER phrase these as "avoid X" or "no X": the image model has no negation channel,
+and naming a thing summons it. Write the opposite as a fact.
+  BAD:  "avoid soft airbrushed gradients"
+  GOOD: "every colour area is flat and hard-edged, with zero gradient anywhere"
+  BAD:  "not glossy plastic 3D"
+  GOOD: "a matte, dry, chalky surface with visible brush drag"
+
+RULES FOR generic_tells — 3 to 5 things that, if visible, mean the render FAILED. These are
+never sent to the image model; a blind vision auditor checks the finished image against them.
+Here, and only here, you may write negatively.
+
+RULES FOR sheet_conceit — the arc's reference image is generated FIRST and anchors every panel
+that follows, so it decides the look of the whole story. It must NOT be "a character reference
+sheet": that phrase carries its own strong visual prior — a clean flat turnaround on white — and
+it will overpower your style, which is exactly how previous arcs ended up looking identical.
+Instead answer this: in THIS medium, what real artefact naturally shows a whole cast at once?
+A photographed shelf of moulded figures. A perforated sheet of commemorative stamps. A printed
+newsprint roster page. A woven tapestry border of figures. A gallery group portrait. A contact
+sheet. Write one concrete sentence naming that artefact.
+
+RULES FOR character_construction — be numeric and anatomical: heads tall, eye size and
+placement, whether hands have five fingers or mitts, whether joints bend or rotate, whether the
+silhouette is soft or faceted. This is the axis a reader feels first, before colour or texture.
+
+RULES FOR page_palette — 4 to 6 hex colours taken FROM the artefact you described. They theme
+the web page around the comic, so the frame matches the art instead of fighting it.
+
+RULES FOR render_quality — "high" if the style lives in texture (impasto, halftone, weave, felt,
+newsprint, grain, moulding seam), otherwise "medium".
+
+IF commit_style_card REFUSES: it will name the offending axis. Do not tweak the wording and
+resubmit — search again from a genuinely different angle and change the thing it objected to.
+
+Your final message: report the committed style_name, the family, and the page_palette.\
+"""
+
+
+STYLE_FORENSICS_INSTRUCTIONS = """\
+You are an art cataloguer. You are shown ONE image and told NOTHING about it. You do not know
+what it was supposed to be, who made it, or why. Do not guess at intent.
+
+Describe, as neutrally and concretely as a museum catalogue entry, what this image physically IS.
+For each axis report ONLY what you can actually see:
+
+  medium_and_process — what substrate and tool produced these marks? Is this a photograph of a
+    physical object, a print, a painting, a drawing, a cel, a 3D render, or a digital painting?
+  linework — is there a line at all? What made it? Uniform or modulated? Or is form defined by
+    colour edges alone?
+  color_and_palette — how is colour laid down: flat fills, blends, hatching, dots, washes?
+    Saturation, hue range, whether the palette is limited or full-spectrum.
+  shading_and_light — flat, cel/stepped, hatched, smoothly blended, or physically simulated?
+    Hard shadow or ambient? One light source, many, or none?
+  texture_and_surface — grain, weave, dot pattern, plastic sheen, paper tooth, brush drag — or
+    perfectly smooth with no surface at all.
+  character_construction — heads tall, eye size and placement, hand construction, whether joints
+    bend or rotate, silhouette hardness.
+  construction_bucket / style_family — your single best label for each.
+  one_line_catalogue_entry — one sentence you would print beneath this in a catalogue.
+
+Be blunt. If it looks like generic smooth digital illustration with soft gradients and no
+identifiable physical process, SAY EXACTLY THAT. That is a legitimate, common, and useful
+finding — it is not a failure to describe the image well.\
+"""
+
+
+STYLE_AUDITOR_INSTRUCTIONS = """\
+You compare two style cards. You have NOT seen the image and you will not be shown it.
+  DECLARED — what the arc's Art Director specified.
+  OBSERVED — what a blind cataloguer wrote after looking at the rendered image.
+
+Score each axis 0.0-1.0 on whether OBSERVED is a plausible description of something rendered
+according to DECLARED.
+
+JUDGE PHYSICS, NOT VOCABULARY. A card demanding "moulded plastic photographed under shop
+lighting" is FAILED by an observation of "smooth digital illustration of plastic-looking
+characters", however enthusiastic that observation sounds. Shared adjectives prove nothing;
+what matters is whether the same physical process could have produced both descriptions.
+
+Check every entry in DECLARED.generic_tells against OBSERVED and list the ones that are present.
+
+verdict is "fail" if ANY of these hold:
+  * overall_score < 0.65
+  * medium_and_process, texture_and_surface, or construction_bucket scores below 0.5
+  * two or more generic_tells are present
+Otherwise "pass".
+
+ON "fail", write intensified_directive: a COMPLETE replacement for DECLARED.render_directive.
+Do not merely pile on adjectives — diagnose first. The most common failure by far is that the
+model illustrated the SUBJECT of the medium instead of producing the medium itself: "a drawing
+of plastic brick people" rather than "a photograph of plastic bricks". When that is what
+happened, rewrite so the FIRST clause names the physical artefact and how it was captured (what
+it is made of, how it is lit, what camera or press recorded it), and put the characters second.
+Keep the rules the Art Director worked under: 90-160 words, no studio/franchise/living-artist
+names, no adjective that could describe any image.
+
+Also fill conceit_advice with a different concrete artefact for the reference image if the
+current one invited a neutral illustrated line-up.
+
+ON "pass", intensified_directive and conceit_advice must both be empty strings.\
+"""
+
+
 ORIGINALITY_CRITIC_INSTRUCTIONS = """\
 You are the Originality Critic. The Director is about to launch a NEW comic arc and hands you \
 its candidate to vet for originality.
 
 You receive a free-text description of the candidate, which should include: genre, setting, \
 premise, core_conflict, plot_shape (the structural engine — e.g. heist, whodunit, survival, \
-redemption arc, chosen-one quest, fish-out-of-water, rivalry, mystery-box), art_style, and themes.
+redemption arc, chosen-one quest, fish-out-of-water, rivalry, mystery-box), and themes.
 
-STEP 1 — Call get_recent_arcs to load summaries (title, logline, genre, art_style) of the most \
+You judge the STORY only. The art style is commissioned by a separate Art Director and is \
+already guaranteed distinct from recent arcs by a check on how the images are physically \
+produced — so ignore art style entirely, even if the candidate mentions one.
+
+STEP 1 — Call get_recent_arcs to load summaries (title, logline, genre) of the most \
 recent arcs.
 
 STEP 2 — Compare the candidate against EACH past arc. Look PAST the surface theme — two stories \
@@ -658,18 +878,17 @@ with different themes but the SAME plot_shape ARE too similar. Judge these dimen
 - core_conflict and character archetypes.
 - setting archetype.
 - genre.
-- art_style — treat near-synonyms as a match ("ink wash noir" ≈ "noir ink wash").
 
 STEP 3 — Decide. The candidate is "too_similar" if ANY of these hold: its plot_shape matches a \
-past arc, its art_style is the same or very close to a past arc, its genre repeats a past arc, \
-or the overall core story closely resembles one (similarity_score >= 0.6). Otherwise it is "ok". \
+past arc, its genre repeats a past arc, or the overall core story closely resembles one \
+(similarity_score >= 0.6). Otherwise it is "ok". \
 If there are NO past arcs, the verdict is "ok".
 
 OUTPUT — return ONLY a compact JSON object, no prose, no code fences:
 {"verdict": "ok" | "too_similar", "most_similar_arc": "<title or empty>", \
 "similarity_score": <0.0-1.0>, "offending_dimensions": [<subset of genre, setting, plot_shape, \
-character_archetypes, themes, art_style>], "reasons": "<one sentence>", \
-"guidance_for_retry": "<concrete instruction: which plot_shape/art_style/angle to avoid and how \
+character_archetypes, themes>], "reasons": "<one sentence>", \
+"guidance_for_retry": "<concrete instruction: which plot_shape/angle to avoid and how \
 to diverge; empty string if ok>"}\
 """
 
@@ -688,12 +907,20 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
     client = _build_openai_client()
     model_name = os.environ.get("AZURE_OPENAI_MODEL", "gpt-4o")
     logger.info("Using model: %s", model_name)
+    if not _supports_temperature(model_name):
+        logger.info(
+            "Model '%s' does not accept a temperature parameter — per-agent temperatures are "
+            "omitted (set COMICBOOK_MODEL_SUPPORTS_TEMPERATURE=true to force them).", model_name,
+        )
     model = OpenAIResponsesModel(
         model=model_name,
         openai_client=client,
     )
 
     arc = get_active_arc()
+    # Pull the style card back out of blob storage if it was ever offloaded, so everything
+    # downstream can just read arc["style_card"] without knowing where it lives.
+    hydrate_arc_style_card(arc)
 
     # ARC TRANSITION GUARD ------------------------------------------------------
     # If the active arc has already published all of its planned episodes, today is
@@ -753,6 +980,27 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
     key_panels: list[dict] = get_key_panels(arc) if arc else []
     logger.info("Key panels loaded: %d", len(key_panels))
 
+    # RESTYLE HATCH -------------------------------------------------------------
+    # A style can otherwise only change at an arc boundary — i.e. every 3-15 days — so a change
+    # to how styles are chosen is invisible for over a week. Setting COMICBOOK_RESTYLE_ARC (or
+    # bumping STYLE_CARD_VERSION past what the arc was built with) re-commissions the style of
+    # the arc that is ALREADY running and drops its cached reference sheet, so the new look
+    # lands on today's episode. Characters drift somewhat for one episode; that is the trade.
+    restyle_requested = False
+    if arc:
+        arc_card_version = int(arc.get("style_card_version", 0) or 0)
+        if os.environ.get("COMICBOOK_RESTYLE_ARC", "").lower() == "true":
+            restyle_requested = True
+            logger.info("RESTYLE: COMICBOOK_RESTYLE_ARC set — re-commissioning the style of the active arc")
+        elif arc.get("style_card") and arc_card_version < STYLE_CARD_VERSION:
+            restyle_requested = True
+            logger.info("RESTYLE: arc style card is v%d, current schema is v%d — re-commissioning",
+                         arc_card_version, STYLE_CARD_VERSION)
+        if restyle_requested:
+            # Force the sheet to be rebuilt under the new card; without this the cached URL
+            # short-circuits generate_character_sheet and the old look survives.
+            arc["character_sheet_url"] = ""
+
     state: Dict[str, Any] = {
         "arc": arc,
         "episode_number": episode_number,
@@ -760,6 +1008,11 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
         "key_panels": key_panels,
         "key_panel_urls": [p["url"] for p in key_panels if p.get("url")],
         "generated_panel_urls": [],
+        # Set by the Art Director's commit_style_card; read by start_new_arc (which refuses
+        # without it) and by the restyle path.
+        "assigned_style_card": None,
+        "needs_style_commission": arc is None or restyle_requested,
+        "restyle_requested": restyle_requested,
     }
 
     # ------------------------------------------------------------------
@@ -791,7 +1044,7 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
             agent_tools["assemble_localized"],
         ],
         model=model,
-        model_settings=ModelSettings(temperature=0.9),
+        model_settings=_model_settings(model_name, 0.9),
     )
 
     persian_author = Agent(
@@ -803,7 +1056,7 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
             agent_tools["assemble_localized"],
         ],
         model=model,
-        model_settings=ModelSettings(temperature=0.9),
+        model_settings=_model_settings(model_name, 0.9),
     )
 
     # Keeps the name "Reteller" so the Cartoonist's transfer_to_Reteller handoff is unchanged,
@@ -836,7 +1089,7 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
             ),
         ],
         model=model,
-        model_settings=ModelSettings(temperature=0.3),
+        model_settings=_model_settings(model_name, 0.3),
     )
 
     cartoonist = Agent(
@@ -858,7 +1111,7 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
         instructions=prompt_with_handoff_instructions(STORYTELLER_INSTRUCTIONS),
         tools=[],
         model=model,
-        model_settings=ModelSettings(temperature=0.5),
+        model_settings=_model_settings(model_name, 0.5),
         handoffs=[handoff(cartoonist, input_filter=remove_all_tools)],
     )
 
@@ -869,7 +1122,45 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
         instructions=ORIGINALITY_CRITIC_INSTRUCTIONS,
         tools=[agent_tools["get_recent_arcs"]],
         model=model,
-        model_settings=ModelSettings(temperature=0.2),
+        model_settings=_model_settings(model_name, 0.2),
+    )
+
+    # The Art Director runs BEFORE the chain, not as a Director tool. After the arc-transition
+    # guard above, `arc is None` already means "today starts a new arc" — the pipeline knows
+    # this in code, so there is no reason to make the style depend on a temperature-1.2 Director
+    # remembering to call a tool. That dependency is precisely the failure class the
+    # deterministic-recovery block below exists to paper over.
+    art_director = Agent(
+        name="ArtDirector",
+        instructions=ART_DIRECTOR_INSTRUCTIONS,
+        tools=[
+            WebSearchTool(search_context_size="high"),
+            agent_tools["get_style_history"],
+            agent_tools["commit_style_card"],
+        ],
+        model=model,
+        model_settings=_model_settings(model_name, 1.2),
+    )
+
+    # The audit is split across TWO agents that are each structurally blind, rather than one
+    # agent asked "does this image match the declared style?". That single-agent form hands the
+    # judge the answer and it agrees — the same reason the beat sheet is written by an agent that
+    # never sees the English script. Forensics sees the image and knows nothing about intent;
+    # the Auditor sees the two descriptions and never sees the image.
+    style_forensics = Agent(
+        name="StyleForensics",
+        instructions=STYLE_FORENSICS_INSTRUCTIONS,
+        model=model,
+        model_settings=_model_settings(model_name, 0.2),
+        output_type=ObservedStyle,
+    )
+
+    style_auditor = Agent(
+        name="StyleAuditor",
+        instructions=STYLE_AUDITOR_INSTRUCTIONS,
+        model=model,
+        model_settings=_model_settings(model_name, 0.1),
+        output_type=StyleAudit,
     )
 
     director = Agent(
@@ -881,10 +1172,11 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
             originality_critic.as_tool(
                 tool_name="check_arc_originality",
                 tool_description=(
-                    "Vet a candidate NEW-ARC premise for originality against recent arcs. Pass a "
-                    "description that includes genre, setting, premise, core_conflict, plot_shape, "
-                    "art_style, and themes. Returns a JSON verdict ('ok' or 'too_similar') with a "
-                    "guidance_for_retry field to act on."
+                    "Vet a candidate NEW-ARC premise for STORY originality against recent arcs. "
+                    "Pass a description that includes genre, setting, premise, core_conflict, "
+                    "plot_shape, and themes. Art style is guaranteed separately — leave it out. "
+                    "Returns a JSON verdict ('ok' or 'too_similar') with a guidance_for_retry "
+                    "field to act on."
                 ),
             ),
             agent_tools["start_new_arc"],
@@ -892,7 +1184,7 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
             agent_tools["save_story_outline"],
         ],
         model=model,
-        model_settings=ModelSettings(temperature=1.2),
+        model_settings=_model_settings(model_name, 1.2),
         handoffs=[handoff(storyteller, input_filter=remove_all_tools)],
     )
 
@@ -932,15 +1224,21 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
 
     input_payload = json.dumps(input_context)
 
+    # Shared by the Director and the Art Director, so on these days the story and the art draw
+    # from the SAME culture instead of pulling in different directions.
+    cultural_seed = ""
     if target_date.day % 2 == 0:
-        input_payload += (
-            "\n\n=== CULTURAL DIVERSITY GUIDANCE ===\n"
+        cultural_seed = (
             "For this arc, explore a NON-WESTERN cultural setting. Draw from: Persian mythology, "
             "West African folklore, Japanese rural life, Brazilian favelas, Polynesian ocean voyages, "
             "Central Asian steppe nomads, Mediterranean fishing villages, Korean historical drama, "
             "Nordic ice towns, Indian temple cities, Mesoamerican civilizations, Balkan mountain "
-            "communities, or anywhere else your imagination takes you.\n\n"
-            "Character names should reflect their world — use naming conventions from the culture "
+            "communities, or anywhere else your imagination takes you."
+        )
+        input_payload += (
+            "\n\n=== CULTURAL DIVERSITY GUIDANCE ===\n"
+            + cultural_seed
+            + "\n\nCharacter names should reflect their world — use naming conventions from the culture "
             "you're drawing from. A story set in a Persian-inspired world should have Persian names "
             "(Dariush, Soraya, Kaveh), not English ones. A West African setting might use Yoruba "
             "or Akan names (Kofi, Amara, Kweku). Let the names feel authentic.\n"
@@ -981,8 +1279,68 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
                          bool(state.get("html_en")), bool(state.get("html_it")), bool(state.get("html_fa")))
             return res
 
+        # 0) Commission the arc's look BEFORE the story chain starts, so the Director is TOLD
+        #    its art style rather than inventing one. _run passes _WEB_SEARCH_HOOKS, which is
+        #    what makes the Art Director's hosted web searches visible in traces (hosted tools
+        #    emit no SDK span of their own).
+        director_input = input_payload
+        if state["needs_style_commission"]:
+            recent_arcs = get_recent_arc_summaries(limit=10)
+            commission = json.dumps({
+                "task": "Design the art style for the next comic arc.",
+                "date": target_date.strftime("%Y-%m-%d"),
+                "starved_families_best_first": starved_families(recent_arcs),
+                "banned_constructions": banned_constructions(recent_arcs, n=3),
+                "recent_art_styles_do_not_repeat": [
+                    a.get("art_style", "") for a in recent_arcs if a.get("art_style")
+                ],
+                "cultural_seed": cultural_seed,
+            })
+            await _run(art_director, commission, "ArtDirector (style commission)")
+
+            card = state.get("assigned_style_card")
+            if card is None:
+                # The Art Director finished without committing. Rather than fail the day's
+                # comic, fall through: start_new_arc will refuse and the Director cannot ship
+                # an unstyled arc, so this is loud in the logs and safe in behaviour.
+                logger.error("ArtDirector produced no style card — start_new_arc will refuse.")
+            else:
+                logger.info("Assigned style: '%s' (family=%s, construction=%s)",
+                             card.style_name, card.style_family, card.construction_bucket)
+                director_input = input_payload + (
+                    "\n\n=== ASSIGNED ART STYLE (not yours to change) ===\n"
+                    + json.dumps({
+                        "style_name": card.style_name,
+                        "style_family": card.style_family,
+                        "lineage_note": card.lineage_note,
+                        "medium_and_process": card.medium_and_process,
+                        "color_and_palette": card.color_and_palette,
+                        "character_construction": card.character_construction,
+                        "page_palette": card.page_palette,
+                    })
+                    + "\nPass style_name UNCHANGED as art_style to start_new_arc, and build "
+                      "color_theme from page_palette.\n=== END ASSIGNED ART STYLE ==="
+                )
+                if state["restyle_requested"] and state["arc"]:
+                    # Mid-arc restyle: the story continues, only the look changes. Persist the
+                    # new card onto the running arc and mirror it in memory (the storage write
+                    # is a no-op under DEBUG_SAVE=false).
+                    a = state["arc"]
+                    card_json = card.model_dump_json()
+                    save_arc_style_card(
+                        a["RowKey"], card_json=card_json, family=card.style_family,
+                        construction=card.construction_bucket, medium=card.medium_and_process,
+                        version=STYLE_CARD_VERSION,
+                    )
+                    update_arc_metadata(a["RowKey"], art_style=card.style_name, character_sheet_url="")
+                    a.update(style_card=card_json, art_style=card.style_name,
+                             style_family=card.style_family,
+                             style_construction=card.construction_bucket,
+                             style_card_version=STYLE_CARD_VERSION, character_sheet_url="")
+                    logger.info("RESTYLE applied to running arc '%s'", a.get("title", ""))
+
         # 1) Optimistic handoff chain, entered at the Director.
-        await _run(director, input_payload, "handoff chain (entry=Director)")
+        await _run(director, director_input, "handoff chain (entry=Director)")
 
         # 2) Recover any stage a missed handoff skipped, by running it directly with a clean input.
         plan = _agent_text("Director")
@@ -1010,7 +1368,132 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
             ):
                 if state.get("html_en") and not state.get(key):
                     await _run(author, "Write and assemble your edition from the saved beat sheet now.", label)
+
+        # 3) STYLE AUDIT — the only check in the pipeline that looks at actual pixels rather
+        #    than at what something was labelled. It runs once per arc, on the character sheet,
+        #    because that sheet is reference image #1 for every panel of every episode: if it
+        #    drifted to the model's default look, the whole arc inherits that drift.
+        await _audit_arc_style(_run)
+
         return plan, script
+
+    async def _audit_arc_style(_run) -> None:
+        """Verify the arc's reference sheet actually renders as its declared style; regenerate
+        it (bounded) when it does not.
+
+        SCOPE, stated plainly: the sheet is generated by the Cartoonist inside the handoff
+        chain, so this audit necessarily runs after today's panels are already drawn. It
+        corrects the anchor for the REST of the arc — episodes 2..N, i.e. most of a 3-15
+        episode run — not the episode that just shipped. To see a corrected look immediately,
+        set COMICBOOK_RESTYLE_ARC=true, which re-commissions the style and drops the cached
+        sheet before the chain runs.
+
+        This must never be able to fail a comic: every failure path logs and returns.
+        """
+        arc = state.get("arc")
+        if not arc:
+            return
+        sheet_url = arc.get("character_sheet_url", "")
+        if not sheet_url:
+            return
+        card = load_style_card(arc)
+        if not card.render_directive.strip() or not card.generic_tells:
+            # A legacy or neutral card has nothing falsifiable to audit against.
+            logger.info("STYLE AUDIT skipped — arc has no full style card.")
+            return
+
+        # Tracks whether the card or sheet actually changed, so a first-attempt pass does not
+        # trigger a pointless rewrite — but a pass that only happened AFTER a regeneration
+        # still persists the improved card and the new sheet.
+        dirty = False
+
+        for attempt in range(1, _MAX_SHEET_REGENERATIONS + 2):
+            try:
+                observed_res = await _run(
+                    style_forensics,
+                    [{
+                        "role": "user",
+                        "content": [
+                            {"type": "input_image", "image_url": sheet_url},
+                            {"type": "input_text",
+                             "text": "Catalogue this image. You know nothing about it."},
+                        ],
+                    }],
+                    f"StyleForensics (sheet, attempt {attempt})",
+                )
+                observed: ObservedStyle = observed_res.final_output
+
+                audit_res = await _run(
+                    style_auditor,
+                    json.dumps({
+                        "DECLARED": card.model_dump(),
+                        "OBSERVED": observed.model_dump(),
+                    }),
+                    f"StyleAuditor (sheet, attempt {attempt})",
+                )
+                audit: StyleAudit = audit_res.final_output
+            except Exception as exc:
+                logger.warning("STYLE AUDIT unavailable (%s) — keeping the sheet as-is.",
+                               str(exc)[:200])
+                return
+
+            logger.info("STYLE AUDIT attempt %d: verdict=%s score=%.2f worst=%s tells=%s",
+                         attempt, audit.verdict, audit.overall_score, audit.worst_axis,
+                         audit.generic_tells_present)
+            logger.info("  observed: %s", observed.one_line_catalogue_entry)
+
+            if audit.verdict != "fail":
+                logger.info("STYLE AUDIT passed — '%s' renders as declared.", card.style_name)
+                break
+            if attempt > _MAX_SHEET_REGENERATIONS:
+                logger.warning(
+                    "STYLE AUDIT still failing after %d regenerations — keeping the last sheet. "
+                    "The intensified directive IS persisted, so panels still get the stronger "
+                    "style block.", _MAX_SHEET_REGENERATIONS,
+                )
+                break
+
+            # Diagnose-and-replace, not adjective-piling: the auditor rewrites the whole
+            # directive, and usually the fix is the CONCEIT (the model illustrated the subject
+            # of the medium instead of producing the medium itself).
+            if audit.intensified_directive.strip():
+                card.render_directive = audit.intensified_directive.strip()
+                dirty = True
+            if audit.conceit_advice.strip():
+                card.sheet_conceit = audit.conceit_advice.strip()
+                dirty = True
+
+            try:
+                new_url = await create_image(
+                    compose_sheet_prompt(card, arc.get("characters", "")),
+                    size="wide",
+                    quality="high",
+                )
+            except Exception as exc:
+                logger.warning("STYLE AUDIT regeneration failed (%s) — keeping the current sheet.",
+                               str(exc)[:200])
+                break
+            sheet_url = new_url
+            dirty = True
+            logger.info("STYLE AUDIT regenerated the sheet: %s", sheet_url[:120])
+
+        if not dirty:
+            return
+
+        # Persist whatever card survived — the intensified directive is what every future panel
+        # will be rendered with, so the STORED card must be the final one, not the original.
+        try:
+            card_json = card.model_dump_json()
+            save_arc_style_card(
+                arc["RowKey"], card_json=card_json, family=card.style_family,
+                construction=card.construction_bucket, medium=card.medium_and_process,
+                version=STYLE_CARD_VERSION,
+            )
+            update_arc_metadata(arc["RowKey"], character_sheet_url=sheet_url)
+            arc.update(style_card=card_json, character_sheet_url=sheet_url)
+            logger.info("STYLE AUDIT persisted the corrected card and sheet for future episodes.")
+        except Exception as exc:
+            logger.warning("STYLE AUDIT could not persist the corrected card: %s", str(exc)[:200])
 
     director_plan, storyteller_script = asyncio.run(_drive())
 

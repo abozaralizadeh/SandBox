@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from datetime import datetime
 from typing import Any, Dict
 
@@ -15,6 +16,7 @@ from ComicBook.azurestorage import (
     get_recent_episodes,
     save_arc_glossary,
     save_arc_story_outline,
+    save_arc_style_card,
     save_key_panel,
     start_new_arc as _storage_start_new_arc,
     update_arc_metadata,
@@ -29,6 +31,19 @@ from ComicBook.helpers import (
     _parse_arc_theme,
     _summarize_episodes,
 )
+from ComicBook.style import (
+    CONSTRUCTION_BUCKETS,
+    STYLE_CARD_VERSION,
+    STYLE_FAMILIES,
+    StyleCard,
+    banned_constructions,
+    card_collision,
+    compose_image_prompt,
+    compose_sheet_prompt,
+    load_style_card,
+    scrub_generic_style_tokens,
+    starved_families,
+)
 from ComicBook.tools.getimage import (
     ContentModerationError,
     create_image,
@@ -40,6 +55,12 @@ from ComicBook.tools.getimage import (
 # How many CONSECUTIVE content-safety blocks to tolerate before giving a panel/sheet a
 # placeholder, so one stubborn prompt can't loop the run forever. A success resets the count.
 _MAX_CONTENT_BLOCKS = 3
+
+# Panels used to render at the "medium" default while the character sheet rendered at "high".
+# Texture is where a style lives — impasto, halftone, canvas weave, moulding seam, newsprint
+# grain all collapse at medium into the same smooth surface — so panels now match the sheet.
+# Env-gated so it can be rolled back without a deploy if the cost/latency is not worth it.
+_PANEL_QUALITY = os.environ.get("COMICBOOK_PANEL_QUALITY", "high")
 
 logger = logging.getLogger("ComicBook")
 
@@ -105,7 +126,39 @@ def build_comic_tools(state: Dict[str, Any], target_date: datetime) -> Dict[str,
         speech_border, sfx_color, teaser_color, header_border, font_import (Google Fonts URL), heading_font, body_font."""
         logger.info("TOOL start_new_arc called: title='%s', genre='%s', planned_episodes=%s, art_style='%s'",
                      title, genre, planned_episodes, art_style)
-        # Backstop guard (tool-refusal layer): never let a recently-used art style ship again.
+
+        # The art style is NOT the Director's to invent — the Art Director commissioned a full
+        # StyleCard before this chain started. Refusing here is the tool-refusal layer of the
+        # three-layer guard (prompt says "it is assigned", the input payload carries it, and
+        # this refuses if it was ignored anyway).
+        card = state.get("assigned_style_card")
+        if card is None:
+            logger.warning("  -> REFUSED start_new_arc: no style card has been assigned")
+            return {
+                "error": "no_style_card",
+                "message": (
+                    "No art style has been assigned to this arc yet, so it cannot be created. "
+                    "The Art Director assigns the style before you run; its style_name is in "
+                    "your input context under 'assigned_style'. Pass that style_name unchanged "
+                    "as art_style and call start_new_arc again."
+                ),
+            }
+        if _normalize(art_style) != _normalize(card.style_name):
+            logger.warning("  -> REFUSED start_new_arc: art_style '%s' != assigned '%s'",
+                           art_style, card.style_name)
+            return {
+                "error": "art_style_not_assigned",
+                "message": (
+                    f"'{art_style}' is not this arc's assigned art style. The Art Director "
+                    f"assigned '{card.style_name}' and the full specification is already applied "
+                    f"to every image. Pass art_style='{card.style_name}' unchanged."
+                ),
+                "assigned_art_style": card.style_name,
+            }
+
+        # Cheap backstop: even with a correctly assigned card, never let a recently-used style
+        # NAME ship again. The substantive axis checks (family/construction/medium) run earlier,
+        # in commit_style_card, where the Art Director can still act on the refusal.
         recent_styles = {
             _normalize(a.get("art_style", ""))
             for a in get_recent_arc_summaries(limit=10)
@@ -132,19 +185,36 @@ def build_comic_tools(state: Dict[str, Any], target_date: datetime) -> Dict[str,
             genre=genre,
             planned_episodes=planned_episodes,
             characters=characters,
-            art_style=art_style,
+            art_style=card.style_name,
             color_theme=color_theme,
         )
+        card_json = card.model_dump_json()
+        save_arc_style_card(
+            new_arc["RowKey"],
+            card_json=card_json,
+            family=card.style_family,
+            construction=card.construction_bucket,
+            medium=card.medium_and_process,
+            version=STYLE_CARD_VERSION,
+        )
+        # Mirror every persisted field into the in-memory arc as well: update_arc_metadata and
+        # save_arc_style_card are both no-ops when DEBUG_SAVE=false, and without this the card
+        # would vanish between here and the Cartoonist on every dry run.
         new_arc.update(
             genre=genre,
             planned_episodes=planned_episodes,
             characters=characters,
-            art_style=art_style,
+            art_style=card.style_name,
             color_theme=color_theme,
+            style_card=card_json,
+            style_family=card.style_family,
+            style_construction=card.construction_bucket,
+            style_card_version=STYLE_CARD_VERSION,
         )
         state["arc"] = new_arc
         state["episode_number"] = 1
-        logger.info("  -> New arc created: %s", new_arc["RowKey"])
+        logger.info("  -> New arc created: %s (style='%s', family='%s', construction='%s')",
+                     new_arc["RowKey"], card.style_name, card.style_family, card.construction_bucket)
         return {
             "status": "created",
             "arc_id": new_arc["RowKey"],
@@ -153,7 +223,7 @@ def build_comic_tools(state: Dict[str, Any], target_date: datetime) -> Dict[str,
             "genre": genre,
             "planned_episodes": planned_episodes,
             "characters": characters,
-            "art_style": art_style,
+            "art_style": card.style_name,
             "color_theme": color_theme,
         }
 
@@ -163,6 +233,99 @@ def build_comic_tools(state: Dict[str, Any], target_date: datetime) -> Dict[str,
         so a candidate new arc can be judged for originality against them."""
         logger.info("TOOL get_recent_arcs called")
         return {"past_arcs": get_recent_arc_summaries(limit=10)}
+
+    @function_tool
+    async def get_style_history() -> Dict[str, Any]:
+        """Return what the recent arcs LOOKED like, and which production families and figure
+        constructions are therefore off-limits or starved. Call this before designing a style."""
+        logger.info("TOOL get_style_history called")
+        recent = get_recent_arc_summaries(limit=10)
+        starved = starved_families(recent)
+        banned = banned_constructions(recent, n=3)
+        logger.info("  -> %d recent arcs; starved families: %s; banned constructions: %s",
+                     len(recent), starved[:4], banned)
+        return {
+            "recent_arcs_newest_first": [
+                {
+                    "art_style": a.get("art_style", ""),
+                    "style_family": a.get("style_family", "") or "(predates the style card)",
+                    "construction": a.get("style_construction", "") or "(predates the style card)",
+                    "medium_and_process": a.get("medium_and_process", ""),
+                }
+                for a in recent
+            ],
+            "starved_families_best_first": starved,
+            "banned_constructions": banned,
+            "known_families": list(STYLE_FAMILIES),
+            "known_constructions": list(CONSTRUCTION_BUCKETS),
+            "note": (
+                "Work inside a starved family and avoid every banned construction. If you found "
+                "a tradition that fits none of the known families, name a new family yourself — "
+                "a family never used before sorts to the front of the rotation."
+            ),
+        }
+
+    @function_tool
+    async def commit_style_card(card_json: str) -> Dict[str, Any]:
+        """Commit the finished Style Card for this arc. card_json must be a JSON object with the
+        StyleCard fields. Refuses cards that repeat a recent arc's family, figure construction,
+        or physical process."""
+        logger.info("TOOL commit_style_card called (len=%d)", len(card_json or ""))
+        try:
+            card = StyleCard.model_validate_json(card_json)
+        except Exception as exc:
+            logger.warning("  -> REJECTED: invalid card: %s", str(exc)[:200])
+            return {
+                "error": "invalid_style_card",
+                "message": f"The card did not validate: {exc}. Every field is required.",
+            }
+
+        if not card.render_directive.strip():
+            return {
+                "error": "empty_render_directive",
+                "message": (
+                    "render_directive is the text pasted into every image prompt for this whole "
+                    "arc — it cannot be empty."
+                ),
+            }
+        if len(card.contrastive_assertions) < 3:
+            return {
+                "error": "too_few_assertions",
+                "message": (
+                    "Give at least 3 contrastive_assertions. They are what makes the model's "
+                    "default look impossible; without them the render_directive alone loses to "
+                    "the model's prior. Phrase each POSITIVELY — never 'avoid X'."
+                ),
+            }
+
+        collision = card_collision(card, get_recent_arc_summaries(limit=10))
+        if collision:
+            logger.warning("  -> REFUSED commit_style_card: %s collision on '%s'",
+                           collision["axis"], collision["value"])
+            return {
+                "error": "style_collision",
+                "offending_axis": collision["axis"],
+                "message": collision["message"],
+                "starved_families_best_first": starved_families(get_recent_arc_summaries(limit=10)),
+                "next_step": (
+                    "Search the web again from a genuinely different angle, then call "
+                    "commit_style_card with a revised card."
+                ),
+            }
+
+        state["assigned_style_card"] = card
+        logger.info("  -> Style card committed: '%s' (family=%s, construction=%s, quality=%s)",
+                     card.style_name, card.style_family, card.construction_bucket, card.render_quality)
+        return {
+            "status": "committed",
+            "style_name": card.style_name,
+            "style_family": card.style_family,
+            "construction_bucket": card.construction_bucket,
+            "message": (
+                "Style locked for this arc. It is now applied automatically to every image. "
+                "Report the style_name and page_palette back."
+            ),
+        }
 
     @function_tool
     async def end_current_arc(conclusion_note: str) -> Dict[str, Any]:
@@ -236,15 +399,12 @@ def build_comic_tools(state: Dict[str, Any], target_date: datetime) -> Dict[str,
         # characters who appear in future episodes are included in the sheet even
         # if they are absent from today's script.
         arc_chars = (state["arc"].get("characters", "") if state["arc"] else "") or description
-        prompt = (
-            f"Character and environment reference sheet, {style} art style. "
-            f"Show ALL characters listed below clearly with full body, distinct visual features, "
-            f"face clearly visible, each labeled by name. "
-            f"Include the primary setting/environment as background. "
-            f"Clean grid-style composition with generous spacing between characters. "
-            f"No text overlays, no speech bubbles. "
-            f"Characters: {arc_chars}"
-        )
+        # The `style` argument is now advisory only — the authoritative spec is the arc's
+        # StyleCard, applied here in code. This image is reference #1 for every panel of the
+        # arc, so whatever look it lands in propagates to the whole story; it is the single
+        # highest-leverage prompt in the pipeline and must not be left to the agent's wording.
+        card = load_style_card(state["arc"])
+        prompt = compose_sheet_prompt(card, arc_chars)
         try:
             url = await create_image(prompt, size="wide", quality="high")
             logger.info("  -> Character sheet generated: %s", url[:120])
@@ -296,11 +456,16 @@ def build_comic_tools(state: Dict[str, Any], target_date: datetime) -> Dict[str,
         """Generate a single comic panel image. Use the character reference sheet URL for consistency."""
         if size not in ("wide", "tall", "square"):
             size = "square"
-        no_text_suffix = ". No text, no speech bubbles, no captions, no letters, no words, no writing."
-        if "no text" not in prompt.lower():
-            prompt = prompt.rstrip(".") + no_text_suffix
-        logger.info("TOOL generate_panel_image called (size='%s', has_ref=%s, prompt='%s')",
-                     size, bool(reference_url), prompt[:80])
+        subject = prompt
+        # The agent writes the SUBJECT; the arc's style is applied here so it can never be
+        # forgotten, diluted, or paraphrased away. The scrub first removes the quality
+        # adjectives the Cartoonist adds by reflex ("cinematic", "highly detailed", "4k") —
+        # those are exactly the tokens that summon the model's default look and they would
+        # otherwise fight the style block from inside the same prompt.
+        card = load_style_card(state["arc"])
+        prompt = compose_image_prompt(card, scrub_generic_style_tokens(subject))
+        logger.info("TOOL generate_panel_image called (size='%s', has_ref=%s, subject='%s')",
+                     size, bool(reference_url), subject[:80])
 
         # Circuit breaker: once the image service has failed repeatedly this run, stop calling it
         # and serve a placeholder so the Cartoonist proceeds instead of looping on a dead service.
@@ -317,20 +482,24 @@ def build_comic_tools(state: Dict[str, Any], target_date: datetime) -> Dict[str,
                 if u and u not in seen:
                     seen.add(u)
                     image_urls.append(u)
+            # Reference count is a STYLE-FIDELITY dial, not only a consistency dial: each
+            # reference pulls the render toward its own look, so a deep stack averages the
+            # panels toward the mean and flattens exactly the texture the style lives in.
+            # Trimmed from <=8 to <=4 — enough to hold characters, few enough to keep surface.
             _add(reference_url)                          # character sheet — always first
-            for u in state["key_panel_urls"][-3:]:       # mid-arc character key panels
+            for u in state["key_panel_urls"][-1:]:       # mid-arc character key panel
                 _add(u)
-            for u in state["generated_panel_urls"][-2:]: # panels from this session
+            for u in state["generated_panel_urls"][-1:]: # previous panel from this session
                 _add(u)
-            for u in state["prev_episode_images"][-2:]:  # arc history anchor
+            for u in state["prev_episode_images"][-1:]:  # arc history anchor
                 _add(u)
 
             if len(image_urls) > 1:
-                url = await create_image_with_references(prompt, image_urls, size)
+                url = await create_image_with_references(prompt, image_urls, size, _PANEL_QUALITY)
             elif image_urls:
-                url = await create_image_with_reference(prompt, image_urls[0], size)
+                url = await create_image_with_reference(prompt, image_urls[0], size, _PANEL_QUALITY)
             else:
-                url = await create_image(prompt, size)
+                url = await create_image(prompt, size, _PANEL_QUALITY)
 
             state["generated_panel_urls"].append(url)
             state["image_failures"] = 0
@@ -450,9 +619,20 @@ def build_comic_tools(state: Dict[str, Any], target_date: datetime) -> Dict[str,
             {"character": p.get("character", ""), "episode": p.get("episode", ""), "url": p.get("url", "")}
             for p in state.get("key_panels", []) if p.get("url")
         ]
+        card = load_style_card(a)
         return {
             "characters": a.get("characters", "") if a else "",
             "art_style": a.get("art_style", "") if a else "",
+            # Mood/tone context only. The Cartoonist must NOT copy these into image prompts —
+            # the full style block is prepended to every prompt in code, and restating it in
+            # the subject text only dilutes it.
+            "style_summary": {
+                "style_name": card.style_name,
+                "medium_and_process": card.medium_and_process,
+                "character_construction": card.character_construction,
+                "composition_and_framing": card.composition_and_framing,
+            },
+            "style_applied_automatically": True,
             "already_registered_key_panels": registered,
         }
 
@@ -629,6 +809,8 @@ def build_comic_tools(state: Dict[str, Any], target_date: datetime) -> Dict[str,
     return {
         "get_arc_status": get_arc_status,
         "get_recent_arcs": get_recent_arcs,
+        "get_style_history": get_style_history,
+        "commit_style_card": commit_style_card,
         "start_new_arc": start_new_arc,
         "end_current_arc": end_current_arc,
         "save_story_outline": save_story_outline,

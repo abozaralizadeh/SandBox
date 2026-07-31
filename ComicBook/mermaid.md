@@ -24,14 +24,14 @@ flowchart TD
     %% ── Director ─────────────────────────────────────────────────────────
     subgraph DIR ["🎭  Director   temp=1.2"]
         D_resp["Responsibility\n─────────────────────────\n• Owns the full arc lifecycle\n• NEW arc: web-search inspiration →\n  form candidate → check_arc_originality →\n  retry until distinct → start_new_arc\n• Writes the story outline on arc start\n• Plans today's episode: panel count,\n  sizes, beats, tone, cliffhanger\n• Never skips / never closes early\n• Hands off to the Storyteller"]
-        D_tools["Tools\n─────────────────────────\n🔍 WebSearch — research & inspiration\n📋 get_arc_status — active arc + history\n🔎 check_arc_originality — OriginalityCritic\n    (as_tool): ok / too_similar + guidance\n🆕 start_new_arc — title, logline, genre,\n    characters (ALL with full visuals),\n    art_style, color_theme, planned_eps\n    (refuses a recently-used art style)\n✅ end_current_arc — close finished arc\n📝 save_story_outline — full arc plan"]
+        D_tools["Tools\n─────────────────────────\n🔍 WebSearch — research & inspiration\n📋 get_arc_status — active arc + history\n🔎 check_arc_originality — OriginalityCritic\n    (as_tool): ok / too_similar + guidance\n🆕 start_new_arc — title, logline, genre,\n    characters (ALL with full visuals),\n    art_style (ASSIGNED — must match the\n    ArtDirector's card), color_theme,\n    planned_eps (refuses an unassigned style)\n✅ end_current_arc — close finished arc\n📝 save_story_outline — full arc plan"]
     end
 
     INIT -->|"arc state\nepisode number\nrecent summaries"| DIR
 
     %% ── Originality Critic (as_tool) ─────────────────────────────────────
     subgraph CRIT ["🔎  OriginalityCritic   temp=0.2   (as_tool, not in the chain)"]
-        CR_resp["Responsibility\n─────────────────────────\n• Calls get_recent_arcs and compares a\n  candidate premise vs recent arcs\n• Looks past surface theme — plot_shape,\n  conflict, archetypes, setting, art_style\n• Returns ok / too_similar + the most\n  similar arc + concrete retry guidance"]
+        CR_resp["Responsibility\n─────────────────────────\n• Calls get_recent_arcs and compares a\n  candidate premise vs recent arcs\n• Looks past surface theme — plot_shape,\n  conflict, archetypes, setting\n• STORY only — art style is guaranteed\n  separately by the ArtDirector\n• Returns ok / too_similar + the most\n  similar arc + concrete retry guidance"]
     end
 
     DIR -. "as_tool\ncheck_arc_originality" .-> CRIT
@@ -49,7 +49,7 @@ flowchart TD
 
         subgraph C_TOOLS ["Tools (called in order)"]
             direction TB
-            CT0["⓪ get_cartoonist_brief\n— full roster · art_style · key panels"]
+            CT0["⓪ get_cartoonist_brief\n— full roster · style summary · key panels\n(style block applied in code)"]
             CT1["① generate_character_sheet\n— ALL arc characters (incl. future eps)\n— cached on arc after ep. 1"]
             CT2["② generate_panel_image  ×N\n— SEQUENTIAL (panel 1 → 2 → … → N)\n— refs: sheet + key panels + session + anchors"]
             CT3["③ mark_key_panel\n— after any panel with a NEW mid-arc char"]
@@ -93,7 +93,7 @@ flowchart TD
     %% ── Storage ──────────────────────────────────────────────────────────
     subgraph STORAGE ["☁️  Azure Storage"]
         direction LR
-        ARC_TBL[("Arcs Table  (PK arc or arc_debug)\n─────────────\ntitle · logline · genre\nplanned_episodes\nart_style · color_theme\ncharacters (full visuals)\nstory_outline (en/it/fa)\ntitle_it · title_fa\ncharacter_sheet_url\nkey_panels (JSON list)\nglossary_it · glossary_fa\nstatus · episodes_count")]
+        ARC_TBL[("Arcs Table  (PK arc or arc_debug)\n─────────────\ntitle · logline · genre\nplanned_episodes\nart_style · color_theme\nstyle_card (JSON) · style_family\nstyle_construction · style_card_version\ncharacters (full visuals)\nstory_outline (en/it/fa)\ntitle_it · title_fa\ncharacter_sheet_url\nkey_panels (JSON list)\nglossary_it · glossary_fa\nstatus · episodes_count")]
         EP_TBL[("Episodes Table\n─────────────\nRowKey = date\nPartitionKey = arc_id\nepisode_number · story_summary\nhtml_content (en/it/fa)\nhtml_blob_name_*\n+ generation_lock(_debug)")]
         BLOB[("Blob Storage\n─────────────\npanel images (.png)\ncharacter sheets (.png)\nHTML overflow (.html)\nstory outlines (.txt)\nglossaries (.json)")]
     end
@@ -145,7 +145,10 @@ flowchart TD
 | Agent | Role | Temp | Tools | In handoff chain? |
 |---|---|---|---|---|
 | **Director** | Arc lifecycle + originality + episode planner | 1.2 | WebSearch, get_arc_status, **check_arc_originality** (as_tool), start_new_arc, end_current_arc, save_story_outline | entry → Storyteller |
-| **OriginalityCritic** | Judges a candidate arc vs recent arcs | 0.2 | get_recent_arcs | no — invoked via `as_tool` |
+| **OriginalityCritic** | Judges a candidate arc's STORY vs recent arcs | 0.2 | get_recent_arcs | no — invoked via `as_tool` |
+| **ArtDirector** | Researches and commits the arc's StyleCard | 1.2 | WebSearch, get_style_history, commit_style_card | no — runs pre-chain |
+| **StyleForensics** | Catalogues the sheet image, blind to intent | 0.2 | — (vision input) | no — runs post-chain |
+| **StyleAuditor** | Compares declared vs observed cards, never sees the image | 0.1 | — | no — runs post-chain |
 | **Storyteller** | Panel-by-panel script writer | 0.5 | — | → Cartoonist |
 | **Cartoonist** | Image generation + HTML assembly (en) | 1.0 | get_cartoonist_brief, generate_character_sheet, generate_panel_image, mark_key_panel, assemble_layout | → Reteller |
 | **Reteller (Localization Director)** | Language-neutral beat sheet (no English wording) + delegates to blind authors | 0.3 | save_beat_sheet, write_italian_edition (as_tool), write_persian_edition (as_tool) | terminus |
@@ -157,7 +160,8 @@ flowchart TD
 |---|---|
 | **Handoff chain + deterministic recovery** | Agents collaborate via SDK handoffs (Director→Storyteller→Cartoonist→Reteller); if a model fails to call its transfer tool, the pipeline runs the missing stage directly so a comic always ships |
 | **No LLM calls inside a tool** | A `@function_tool` does only deterministic work; model-reasoning steps are Agents reached via `as_tool` (OriginalityCritic) or handoffs |
-| **Three-layer originality guard** | Prompt mandates search→check→retry; the OriginalityCritic (as_tool) judges core-story similarity; `start_new_arc` refuses a recently-used art style |
+| **Three-layer story-originality guard** | Prompt mandates search→check→retry; the OriginalityCritic (as_tool) judges core-story similarity; `start_new_arc` refuses an unassigned art style |
+| **Three-layer visual-originality guard** | ArtDirector prompt carries starved families + banned constructions; `commit_style_card` refuses collisions on family / construction / physical process; the blind StyleForensics→StyleAuditor pair checks the rendered pixels |
 | **Temperature split** | Director 1.2 (creative engine) and OriginalityCritic 0.2 (judge); Storyteller 0.5 faithfully executes the plan; Localization Director 0.3 (extraction, not prose); native authors 0.9 (the creative writing) |
 | Panels generated **sequentially** | Each finished panel URL feeds as a reference into the next call, maintaining visual consistency |
 | Character sheet uses **ALL arc characters** at `quality=high` | Generated once on ep. 1 and cached — must cover every character who ever appears |

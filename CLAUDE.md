@@ -64,8 +64,42 @@ repo only reads it. Never add account data or absolute amounts to the dashboard 
 - **Localization is done by blind native authors, not translators**: the Reteller/native agents
   write from an English-echo-guarded beat sheet in fresh context, never from the English text.
 - **Guard misbehaving agents in three layers**: prompt instruction + input flags + the tool
-  itself refusing (e.g. `end_current_arc` refusing early arc-closes, `start_new_arc` refusing a
-  recently-used art style). A prompt-only guard is not enough.
+  itself refusing (e.g. `end_current_arc` refusing early arc-closes, `commit_style_card` refusing
+  a style that collides with a recent arc's family/construction/process). A prompt-only guard is
+  not enough.
+- **A quality gate that judges its own subject will pass it.** Where an agent checks work, make
+  the blindness structural: the beat sheet is written by an agent that never saw the English
+  script; `StyleForensics` catalogues the sheet image knowing nothing about the intended style,
+  and `StyleAuditor` compares the two descriptions without ever seeing the image.
+
+## ComicBook art style (`ComicBook/style.py`)
+
+The arc's look is a `StyleCard`, not a label, and it is injected into every image prompt **by
+code** (`compose_image_prompt` / `compose_sheet_prompt`) — never by asking the Cartoonist to
+retype it. Constraints that were learned the hard way; do not undo them:
+
+- **gpt-image has no negative-prompt channel.** "avoid glossy 3D" summons glossy 3D. Only
+  positive `contrastive_assertions` are sent; the avoid-list (`generic_tells`) is audit-only.
+- **`render_directive` must be brand-free.** Naming a studio/franchise/living artist trips the
+  image safety layer and returns a blank panel. Describe technique, material and proportions
+  instead — it also renders more distinctly.
+- **Never prompt for "a character reference sheet".** That phrase has a stronger visual prior
+  (clean flat turnaround on white) than any style adjective, and that sheet is reference #1 for
+  every panel of the arc, so its look propagates everywhere. Use `sheet_conceit` — an artefact
+  the medium itself would produce.
+- **Style names are not the anti-repetition test**; `commit_style_card` compares production
+  family, figure construction and physical process, computed LRU-style from arc history.
+- New style fields must be added to the explicit `select=[...]` in `get_recent_arc_summaries` or
+  they come back empty with no error, silently breaking the rotation.
+- `COMICBOOK_PANEL_QUALITY` (default `high`) and `COMICBOOK_RESTYLE_ARC` (re-style a running arc
+  today rather than waiting for the next arc boundary) are the two rollout dials.
+
+## Model capability
+
+Reasoning-family deployments (`gpt-5.x`, `o1`/`o3`/`o4` — and `AZURE_OPENAI_MODEL` is currently
+`gpt-5.5`) reject `temperature` with a 400. Every ComicBook agent sets a deliberate temperature,
+so they go through `_model_settings(model_name, temp)` in `agents.py`, which omits the parameter
+where it cannot be sent. Override with `COMICBOOK_MODEL_SUPPORTS_TEMPERATURE`.
 
 ## LangSmith tracing
 
