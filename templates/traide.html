@@ -225,6 +225,38 @@
     .vstat .vrow { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 0.76rem; color: var(--text-2); padding: 2px 0; }
     .vstat .vrow b { color: var(--text); }
 
+    /* ── strategy edge — does the DIRECTION CALL predict, and which playbook is paying? ──
+       Deliberately distinct from the win/loss panel: win rate conflates the direction call with fill
+       quality and exit management, so it cannot say whether the strategy has an edge at all. */
+    .edge-verdict { display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+      background: var(--s2); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
+    .edge-verdict .badge { font-family: var(--mono); font-size: 0.78rem; font-weight: 700; letter-spacing: 1px;
+      text-transform: uppercase; padding: 7px 13px; border-radius: 8px; border: 1px solid currentColor; }
+    .edge-verdict .badge.v-edge { color: var(--up); box-shadow: 0 0 14px rgba(0,230,168,0.18); }
+    .edge-verdict .badge.v-none { color: var(--down); box-shadow: 0 0 14px rgba(255,59,92,0.18); }
+    .edge-verdict .badge.v-wait { color: var(--text-3); }
+    .edge-verdict .vtext { font-size: 0.8rem; color: var(--text-2); line-height: 1.45; flex: 1; min-width: 220px; }
+    .edge-verdict .vtext b { color: var(--text); }
+    .edge-meta { display: flex; gap: 16px; flex-wrap: wrap; font-family: var(--mono); font-size: 0.7rem;
+      color: var(--text-3); margin-top: 10px; }
+    .edge-meta b { color: var(--text-2); font-weight: 600; }
+    .fam-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin-top: 12px; }
+    .fam { background: var(--s2); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+    .fam .fh { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+    .fam .fname { font-family: var(--mono); font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text); }
+    .fam .fv { font-family: var(--mono); font-size: 0.58rem; text-transform: uppercase; letter-spacing: 0.5px;
+      padding: 2px 7px; border-radius: 999px; border: 1px solid currentColor; }
+    .fam .fv.v-edge { color: var(--up); } .fam .fv.v-none { color: var(--down); } .fam .fv.v-wait { color: var(--text-3); }
+    .fam .frow { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 0.74rem;
+      color: var(--text-2); padding: 2px 0; }
+    .fam .frow b { color: var(--text); }
+    .fam .risk { margin-top: 9px; padding-top: 8px; border-top: 1px solid var(--border); }
+    .fam .risk .rl { display: flex; justify-content: space-between; font-family: var(--mono);
+      font-size: 0.64rem; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.5px; }
+    .fam .rbar { height: 5px; border-radius: 3px; background: rgba(255,255,255,0.07); margin-top: 5px; overflow: hidden; }
+    .fam .rbar i { display: block; height: 100%; border-radius: 3px; background: var(--up); }
+    .fam .rbar i.dim { background: var(--amber); }
+
     /* ── open positions — live TP/SL bracket ── */
     .pos { background: var(--s2); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; margin-bottom: 10px; }
     .pos:last-child { margin-bottom: 0; }
@@ -384,6 +416,16 @@
     <div class="panel">
       <div class="panel-head"><div class="panel-title t-violet"><span class="tick"></span> Recent trade outcomes <span style="color:var(--text-3);font-weight:400;font-family:var(--mono);font-size:0.7rem">· ROE per closed trade</span></div></div>
       <div class="chart sm" id="tradesChart"></div>
+    </div>
+
+    <!-- ═══════════ STRATEGY EDGE — does the direction call actually predict? ═══════════ -->
+    <div class="section-label">Strategy edge</div>
+    <div class="panel">
+      <div class="panel-head">
+        <div class="panel-title t-cyan"><span class="tick"></span> Signal quality
+          <span style="color:var(--text-3);font-weight:400;font-family:var(--mono);font-size:0.7rem">· forward return from the price at signal time, vs cost</span></div>
+      </div>
+      <div id="edgeBox"><div class="empty">Measuring…</div></div>
     </div>
 
     <!-- ═══════════ LIVE BOOK — what the bot has working right now ═══════════ -->
@@ -1093,6 +1135,80 @@
       box.innerHTML = block('Spot', kpis.spot) + block('Futures', kpis.futures);
     }
 
+    // Strategy edge. This answers a different question from the win/loss panel: win rate mixes the
+    // direction call together with fill quality and exit management, so a bot can show a healthy win
+    // rate while its signal predicts nothing. This measures the signal ALONE — forward return from the
+    // market price at the moment of the call, signed by the traded direction — against the round-trip
+    // cost it has to clear. Each setup family is scored separately, and risk follows whichever pays.
+    const FAM_LABEL = {
+      continuation: 'Continuation', fade_extreme: 'Fade extreme',
+      breakout: 'Breakout', range_edge: 'Range edge', other: 'Other',
+    };
+    function verdictClass(v) {
+      return v === 'edge' ? 'v-edge' : (v === 'no edge' ? 'v-none' : 'v-wait');
+    }
+    function renderStrategyEdge(s) {
+      const box = el('edgeBox');
+      if (!box) return;
+      const e = s && s.strategyEdge;
+      if (!e) { box.innerHTML = '<div class="empty">Not published yet</div>'; return; }
+
+      const v = e.verdict || 'insufficient data';
+      const n = e.n || 0;
+      const best = e.bestHorizon ? (e.byHorizon || {})[e.bestHorizon] : null;
+      const cost = e.costPct;
+      const headline = {
+        'edge': 'The direction calls <b>predict</b> — mean forward return clears the cost of trading.',
+        'no edge': 'The direction calls do <b>not</b> clear trading costs. Exits and sizing cannot fix a signal that does not predict; setup selection is the lever.',
+        'insufficient data': 'Not enough settled signals yet to judge. Each entry is scored once its measurement horizon elapses.',
+      }[v] || '';
+
+      let meta = [];
+      if (best) {
+        meta.push(`<span>horizon <b>${esc(e.bestHorizon)}</b></span>`);
+        meta.push(`<span>mean <b class="${cls(best.mean_pct)}">${fmtPct(best.mean_pct)}</b></span>`);
+        meta.push(`<span>hit <b>${best.hit_rate != null ? (best.hit_rate * 100).toFixed(0) + '%' : '—'}</b></span>`);
+        meta.push(`<span>net of cost <b class="${cls(best.net_of_cost_pct)}">${fmtPct(best.net_of_cost_pct)}</b></span>`);
+      }
+      if (cost != null) meta.push(`<span>cost hurdle <b>${fmtPct(cost)}</b></span>`);
+      meta.push(`<span>samples <b>${n}</b></span>`);
+
+      let html = `<div class="edge-verdict">
+          <span class="badge ${verdictClass(v)}">${esc(v)}</span>
+          <span class="vtext">${headline}</span>
+        </div>
+        <div class="edge-meta">${meta.join('')}</div>`;
+
+      const fams = e.byFamily || {};
+      const riskBy = e.familyRiskFactor || {};
+      const names = Object.keys(fams);
+      if (names.length) {
+        // Worst-performing family first: the one costing money is the one worth looking at.
+        names.sort((a, b) => (fams[a].mean_pct ?? 0) - (fams[b].mean_pct ?? 0));
+        html += '<div class="fam-grid">' + names.map(name => {
+          const f = fams[name] || {};
+          const fv = f.verdict || 'insufficient data';
+          const risk = riskBy[name] != null ? Number(riskBy[name]) : 1;
+          const pct = Math.max(0, Math.min(1, risk)) * 100;
+          return `<div class="fam">
+            <div class="fh">
+              <span class="fname">${esc(FAM_LABEL[name] || name)}</span>
+              <span class="fv ${verdictClass(fv)}">${esc(fv === 'insufficient data' ? 'untested' : fv)}</span>
+            </div>
+            <div class="frow"><span>Forward return</span><b class="${cls(f.mean_pct)}">${fmtPct(f.mean_pct)}</b></div>
+            <div class="frow"><span>Hit rate</span><b>${f.hit_rate != null ? (f.hit_rate * 100).toFixed(0) + '%' : '—'}</b></div>
+            <div class="frow"><span>Net of cost</span><b class="${cls(f.net_of_cost_pct)}">${fmtPct(f.net_of_cost_pct)}</b></div>
+            <div class="frow"><span>Samples</span><b>${f.n || 0}</b></div>
+            <div class="risk">
+              <div class="rl"><span>Risk allocated</span><span>×${risk.toFixed(2)}</span></div>
+              <div class="rbar"><i class="${risk < 1 ? 'dim' : ''}" style="width:${pct}%"></i></div>
+            </div>
+          </div>`;
+        }).join('') + '</div>';
+      }
+      box.innerHTML = html;
+    }
+
     function renderKpis(s) {
       const k = s.kpis || {};
       const wins = k.wins || 0, losses = k.losses || 0, total = wins + losses;
@@ -1142,6 +1258,7 @@
         renderKpis(s);
         renderDonut(s.kpis);
         renderVenue(s.kpis);
+        renderStrategyEdge(s);
         if (!window._tradesLoaded) { renderTrades(s.trades); }   // fast seed; loadTrades() pulls fuller history
         renderPositions(s.positions);
         renderPending(s.pendingOrders);
@@ -1193,7 +1310,7 @@
       el('modePill').className = 'pill muted';
       el('modePill').innerHTML = '<span class="dot" style="background:var(--amber)"></span> warming up';
       el('updatedPill').textContent = 'no data yet';
-      ['feedBox','positionsBox','pendingBox','coinsBox','closedBox','researchPlans','notesBox'].forEach(id => {
+      ['feedBox','positionsBox','pendingBox','coinsBox','closedBox','researchPlans','notesBox','edgeBox'].forEach(id => {
         el(id).innerHTML = '<div class="empty">Agents warming up… data appears once the bot publishes its first snapshot.</div>';
       });
       renderEquity([]); renderDonut({}); renderTrades([]);
