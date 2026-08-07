@@ -40,7 +40,7 @@ local prune.
 
 | Store | Name / keys | Contents |
 |---|---|---|
-| Blob | `live.json` | Full current snapshot: KPIs, positions, pending orders, coin universe, recently-closed positions, decision feed, equity tail, notes, research |
+| Blob | `live.json` | Full current snapshot: KPIs, **strategy edge**, positions, pending orders, coin universe, recently-closed positions, decision feed, equity tail, notes, research |
 | Blob | `rollups/{daily,weekly,monthly,alltime}.json` | Pre-bucketed equity series + KPIs |
 | Table | PK `equity`, RK `{day:08d}` | `indexClose`, `drawdownPct`, optional `dayRealizedPnl` |
 | Table | PK `decision`, RK `{ts:010d}-{symbol}` | `data` = JSON of one sanitized decision |
@@ -49,6 +49,34 @@ local prune.
 
 All table writes are idempotent upserts with deterministic RowKeys, so repeated publishes never
 duplicate. Tables are the durable accumulator; blobs are cheap, rebuildable projections.
+
+## Strategy edge (`live.json` → `strategyEdge`, rendered by the "Signal quality" panel)
+
+Win rate and PnL answer *whether* the bot is winning, but they conflate three different things — was
+the direction call right, was the fill any good, was the exit managed well — so they cannot say
+**why**. `strategyEdge` measures the signal alone: forward return from the market price at the moment
+of the call, signed by the traded direction, against the round-trip cost it has to clear. Each *setup
+family* is scored separately and the producer allocates risk toward whichever currently pays, so
+`familyRiskFactor` explains where capital is going rather than only reporting the result.
+
+```jsonc
+"strategyEdge": {
+  "verdict": "no edge",              // edge | no edge | insufficient data
+  "n": 55, "costPct": 0.12, "bestHorizon": "60m",
+  "byHorizon": { "60m": {"n": 55, "mean_pct": -0.135, "hit_rate": 0.35, "net_of_cost_pct": -0.255} },
+  "byFamily": {
+    "continuation": {"n": 34, "mean_pct": -0.226, "hit_rate": 0.28, "verdict": "no edge"},
+    "fade_extreme": {"n": 15, "mean_pct":  0.191, "hit_rate": 0.57, "verdict": "insufficient data"}
+  },
+  "familyRiskFactor": {"continuation": 0.5, "fade_extreme": 1.0},
+  "slippagePctPerSide": 0.01, "slippageSource": "measured"
+}
+```
+
+Percentages, counts and verdicts only — no balance, equity, position size or account identifier is
+involved, so it is safe under the default `normalized` disclosure mode. The renderer sorts families
+worst-first (the one costing money leads) and degrades to an empty state when the key is absent, so
+an older producer that does not publish it still renders fine.
 
 ## Routes (`main.py`)
 
