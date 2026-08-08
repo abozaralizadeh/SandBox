@@ -225,6 +225,15 @@
     .vstat .vrow { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 0.76rem; color: var(--text-2); padding: 2px 0; }
     .vstat .vrow b { color: var(--text); }
 
+    /* Which playbook a row came from. The strategyEdge panel scores families in aggregate; this
+       ties each individual position back to its bucket so a losing family is traceable to trades. */
+    .fam-tag { font-family: var(--mono); font-size: 0.58rem; text-transform: uppercase; letter-spacing: 0.5px;
+      padding: 2px 7px; border-radius: 999px; border: 1px solid var(--border2); color: var(--text-3); }
+    .fam-tag.f-continuation { color: var(--cyan);   border-color: rgba(45,212,255,0.35); }
+    .fam-tag.f-fade_extreme { color: var(--violet); border-color: rgba(167,139,250,0.35); }
+    .fam-tag.f-breakout     { color: var(--amber);  border-color: rgba(255,176,32,0.35); }
+    .fam-tag.f-range_edge   { color: var(--up);     border-color: rgba(0,230,168,0.35); }
+
     /* ── strategy edge — does the DIRECTION CALL predict, and which playbook is paying? ──
        Deliberately distinct from the win/loss panel: win rate conflates the direction call with fill
        quality and exit management, so it cannot say whether the strategy has an edge at all. */
@@ -881,7 +890,7 @@
             ? `<div class="pos-fb">${fb.join('')}${c.betterEntryAvailable ? '<span class="fb-warn">· better entry was available</span>' : ''}</div>` : '';
           return `<div class="pos">
             <div class="pos-top">
-              <span class="sym-cell">${coinIcon(c.symbol, 18)}${sym}</span>
+              <span class="sym-cell">${coinIcon(c.symbol, 18)}${sym}</span>${famTag(c.setupFamily)}
               <span class="tags"><span class="tag ${c.side === 'long' ? 'long' : 'short'}">${esc(c.side || '')}</span></span>
               ${roe}
             </div>
@@ -958,7 +967,7 @@
 
         return `<div class="pos" data-idx="${i}">
           <div class="pos-top">
-            <span class="sym-cell">${coinIcon(p.symbol, 18)}${sym}</span>
+            <span class="sym-cell">${coinIcon(p.symbol, 18)}${sym}</span>${famTag(p.setupFamily)}
             <span class="tags"><span class="tag ${p.side === 'long' ? 'long' : 'short'}">${esc(p.side || '')}</span><span class="tag ${p.venue === 'futures' ? 'futures' : 'spot'}">${esc(p.venue || '')}</span></span>
             <span class="pos-ret ${cls(p.returnPct)}">${fmtPct(p.returnPct)}</span>
             <button class="pos-chart-btn${open ? ' open' : ''}" data-idx="${i}" aria-expanded="${open}" title="Toggle price chart">${CHART_ICON}<span>${open ? 'Hide' : 'Chart'}</span></button>
@@ -1095,7 +1104,7 @@
             ${o.ts ? `<span class="a-meta" style="margin-left:auto">${relTime(o.ts)}</span>` : ''}
             <button class="pos-chart-btn${open ? ' open' : ''}" data-idx="${i}" aria-expanded="${open}" title="Toggle price chart">${CHART_ICON}<span>${open ? 'Hide' : 'Chart'}</span></button>
           </div>
-          <div class="pos-px"><span>waiting: ${waitFor}</span>${o.botEntry ? '<span>· bot entry</span>' : ''}</div>
+          <div class="pos-px"><span>waiting: ${waitFor}</span>${o.botEntry ? '<span>· bot entry</span>' : ''}${o.setupFamily ? `<span>· ${esc(FAM_LABEL[o.setupFamily] || o.setupFamily)}</span>` : ''}</div>
           <div class="pos-chart-wrap pend-chart-wrap" data-idx="${i}"${open ? '' : ' style="display:none"'}>
             <div class="seg pos-iv">${ivBtns}</div>
             <div class="pos-chart-slot pend-chart-slot" data-idx="${i}"></div>
@@ -1144,6 +1153,12 @@
       continuation: 'Continuation', fade_extreme: 'Fade extreme',
       breakout: 'Breakout', range_edge: 'Range edge', other: 'Other',
     };
+    // Family chip shown on individual positions/orders (aggregate scores live in the edge panel).
+    function famTag(f) {
+      if (!f) return '';
+      const label = (FAM_LABEL[f] || f);
+      return `<span class="fam-tag f-${esc(f)}" title="setup family — scored in Strategy edge">${esc(label)}</span>`;
+    }
     function verdictClass(v) {
       return v === 'edge' ? 'v-edge' : (v === 'no edge' ? 'v-none' : 'v-wait');
     }
