@@ -14,6 +14,7 @@ from ComicBook.azurestorage import get_episode_index, get_arc_list
 from ComicBook.imageproxy import ensure_webp_variant, blob_name_if_ours, rewrite_comic_images
 from GenBox.prompt import get_llm_response
 from GenBox.video import ensure_generation_started, video_status
+from GenBox.schedule import channel_index as genbox_channel_index
 from GenBox.azurestorage import (
     video_blob_name_from_url,
     get_video_blob_size,
@@ -237,6 +238,16 @@ def _parse_range(range_header, size):
         return start, min(end, size - 1)
     except Exception:
         return None
+
+
+@app.route('/genbox-channels', methods=['GET'])
+def genbox_channels():
+    """The dates the TV can tune to: every day that actually has a bulletin, plus the live
+    slot, and the current publication interval. The list comes from storage, so the dial
+    keeps stepping over the real archive even after GENBOX_GENERATION_INTERVAL_DAYS changes."""
+    if not request.headers.get('Referer', ''):
+        return "404 Not Found", 404
+    return jsonify(genbox_channel_index())
 
 
 @app.route('/genbox-video-status', methods=['GET'])

@@ -34,9 +34,12 @@ def _ensure_video_container():
 
 _ensure_video_container()
 
-def insert_history(role, content):
+def insert_history(role, content, flat_date=None):
+    """Save a history row. `flat_date` is the publication slot the row belongs to (defaults
+    to today) — with a generation interval > 1 the slot can be an earlier date than the one
+    the generation actually runs on, and the row must be keyed by the slot."""
 
-    rowkey = get_flat_date()
+    rowkey = flat_date or get_flat_date()
     # Define the entity (row) to insert
     entity = {
         "PartitionKey": role,  # Logical grouping for entities
@@ -82,6 +85,28 @@ def get_last_n_rows(n=10):
         print(f"Error retrieving rows: {e}")
         return None
     
+
+def list_decision_dates():
+    """Every flat date (YYYYMMDD) that has a saved decision row, ascending.
+
+    This is the source of truth for the TV's channel list: which days have content is a
+    fact of storage, so navigation stays correct even after the publication interval
+    changes. Only RowKeys are fetched (`select`) — the decision bodies are large and not
+    needed here."""
+    try:
+        entities = table_client.query_entities(
+            query_filter="PartitionKey eq 'assistant'",
+            select=["RowKey"],
+            results_per_page=1000,
+        )
+        return sorted({
+            e["RowKey"] for e in entities
+            if e.get("RowKey") and len(e["RowKey"]) == 8 and e["RowKey"].isdigit()
+        })
+    except Exception as e:
+        print(f"Error listing decision dates: {e}")
+        return []
+
 
 def get_row(partitionkey, rowkey):
     try:

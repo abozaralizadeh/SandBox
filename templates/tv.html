@@ -516,6 +516,62 @@
       });
     }
 
+    // ---- channel list (the days the dial can tune to) ----
+    // Loaded from /genbox-channels: the dates that actually HAVE a bulletin, plus the live
+    // slot. Stepping over this list instead of over ±1 calendar day is what keeps the two
+    // dial knobs correct when the publication interval (GENBOX_GENERATION_INTERVAL_DAYS)
+    // changes — the archive keeps whatever cadence it was published on. If the fetch fails
+    // we silently fall back to the old ±1-day stepping.
+    let channels = [];        // Date objects, ascending
+    let channelIndex = -1;    // currentDate's position in `channels` (-1 = not on the list)
+    let liveDate = null;      // the channel allowed to be generating right now
+
+    function parseYmd(s) {
+      // Build in LOCAL time; new Date('YYYY-MM-DD') would parse as UTC and can land a day off.
+      const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s || '');
+      return m ? new Date(+m[1], +m[2] - 1, +m[3]) : null;
+    }
+
+    async function loadChannels() {
+      try {
+        const r = await fetch('/genbox-channels');
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const data = await r.json();
+        const dates = (data.dates || []).map(parseYmd).filter(Boolean);
+        if (dates.length) channels = dates;
+        liveDate = parseYmd(data.live) || liveDate;
+      } catch (e) {
+        console.error('Error fetching the channel list:', e);
+      }
+      return channels;
+    }
+
+    function indexOfDay(date) {
+      return channels.findIndex(d => sameDay(d, date));
+    }
+
+    // Turn the dial by one channel. delta -1 = older, +1 = newer. At the newest end we
+    // refresh the list first, so a page left open across a publication picks up the new day.
+    async function stepChannel(delta) {
+      if (!channels.length) {                 // no list -> legacy ±1-day behaviour
+        currentDate = new Date(currentDate);
+        currentDate.setDate(currentDate.getDate() + delta);
+        displayServerText(currentDate);
+        return;
+      }
+      if (channelIndex < 0) channelIndex = Math.max(indexOfDay(currentDate), channels.length - 1);
+      if (delta > 0 && channelIndex >= channels.length - 1) {
+        await loadChannels();
+        channelIndex = indexOfDay(currentDate);
+        if (channelIndex < 0) channelIndex = channels.length - 1;
+      }
+      const next = Math.min(Math.max(channelIndex + delta, 0), channels.length - 1);
+      if (next === channelIndex) return;      // already at the oldest / newest channel
+      channelIndex = next;
+      currentDate = new Date(channels[next]);
+      displayServerText(currentDate);
+    }
+
     function sameDay(a, b) {
       return a && b &&
         a.getFullYear() === b.getFullYear() &&
@@ -815,7 +871,9 @@
       const titleHTML = '<div class="tv-title">International<br>Artificial Intelligence<br>Government</div>';
       const discoverLink = '\n<a href="https://abozar-alizadeh.medium.com/giving-the-ai-government-a-face-and-a-voice-building-genboxs-self-producing-newsroom-db7f57b9e1c7" target="_blank" class="custom-link">Discover More!</a>';
       const channelDay = date ? new Date(date) : new Date();   // snapshot of this channel's day (currentDate mutates in place)
-      const isToday = sameDay(channelDay, new Date());
+      // The "live" channel is the current publication slot — today only when today lands on
+      // the publication interval; between publications the last slot's bulletin stays on air.
+      const isToday = sameDay(channelDay, liveDate || new Date());
 
       // Swap real content in once it's available (clears the no-signal static/centering).
       const showRealContent = (serverText) => {
@@ -881,8 +939,7 @@
       rotationAngle1 += 45;
       button1.style.transform = `rotate(${rotationAngle1}deg)`;
 
-      currentDate.setDate(currentDate.getDate() - 1);
-      displayServerText(currentDate);
+      stepChannel(-1);   // one channel older
     });
 
     const button2 = document.getElementById('button2');
@@ -894,8 +951,7 @@
       rotationAngle2 -= 45;
       button2.style.transform = `rotate(${rotationAngle2}deg)`;
 
-      currentDate.setDate(currentDate.getDate() + 1);
-      displayServerText(currentDate);
+      stepChannel(1);    // one channel newer
     });
 
     // Third button from top: pause / resume BOTH the video and the scrolling text
@@ -989,7 +1045,20 @@
 
     helpButton.addEventListener('click', () => { userInteracted = true; showHelp(); });
 
-    displayServerText();
+    // Tune to the newest channel on load. That is the live slot, which is today only on a
+    // publication day; otherwise the last published bulletin stays on air.
+    (async () => {
+      await loadChannels();
+      if (channels.length) {
+        channelIndex = channels.length - 1;
+        currentDate = new Date(channels[channelIndex]);
+        displayServerText(currentDate);
+      } else {
+        // No channel list (endpoint unreachable) — ask for the live channel without naming a
+        // date and let the server resolve the slot, so an off-schedule day still shows content.
+        displayServerText();
+      }
+    })();
   </script>
 
 </body>

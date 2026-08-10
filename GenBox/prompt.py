@@ -10,6 +10,7 @@ from GenBox.azurestorage import (
     release_decision_lock,
 )
 from GenBox.research import research_real_world
+from GenBox.schedule import current_slot_date
 from utils import get_flat_date, get_readable_date
 
 load_dotenv()
@@ -64,45 +65,46 @@ def _extract_output(row):
 
 
 def get_llm_response(date=None):
-  if date:
-      date_row = get_row("assistant", get_flat_date(date))
-      if date_row:
-          print("date row exists")
-          output = _extract_output(date_row)
-          # Row exists but is empty/malformed -> no content (frontend shows TV static).
-          return f"{output}\n\n{get_readable_date(date)}" if output else ""
-      elif get_flat_date(date) != get_flat_date():
-          # No row for this past/other day -> no content.
-          return ""
+  # The live channel is the current publication slot, which is today only when today lands
+  # on the GENBOX_GENERATION_INTERVAL_DAYS grid; between publications it is the most recent
+  # slot, whose bulletin stays on air.
+  slot = current_slot_date()
+  target = date if date else slot
+  flat = get_flat_date(target)
 
-  todays_row = get_row("assistant", get_flat_date())
+  row = get_row("assistant", flat)
+  if row:
+      print("date row exists")
+      output = _extract_output(row)
+      # Row exists but is empty/malformed -> no content (frontend shows TV static).
+      return f"{output}\n\n{get_readable_date(target)}" if output else ""
 
-  if todays_row:
-      print("todays row already exists")
-      output = _extract_output(todays_row)
-      # Today's row exists but is empty/malformed -> no content (don't crash / re-generate).
-      return f"{output}\n\n{get_readable_date()}" if output else ""
+  if flat != get_flat_date(slot):
+      # No row for this past/other day -> no content.
+      return ""
 
-  # Cache miss — generate today's decision in the BACKGROUND (topic + web research + the
-  # detailed decision is slow) so this request returns immediately. The TV shows static and
-  # keeps polling /get-string until the bulletin is ready.
-  _ensure_decision_generation(date)
+  # Cache miss on the live slot — generate its decision in the BACKGROUND (topic + web
+  # research + the detailed decision is slow) so this request returns immediately. The TV
+  # shows static and keeps polling /get-string until the bulletin is ready.
+  _ensure_decision_generation(target)
   return ""
 
 
 def _ensure_decision_generation(date=None):
-    """Non-blocking, idempotent trigger for today's decision text. Starts a daemon thread
-    guarded by an Azure-table single-flight lock so only one worker generates a given day,
-    and never blocks the HTTP request. Only 'today' (the live channel) is generated."""
-    flat = get_flat_date(date) if date else get_flat_date()
-    if flat != get_flat_date():
+    """Non-blocking, idempotent trigger for the live slot's decision text. Starts a daemon
+    thread guarded by an Azure-table single-flight lock so only one worker generates a given
+    day, and never blocks the HTTP request. Only the current publication slot is generated —
+    off-schedule days and past channels never do."""
+    slot = current_slot_date()
+    flat = get_flat_date(slot)
+    if date and get_flat_date(date) != flat:
         return  # past/other days never generate (they're 'no content' if absent)
     if not try_acquire_decision_lock(flat):
         return  # another worker/thread is already generating this day
 
     def _run():
         try:
-            _call_llm_decision(date)
+            _call_llm_decision(slot)
         except SystemExit as e:
             # _call_llm_decision raises SystemExit on a failed upstream request; in a
             # background thread that would just kill the thread — log and release instead.
@@ -179,7 +181,7 @@ def _choose_topic(recent_topics, handoff_hint):
     return hint or "the most pressing current global challenge to address today"
 
 
-def _decision_user_message(topic, research):
+def _decision_user_message(topic, research, date=None):
     """Phase B user prompt: today's chosen topic + the real-world research briefing."""
     parts = [f"Today's chosen topic and objective: {topic}"]
     briefing = (research or {}).get("briefing", "").strip()
@@ -194,7 +196,7 @@ def _decision_user_message(topic, research):
         )
     parts.append(
         "Now make today's detailed world-governing decision on THIS topic, in the required "
-        f"JSON format. context: {get_readable_date()}"
+        f"JSON format. context: {get_readable_date(date)}"
     )
     return {"role": "user", "content": [{"type": "text", "text": p} for p in parts]}
 
@@ -221,6 +223,10 @@ def _annotate_decision(content, topic, sources):
 
 @traceable(run_type="chain", name="GenBox Decision")
 def _call_llm_decision(date=None):
+  # Every row this run writes is keyed by the publication slot, which with an interval > 1
+  # can be earlier than the day the generation actually runs on.
+  date = date or current_slot_date()
+  flat_date = get_flat_date(date)
   headers = {
       "Content-Type": "application/json",
       "api-key": API_KEY,
@@ -313,14 +319,14 @@ Consider implementing a new taxation policy focused on environmental sustainabil
   # "prompt" handoff is only an optional hint; the picker diversifies away from recent topics.
   handoff_hint = _salvage_string_field(last_n_rows[-1].get("content"), "prompt") if last_n_rows else ""
   topic = _choose_topic(_recent_topics(last_n_rows), handoff_hint)
-  print(f"GenBox topic for {get_readable_date()}: {topic}")
+  print(f"GenBox topic for {get_readable_date(date)}: {topic}")
 
   # Research step — native web search on the chosen topic (best-effort; may be empty).
   research = research_real_world(topic, date=date)
 
   # Phase B — the detailed decision, grounded in the research.
-  user_message = _decision_user_message(topic, research)
-  insert_history("user", str(user_message["content"]))
+  user_message = _decision_user_message(topic, research, date)
+  insert_history("user", str(user_message["content"]), flat_date)
 
   payload["messages"] += last_n_prompts
   payload["messages"].append(user_message)
@@ -342,13 +348,13 @@ Consider implementing a new taxation policy focused on environmental sustainabil
       # Persist the chosen topic + the exact sources the research surfaced (provenance).
       content = _annotate_decision(content, topic, research.get("sources"))
 
-      insert_history(role, content)
+      insert_history(role, content, flat_date)
       try:
           output = (json.loads(content).get("output") or "").strip()
       except Exception:
           output = ""
       if output:
-          return f"{output}\n\n{get_readable_date()}"
+          return f"{output}\n\n{get_readable_date(date)}"
 
   # Nothing usable to show (no/failed generation) -> no content.
   return ""

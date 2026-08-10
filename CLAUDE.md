@@ -7,7 +7,9 @@ Guidance for Claude Code when working in this repository.
 SandBox is a single Flask app (`main.py`) hosting six independent AI subprojects, deployed to
 Azure App Service (web app "genbox", domain SandBoxes.Live) via `azure-pipelines.yml` on every
 push to `main`. There is **no scheduler anywhere**: all content is generated lazily when the
-first visitor of the day requests it, then cached in Azure Table Storage.
+first visitor of the day requests it, then cached in Azure Table Storage. GenBox publishes on a
+cadence (`GENBOX_GENERATION_INTERVAL_DAYS`, default 1) — still lazily, but only on dates that
+land on the interval grid; see `GenBox/schedule.py`.
 
 Run locally:
 
