@@ -1393,6 +1393,18 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
         arc = state.get("arc")
         if not arc:
             return
+
+        # ONCE PER ARC, NOT ONCE PER DAY. The reference sheet is the arc's character anchor and
+        # is deliberately generated once and cached; re-auditing it every episode would let a
+        # "fail" verdict replace it on any given day, so the cast would drift from episode to
+        # episode — the exact problem the cached sheet exists to prevent. The marker is keyed to
+        # the card version so a restyle (new card) legitimately earns a fresh audit.
+        audited_version = int(arc.get("style_audit_version", 0) or 0)
+        if audited_version >= STYLE_CARD_VERSION and not state.get("restyle_requested"):
+            logger.info("STYLE AUDIT skipped — this arc's sheet was already audited (v%d).",
+                         audited_version)
+            return
+
         sheet_url = arc.get("character_sheet_url", "")
         if not sheet_url:
             return
@@ -1477,23 +1489,28 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
             dirty = True
             logger.info("STYLE AUDIT regenerated the sheet: %s", sheet_url[:120])
 
-        if not dirty:
-            return
-
-        # Persist whatever card survived — the intensified directive is what every future panel
-        # will be rendered with, so the STORED card must be the final one, not the original.
+        # Mark the arc audited on EVERY completion path — pass, fail-and-fixed, or exhausted.
+        # Without this the audit would re-run tomorrow and could swap the sheet again.
         try:
-            card_json = card.model_dump_json()
-            save_arc_style_card(
-                arc["RowKey"], card_json=card_json, family=card.style_family,
-                construction=card.construction_bucket, medium=card.medium_and_process,
-                version=STYLE_CARD_VERSION,
+            if dirty:
+                # Persist whatever card survived: the intensified directive is what every future
+                # panel is rendered with, so the STORED card must be the final one.
+                card_json = card.model_dump_json()
+                save_arc_style_card(
+                    arc["RowKey"], card_json=card_json, family=card.style_family,
+                    construction=card.construction_bucket, medium=card.medium_and_process,
+                    version=STYLE_CARD_VERSION,
+                )
+                arc.update(style_card=card_json)
+                logger.info("STYLE AUDIT persisted the corrected card for the rest of the arc.")
+            update_arc_metadata(
+                arc["RowKey"],
+                character_sheet_url=sheet_url,
+                style_audit_version=STYLE_CARD_VERSION,
             )
-            update_arc_metadata(arc["RowKey"], character_sheet_url=sheet_url)
-            arc.update(style_card=card_json, character_sheet_url=sheet_url)
-            logger.info("STYLE AUDIT persisted the corrected card and sheet for future episodes.")
+            arc.update(character_sheet_url=sheet_url, style_audit_version=STYLE_CARD_VERSION)
         except Exception as exc:
-            logger.warning("STYLE AUDIT could not persist the corrected card: %s", str(exc)[:200])
+            logger.warning("STYLE AUDIT could not persist its result: %s", str(exc)[:200])
 
     director_plan, storyteller_script = asyncio.run(_drive())
 
