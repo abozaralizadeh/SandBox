@@ -6,9 +6,14 @@ from typing import Any, Dict, List, Optional
 from AIOpenProblemSolver.azurestorage import (
     get_iteration_slice,
     latest_iteration,
+    parse_iteration_rowkey,
+    release_iteration_lock,
+    rowkey_for_date,
     save_iteration,
+    try_acquire_iteration_lock,
 )
 from AIOpenProblemSolver.graph import get_open_deep_search_agent
+from AIOpenProblemSolver.memory import load_or_seed_memory, render_memory, update_memory
 
 try:  # LangGraph >= 0.2
     from langgraph.types import Overwrite, StateSnapshot
@@ -138,17 +143,16 @@ def _extract_message_container(payload: Any) -> Optional[Dict[str, Any]]:
     return None
 
 
-def _rowkey_now() -> str:
-    return datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+def _rowkey_for_today(problem: str, today: datetime) -> str:
+    """The RowKey today's iteration must be saved under: the one this day already has, if
+    any, so a re-run REPLACES the day's entry instead of adding a second one (the notebook
+    shows one entry per day). Only a day with no entry yet gets a fresh key."""
+    flat_date = today.strftime("%Y%m%d")
+    return rowkey_for_date(problem, flat_date) or today.strftime("%Y%m%d_%H%M%S")
 
 
 def _rowkey_to_date(rowkey: str) -> Optional[datetime]:
-    for fmt in ("%Y%m%d_%H%M%S", "%Y%m%d_%H", "%Y%m%d"):
-        try:
-            return datetime.strptime(rowkey, fmt)
-        except ValueError:
-            continue
-    return None
+    return parse_iteration_rowkey(rowkey)
 
 
 def _decode_metadata(raw: str) -> Dict[str, Any]:
@@ -187,7 +191,7 @@ def _format_entity(entity: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _history_context(problem: str, limit: int = 5) -> str:
+def _recent_summaries(problem: str, limit: int = 5) -> str:
     history, _ = get_iteration_slice(problem, offset=0, limit=limit)
     if not history:
         return "No prior progress recorded."
@@ -207,7 +211,11 @@ def _history_context(problem: str, limit: int = 5) -> str:
 
 async def _run_iteration(problem: str, today: datetime) -> Dict[str, Any]:
     agent, browser_aclose = await get_open_deep_search_agent()
-    history_snippet = _history_context(problem)
+    history_snippet = _recent_summaries(problem)
+    # The distilled record of what has already been tried — the part that keeps the agent
+    # from spending today re-running an experiment it already ran (see memory.py).
+    memory = load_or_seed_memory(problem)
+    memory_snippet = render_memory(memory)
 
     system_prompt = f"""
 You are Open Problem Solver, a creative autonomous mathematician working to solve one of the most important open problems in mathematics.
@@ -219,7 +227,7 @@ Make tangible, ORIGINAL progress on the following problem. Do not merely summari
 {problem}
 
 ## Your Process
-1. Review historical progress (below) to understand what has already been attempted.
+1. Review the RESEARCH MEMORY and historical progress (below) to understand what has already been attempted.
 2. Identify the most promising direction that has NOT been fully explored.
 3. Formulate a specific conjecture or approach for today's work.
 4. USE YOUR COMPUTATIONAL TOOLS (python_math_sandbox, symbolic_calculator) to:
@@ -231,11 +239,20 @@ Make tangible, ORIGINAL progress on the following problem. Do not merely summari
 5. Develop rigorous arguments based on what you discover.
 6. Use web search ALWAYS to verify a specific theorem, look up a known result, or check whether your approach has been attempted.
 
-## Historical Progress
+## Research Memory (accumulated across all previous iterations)
+{memory_snippet}
+
+## Historical Progress (recent daily summaries)
 {history_snippet}
 
+## Working With Your Memory (mandatory)
+- The memory above is your own record from previous days. Treat it as fact.
+- Do NOT re-run an experiment listed under "COMPUTATIONS ALREADY RUN" — reuse its stated result. If you genuinely need to revisit one, say why and change it substantively (wider range, different method, sharper hypothesis).
+- Do NOT re-attempt an approach listed under "ALREADY TRIED AND FAILED" unless you have a concrete new idea that defeats the specific reason it failed — and state that reason and your fix explicitly.
+- Build on "ESTABLISHED SO FAR" rather than re-deriving it, and prefer picking up an "OPEN LEAD" over inventing a fresh direction, unless you can argue the lead is exhausted.
+
 ## Expectations for Today
-- Run at least 3-5 computational experiments using python_math_sandbox
+- Run at least 3-5 computational experiments using python_math_sandbox — each one NEW relative to the memory above
 - Formulate at least one original conjecture or proof strategy
 - If a direction seems unproductive, pivot and explain why
 - Clearly mark what is proven vs. conjectured vs. speculative
@@ -246,6 +263,9 @@ When you are finished, output valid JSON (no code fences) with these keys:
 - summary: concise, plain-text overview of today's advances (<= 4 sentences). Focus on what YOU discovered or proved, not what you read online.
 - html_content: HTML describing today's work. Use semantic tags (e.g., <section>, <h2>, <p>, <ul>, <pre>, <code>). Include your computations, conjectures, proof sketches, and any relevant code snippets.
 - next_steps: array of 2-5 concrete follow-up actions, each describing a specific mathematical investigation to pursue.
+- experiments: array of one-line strings, one per computation you actually ran today, each stating WHAT was computed (with the concrete ranges/parameters) and WHAT came out — e.g. "Counted sign changes of S(t) for t up to 10^5 via Riemann-Siegel — matched the predicted log log t growth". This is what stops tomorrow from recomputing today's work, so be specific.
+- dead_ends: array of one-line strings for every approach you tried today that did NOT work, each naming the approach AND the concrete reason it failed. Empty array if nothing failed — but a day with no failures is rare, so be honest.
+- established: array of one-line strings for results you consider settled after today (proven, or verified strongly enough to build on). Mark proven vs. verified.
 - references: array of citation strings formatted as "Title — URL". Include only sources you actually consulted.
 - progress_percent: number between 0 and 100 representing cumulative progress toward fully solving the problem. Be conservative and honest — a genuine novel partial result might be 0.1-1%. Do not inflate.
 - progress_comment: short (<= 120 characters) status note contextualizing the progress_percent value. Describe what was achieved, not what was attempted.
@@ -304,12 +324,15 @@ Task: Make original progress on the problem today. Think creatively, compute ext
     metadata = {
         "next_steps": parsed.get("next_steps", []),
         "references": parsed.get("references", []),
+        "experiments": parsed.get("experiments", []),
+        "dead_ends": parsed.get("dead_ends", []),
+        "established": parsed.get("established", []),
         "raw_response": parsed,
         "progress_percent": progress_percent,
         "progress_comment": progress_comment,
     }
 
-    rowkey = _rowkey_now()
+    rowkey = _rowkey_for_today(problem, today)
     save_iteration(
         problem=problem,
         rowkey=rowkey,
@@ -317,6 +340,10 @@ Task: Make original progress on the problem today. Think creatively, compute ext
         summary=summary,
         metadata=metadata,
     )
+
+    # Fold today's findings into the long-term memory (compacting it when it has grown
+    # past its budget). Best-effort by design — the day's iteration is already saved.
+    await update_memory(problem, parsed, stamp=today.strftime("%Y-%m-%d"), base=memory)
 
     return _format_entity(
         {
@@ -332,13 +359,37 @@ Task: Make original progress on the problem today. Think creatively, compute ext
     )
 
 
-async def ensure_latest_iteration(problem: str) -> Dict[str, Any]:
+def _has_iteration_for_today(problem: str) -> Optional[Dict[str, Any]]:
     latest = latest_iteration(problem)
     if latest:
         timestamp = _rowkey_to_date(latest.get("RowKey", ""))
         if timestamp and timestamp.date() == datetime.utcnow().date():
-            return _format_entity(latest)
-    return await _run_iteration(problem, datetime.utcnow())
+            return latest
+    return None
+
+
+async def ensure_latest_iteration(problem: str) -> Optional[Dict[str, Any]]:
+    """Run today's iteration unless it exists or another worker is already running it.
+
+    An iteration takes minutes and is triggered from a blocking request, so without the
+    single-flight lock every concurrent visitor — across 4 gunicorn workers — starts its
+    own run and the day ends up with several notebook entries. Callers that lose the race
+    get None and simply serve the history that is already there."""
+    existing = _has_iteration_for_today(problem)
+    if existing:
+        return _format_entity(existing)
+
+    if not try_acquire_iteration_lock(problem):
+        return None   # another worker is generating today's iteration right now
+
+    try:
+        # Re-check inside the lock: the run we queued behind may have just finished.
+        existing = _has_iteration_for_today(problem)
+        if existing:
+            return _format_entity(existing)
+        return await _run_iteration(problem, datetime.utcnow())
+    finally:
+        release_iteration_lock(problem)
 
 
 async def get_problem_history(

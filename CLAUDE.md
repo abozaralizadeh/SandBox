@@ -30,7 +30,7 @@ The 1-hour gunicorn timeout is deliberate — it matches the ComicBook generatio
 | `AIBlog/` | Daily AI-research blog post with DALL·E banner | LangGraph `create_react_agent` over `TokenAwareAzureChatOpenAI` | `prompt.getaiblog(date)` (async) |
 | `ComicBook/` | Daily comic strip with persistent multi-episode arcs, it/fa retellings | **OpenAI Agents SDK** (handoff chain, NOT LangGraph) | `prompt.get_comicbook(date, lang)` |
 | `GenBox/` | Daily "AI world government" decision + Sora 2 news video + TTS narration | Plain HTTP for decision text; OpenAI Agents SDK for the video Producer | `prompt.get_llm_response(date)`, `video.ensure_generation_started(date)` |
-| `AIOpenProblemSolver/` | Daily research iterations on open math problems | `deepagents.create_deep_agent` (LangGraph-based; ReAct fallback) | `prompt.get_problem_history(...)` |
+| `AIOpenProblemSolver/` | Daily research iterations on open math problems (one entry per day; `memory.py` keeps the cross-day record of tried/failed work) | `deepagents.create_deep_agent` (LangGraph-based; ReAct fallback) | `prompt.get_problem_history(...)` |
 | `TrAIde/` | Read-only dashboard for the separate trAIde trading bot | None — pure consumer | `azurestorage.*` getters, `market.get_candles` |
 
 `TrAIde/` contains **no LLM code**. The producing agents live in the separate repo at
@@ -49,7 +49,9 @@ repo only reads it. Never add account data or absolute amounts to the dashboard 
    Storage and the table row keeps an `html_blob_name` pointer, hydrated on read. Preserve this
    in any storage change.
 4. Cross-worker single-flight is done with **Azure-table entity-create locks** with TTLs
-   (ComicBook `generation_lock` 1h; GenBox decision/video/audio locks, stale after 1800s).
+   (ComicBook `generation_lock` 1h; GenBox decision/video/audio locks, stale after 1800s;
+   AIOpenProblemSolver `iteration_lock`, `AIOPS_ITERATION_LOCK_TTL` 5400s — its iteration runs
+   from a *blocking* request, so without the lock every concurrent visitor started its own).
    There are 4 gunicorn workers — never assume in-process state is shared.
 5. Content endpoints (`/tomorrownewscontent`, `/aiblogcontent`, `/comicbookcontent`, `/traide/*`)
    are **Referer-guarded** against hotlinking; keep the guard on new data endpoints.

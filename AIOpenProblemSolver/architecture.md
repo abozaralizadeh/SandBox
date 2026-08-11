@@ -48,7 +48,8 @@ flowchart TB
   end
 
   subgraph STORE["Azure Storage — AIOpenProblemSolver/azurestorage.py"]
-    TIT[("Table iterations (aiops_table_name)<br/>PK sha1(problem) · RK YYYYMMDD_HHMMSS<br/>summary · html_content · metadata · progress")]
+    TIT[("Table iterations (aiops_table_name)<br/>PK sha1(problem) · RK YYYYMMDD_HHMMSS<br/>one row per day · summary · html_content<br/>metadata · progress")]
+    TMEM[("Same table, PK memory · iteration_lock<br/>research memory (4 buckets, compacted)<br/>single-flight lock")]
     TCAT[("Table catalog (aiops_problem_table_name)<br/>PK catalog · problem · description")]
   end
 
@@ -73,6 +74,7 @@ flowchart TB
   LOOPN --> BR
   DA --> CHAT
   RUN -->|save_iteration| TIT
+  RUN -->|"lock · read/update memory"| TMEM
   RUN --> SLICE
   SLICE <--> TIT
   SLICE -->|entries + progress JSON| RH
@@ -93,15 +95,18 @@ sequenceDiagram
     U->>UI: open page / scroll / pick problem
     UI->>API: GET /history?problem, offset, ensure_latest
     API->>P: get_problem_history(...)
-    alt ensure_latest and no entry today (continue the problem)
-        P->>AG: _run_iteration(problem, today) + history context
+    alt ensure_latest, no entry today, and lock acquired (continue the problem)
+        P->>T: try_acquire_iteration_lock (single flight across workers)
+        P->>T: load research memory (dead ends · experiments · established · leads)
+        P->>AG: _run_iteration(problem, today) + memory + recent summaries
         loop think → compute → research (recursion 1000)
             AG->>X: python_math_sandbox / symbolic_calculator
             AG->>X: search / browse
             AG->>X: chat (reason, conjecture)
         end
-        AG-->>P: JSON {summary, html, next_steps, references, progress}
-        P->>T: save_iteration (PK sha1 · RK timestamp)
+        AG-->>P: JSON {summary, html, next_steps, experiments, dead_ends, established, references, progress}
+        P->>T: save_iteration (PK sha1 · RK = the day's existing key, else timestamp)
+        P->>T: update memory (merge, compact if over budget), release lock
     end
     P->>T: get_iteration_slice (offset, limit)
     T-->>P: recent iterations
@@ -113,6 +118,33 @@ sequenceDiagram
 - **Read vs. generate:** browsing history is a cheap table read. A **new iteration runs only
   when** `ensure_latest=true` and there is no entry for today — this is the resume/continue
   mechanism, so the agent advances the *same* problem instead of restarting.
+- **One entry per day, enforced three ways.** An iteration takes minutes and is triggered from
+  a *blocking* request, so concurrent visitors across the 4 gunicorn workers used to each start
+  their own run and the day ended up with several notebook entries. Now: (1) a cross-worker
+  **single-flight lock** (`iteration_lock` partition, TTL `AIOPS_ITERATION_LOCK_TTL`, re-checked
+  inside the lock) means losers of the race serve the existing history instead of generating;
+  (2) the save **reuses the RowKey the day already has** (`rowkey_for_date`), so a re-run
+  replaces the day's entry rather than appending one; (3) `get_iterations` **collapses each
+  calendar day to its latest row** on read, which repairs the dates that were duplicated before
+  the lock existed without deleting anything.
+- **Research memory (`AIOpenProblemSolver/memory.py`):** the agent starts every day with a fresh
+  context, so a rolling window of summaries is not enough to stop it re-running yesterday's
+  experiment — summaries say what was *achieved*, and what prevents wasted work is the record of
+  what was **tried and failed**. Each iteration folds its report into a per-problem memory
+  document (`memory` partition) with four buckets — `dead_ends`, `experiments`, `established`,
+  `open_leads` — deduplicated stamp-, case- and punctuation-insensitively. It is rendered into
+  the system prompt anti-repetition-first, with explicit rules forbidding the agent from redoing
+  a listed experiment or failed approach. The agent's JSON output gained `experiments`,
+  `dead_ends` and `established` keys to feed it; all are read with `.get`, so a model that omits
+  them degrades instead of breaking.
+- **Memory compaction:** the document only grows, so once it passes `AIOPS_MEMORY_MAX_ITEMS`
+  (80) or `AIOPS_MEMORY_MAX_CHARS` (12k) an LLM pass merges near-duplicate entries — required to
+  *enumerate* the specific ranges/variants it merges, since a merged entry that loses the
+  specifics no longer answers "did I already run this?". A compaction that returns nothing, drops
+  every dead end, or collapses 8+ dead ends into fewer than 3 is **rejected** as a summary rather
+  than a compaction, and a deterministic per-bucket trim (dead ends and established results
+  survive longest) runs instead — so memory stays bounded even when the model is unavailable.
+  The whole memory path is best-effort and never raises into the iteration that produced it.
 - **Deep agent:** built with **deepagents** (`create_deep_agent`), falling back to a classic
   LangGraph **ReAct** agent. Priority is THINK → COMPUTE → CONSTRUCT/PROVE → RESEARCH; tool
   outputs are truncated (`AIOPS_TOOL_MAX_CHARS`) to protect the context window.
