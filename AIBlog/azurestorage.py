@@ -209,6 +209,30 @@ def upsert_title(rowkey, title):
         print(f"Error inserting row: {e}")
 
 
+def list_edition_keys():
+    """Every RowKey that actually holds a post, ascending.
+
+    The archive is not dense — whenever the app was down for a day, that day simply has no
+    row — so the reader's ◀/▶ navigation has to step over the days that exist instead of
+    over the calendar. `html_blob_name` is the availability marker: `_attach_html_payload`
+    always writes it (inline or offloaded), while a row created by `upsert_title` alone —
+    a generation that named its post and then failed — never gets it. Selecting only these
+    two properties keeps this a cheap query; the HTML itself is never fetched here."""
+    try:
+        entities = table_client.query_entities(
+            query_filter="PartitionKey eq 'getimagetool'",
+            select=["RowKey", "html_blob_name"],
+            results_per_page=1000,
+        )
+        return sorted(
+            e["RowKey"] for e in entities
+            if e.get("RowKey") and "html_blob_name" in e
+        )
+    except Exception as e:
+        print(f"Error listing AIBlog edition keys: {e}")
+        return []
+
+
 def get_last_n_rows(n=10):
     try:
         # Query all entities

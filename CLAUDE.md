@@ -56,6 +56,30 @@ repo only reads it. Never add account data or absolute amounts to the dashboard 
 5. Content endpoints (`/tomorrownewscontent`, `/aiblogcontent`, `/comicbookcontent`, `/traide/*`)
    are **Referer-guarded** against hotlinking; keep the guard on new data endpoints.
 
+## Gaps in the archives (every generator)
+
+Nothing schedules these generators: content exists for a date only if a visitor arrived that
+day and the app was up. Every archive therefore has **holes**, and any downtime adds more. Two
+rules keep that from breaking, and both must hold for anything new:
+
+- **Only the LIVE date generates.** A request for any earlier date serves what is stored or
+  reports the gap; it never generates. Each edition reports the day it was made (TomorrowNews
+  predicts tomorrow from *that day's* real news, AIBlog covers research published that day), so a
+  back-dated edition would be a lie — and for ComicBook actively destructive, since `save_episode`
+  advances the arc's `last_episode_date`/`last_story_summary` and a back-dated episode would
+  leave the running arc describing something that is not its newest chapter. `save_episode`
+  additionally numbers episodes **by date order** and only ever moves the arc's pointer forward,
+  so a stray back-dated write cannot corrupt continuity. GenBox's live date is its schedule slot
+  (`GenBox/schedule.py`), not simply today.
+- **Navigation follows storage, not the calendar.** Stepping ±1 day walks straight into a hole,
+  which is why every ◀/▶ pair steps over an index of dates that actually exist:
+  `/aiblogindex`, `/tomorrownewsindex` (grouped per language — `fa`/`it` start much later than
+  `en`, and the early archive is hourly, so editions are matched on the full timestamp),
+  `/comicbookindex`, `/genbox-channels`, and AIOpenProblemSolver's paginated timeline. All clamp
+  at both ends, recover when landing on a gap date (a shared link), and fall back to plain
+  ±1-day stepping if the index endpoint is unreachable. Calendars grey out dates with no content.
+  A date with no content returns a placeholder page plus an `Edition-Missing: 1` header.
+
 ## Agent-design conventions (repo-wide)
 
 - **Tools never call the LLM.** A `@function_tool` (or LangChain tool) does deterministic work

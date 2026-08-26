@@ -118,6 +118,11 @@ sequenceDiagram
 - **Read vs. generate:** browsing history is a cheap table read. A **new iteration runs only
   when** `ensure_latest=true` and there is no entry for today — this is the resume/continue
   mechanism, so the agent advances the *same* problem instead of restarting.
+- **Gaps are inherent, and harmless here.** Nothing schedules the iterations, so days the app was
+  down simply have no entry. The timeline is a paginated list of the entries that exist (never a
+  calendar walk), `_recent_summaries` and the memory seed both read the last N *existing* rows,
+  and only today ever generates — so a week of downtime costs a week of research and nothing else.
+  No date arithmetic anywhere assumes yesterday exists.
 - **One entry per day, enforced three ways.** An iteration takes minutes and is triggered from
   a *blocking* request, so concurrent visitors across the 4 gunicorn workers used to each start
   their own run and the day ended up with several notebook entries. Now: (1) a cross-worker

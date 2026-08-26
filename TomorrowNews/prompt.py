@@ -1,6 +1,6 @@
 import os
 from datetime import datetime, timedelta
-from TomorrowNews.azurestorage import get_row, insert_history
+from TomorrowNews.azurestorage import get_row, insert_history, list_edition_keys
 from TomorrowNews.graph import news_graphs, news_graph
 from TomorrowNews.ReAct import supervisor
 from TomorrowNews.supervisor import ma_graph
@@ -150,21 +150,61 @@ def _generate_single(parsed_date, lang="en"):
     return content, timestamp
 
 
+def edition_index():
+    """Per-language lists of the editions a reader can actually open (ascending ISO
+    datetimes), so the ◀/▶ arrows and the calendar can step over the days that exist.
+
+    Language matters here: `fa`/`it` only exist for recent dates, and the early archive is
+    language-less (those rows serve as English, exactly as `_try_cache` reads them). Today is
+    always included — it is the one date that still generates on request."""
+    per_lang = {lang: set() for lang in GENERATION_ORDER}
+    for key in list_edition_keys():
+        parts = key.split("_")
+        lang = parts[2] if len(parts) > 2 else "en"   # language-less legacy rows are English
+        if lang not in per_lang:
+            continue
+        try:
+            per_lang[lang].add(parse_flat_date_hour("_".join(parts[:2])).isoformat())
+        except ValueError:
+            continue        # a RowKey that is not a date key (never expected; ignore)
+
+    today = parse_flat_date_hour(_get_rowkey_base(None)).isoformat()
+    editions = {}
+    for lang, dates in per_lang.items():
+        dates.add(today)
+        editions[lang] = sorted(dates)
+    return {
+        "editions": editions,
+        "latest": {lang: dates[-1] for lang, dates in editions.items()},
+    }
+
+
+def is_live_edition(parsed_date) -> bool:
+    """True when the requested date is today's edition — the only one that may be generated.
+
+    Every other date is archive: an edition predicts tomorrow's events from *that day's*
+    real newspaper, so a day the server was down cannot be written after the fact. It used
+    to be, in two different ways: `fa`/`it` requests fell through and generated a whole
+    newspaper under the old date (from today's news), and `en` requests silently served
+    today's edition under the old date, which snapped the reader's date label back to today
+    and made ◀ look broken at the edge of a gap."""
+    return parsed_date is None or _get_rowkey_base(parsed_date) == _get_rowkey_base(None)
+
+
 def gettomorrownews(parsed_date, lang="en"):
     if not strtobool(os.environ.get("DEBUG", False)):
         cached = _try_cache(parsed_date, lang)
         if cached:
             return cached
 
-        if lang == "en":
-            base = _get_rowkey_base(None)
-            fallback_key = f"{base}_{lang}"
-            if cached_fb := get_row(fallback_key):
-                return cached_fb["html_content"], parse_flat_date_hour(base)
-            if cached_fb := get_row(base):
-                return cached_fb["html_content"], parse_flat_date_hour(base)
+        if not is_live_edition(parsed_date):
+            # No edition for this day (the gap is real) — report it instead of inventing one.
+            return "", parse_flat_date_hour(_get_rowkey_base(parsed_date))
 
-    results = _generate_all(parsed_date)
+    # Always generate the LIVE edition, never a back-dated one: an edition is only ever
+    # written for the day it was produced. (In DEBUG the cache check above is skipped, so a
+    # request for an old date re-generates today's edition rather than overwriting history.)
+    results = _generate_all(None)
     return results[lang]
 
 

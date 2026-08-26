@@ -8,7 +8,9 @@ from dotenv import load_dotenv
 load_dotenv()
 from flask import Flask, jsonify, make_response, request, render_template, Response, redirect
 from AIBlog.prompt import *
+from AIBlog.prompt import edition_index as aiblog_edition_index
 from TomorrowNews.prompt import *
+from TomorrowNews.prompt import edition_index as tomorrownews_edition_index
 from ComicBook.prompt import get_comicbook
 from ComicBook.azurestorage import get_episode_index, get_arc_list
 from ComicBook.imageproxy import ensure_webp_variant, blob_name_if_ours, rewrite_comic_images
@@ -46,6 +48,32 @@ def _env_flag(name, default=False):
     if val is None:
         return default
     return val.strip().lower() in ("1", "true", "yes", "on")
+
+def _missing_edition_page(title, dt=None):
+    """Shown for a date with no edition — the days the app was down. The daily generators
+    only ever produce the LIVE edition (an edition reports the day it was made), so a gap is
+    permanent and is stated plainly instead of being back-filled or masked with today's
+    content. Rendered into the reader's iframe, hence a full standalone document."""
+    label = ""
+    try:
+        label = dt.strftime('%d %B %Y') if dt else ""
+    except AttributeError:
+        label = str(dt or "")
+    return f"""<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{title}</title></head>
+<body style="margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+             background:transparent;color:#444;display:flex;align-items:center;
+             justify-content:center;min-height:60vh;text-align:center">
+  <div style="padding:32px">
+    <div style="font-size:34px;margin-bottom:12px">📭</div>
+    <h2 style="margin:0 0 8px;font-size:20px;font-weight:600">No edition for {label or 'this date'}</h2>
+    <p style="margin:0;font-size:15px;line-height:1.5;color:#666">
+      {title} publishes once a day and was offline on this date, so nothing was written.<br>
+      Use the arrows to jump to the closest date that has one.</p>
+  </div>
+</body></html>"""
+
 
 @app.route('/get-string', methods=['GET'])
 def get_string():
@@ -94,11 +122,21 @@ def tomorrownewscontent():
             except:
                 parsed_date = None
         tomorrownews, dt = gettomorrownews(parsed_date, lang=lang)
-        response = make_response(tomorrownews)
+        response = make_response(tomorrownews or _missing_edition_page("Tomorrow News", dt))
         response.headers['Timestamp'] = dt
+        response.headers['Edition-Missing'] = "0" if tomorrownews else "1"
         return response
     else:
         return "404 Not Found", 404
+
+
+@app.route('/tomorrownewsindex', methods=['GET'])
+def tomorrownewsindex():
+    """Which editions exist, per language — the ◀/▶ arrows and the calendar step over this
+    list so a day the app was down is skipped instead of becoming a dead end."""
+    if not request.headers.get('Referer', ''):
+        return "404 Not Found", 404
+    return jsonify(tomorrownews_edition_index())
 
 @app.route('/comicbook', methods=['GET'])
 def comicbook():
@@ -198,11 +236,21 @@ async def aiblogcontent():
                 parsed_date = None
         aiblogcontent, datetime = await getaiblog(parsed_date)
         # Create a response object and add a custom header
-        response = make_response(aiblogcontent)
+        response = make_response(aiblogcontent or _missing_edition_page("AI Blog", datetime))
         response.headers['Timestamp'] = datetime  # Replace 'Custom-Header' and 'CustomValue' with your desired values
+        response.headers['Edition-Missing'] = "0" if aiblogcontent else "1"
         return response
     else:
         return "404 Not Found", 404
+
+
+@app.route('/aiblogindex', methods=['GET'])
+def aiblogindex():
+    """Which posts exist — the ◀/▶ arrows and the calendar step over this list so a day the
+    app was down is skipped instead of becoming a dead end."""
+    if not request.headers.get('Referer', ''):
+        return "404 Not Found", 404
+    return jsonify(aiblog_edition_index())
 
 @app.route('/genbox')
 def genbox():

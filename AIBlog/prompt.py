@@ -3,7 +3,7 @@ import re
 import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable, List
-from AIBlog.azurestorage import get_row, upsert_history, get_last_n_rows
+from AIBlog.azurestorage import get_row, upsert_history, get_last_n_rows, list_edition_keys
 from AIBlog.graph import *
 from utils import get_flat_date, get_flat_date_hour, parse_flat_date_hour, strtobool
 
@@ -50,17 +50,42 @@ def _extract_text_from_last_message(last_message: Any) -> str:
     return _PRIVATE_USE_RE.sub(" ", raw)
 
 
+def edition_index():
+    """The dates a reader can actually open, ascending ISO datetimes, plus the newest one.
+
+    Drives the ◀/▶ arrows and the calendar: the archive has holes wherever the app was down,
+    and stepping the calendar by one day walks into them. Today is always included even
+    before its post exists, because today is the one date that still generates on request."""
+    editions = []
+    for key in list_edition_keys():
+        try:
+            editions.append(parse_flat_date_hour(key).isoformat())
+        except ValueError:
+            continue        # a RowKey that is not a date key (never expected; ignore)
+    today = parse_flat_date_hour(get_flat_date() + "_00").isoformat()
+    if today not in editions:
+        editions.append(today)
+    editions.sort()
+    return {"editions": editions, "latest": editions[-1] if editions else today}
+
+
 async def getaiblog(parsed_date):
     timestamp = datetime.utcnow()
-    flat_date_hour = get_flat_date(parsed_date) + "_00"
+    requested_key = get_flat_date(parsed_date) + "_00"
+    today_key = get_flat_date() + "_00"
+    flat_date_hour = requested_key
 
     try:
         if not strtobool(os.environ.get("DEBUG", False)):
             if lastdayblog := get_row(flat_date_hour):
                 return lastdayblog["html_content"], parse_flat_date_hour(flat_date_hour)
-            flat_date_hour = get_flat_date() + "_00"
-            if parsed_date is not None and (lastdayblog := get_row(flat_date_hour)):
-                return lastdayblog["html_content"], parse_flat_date_hour(flat_date_hour)
+            if requested_key != today_key:
+                # A day the server was down has no post, and there is no honest way to write
+                # one now: the post reports the AI research published *that* day. So report
+                # the gap instead of (a) generating a back-dated post or (b) serving today's
+                # post under an older date — the latter is what used to happen, which snapped
+                # the reader's date label back to today and made ◀ look broken.
+                return "", parse_flat_date_hour(requested_key)
     except Exception as e:
         print("Error fetching from storage:", e)
         if isinstance(e, KeyError) and e.args[0] == 'html_content':
@@ -77,7 +102,16 @@ async def getaiblog(parsed_date):
                         raise e
         else:
             raise e
-        
+
+    if requested_key != today_key and not strtobool(os.environ.get("DEBUG", False)):
+        # Reachable when the requested day HAS a row but no usable HTML (a generation that
+        # failed after naming its post). Same rule as a missing row: report the gap.
+        return "", parse_flat_date_hour(requested_key)
+
+    # A post is only ever written for the day it was generated, so a request for an older
+    # date can never create a back-dated row.
+    flat_date_hour = today_key
+
     lastdayblogs = get_last_n_rows(30)
     lastdayblogstitles = [row.get("title", "") for row in lastdayblogs]
 

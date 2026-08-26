@@ -396,6 +396,14 @@ def ensure_active_arc(target_date: Optional[datetime] = None, min_days: int = 7,
     return start_new_arc(title=title, logline=logline, target_days=target, start_date=target_date)
 
 
+def _episode_dates(arc_id: str) -> List[str]:
+    """The RowKeys (flat dates) of an arc's episodes, ascending."""
+    entities = episodes_table.query_entities(
+        f"PartitionKey eq '{arc_id}'", select=["RowKey"], results_per_page=200
+    )
+    return sorted(e["RowKey"] for e in entities if e.get("RowKey"))
+
+
 def _count_episodes(arc_id: str) -> int:
     entities = list(episodes_table.query_entities(f"PartitionKey eq '{arc_id}'", results_per_page=200))
     return len(entities)
@@ -569,7 +577,13 @@ def save_episode(
             "arc_title": arc.get("title", ""),
             "episode_number": episode_number,
         }
-    episode_number = _count_episodes(arc_id) + 1
+    # Number episodes by DATE ORDER, not by "how many exist + 1". Counting breaks in two
+    # ways a gap makes reachable: re-generating a day that already has an episode would give
+    # the replacement a brand-new (too high) number, and an episode written for a date older
+    # than the arc's newest would be numbered as if it came last. Position-by-date is correct
+    # in both cases and idempotent.
+    dates = sorted(set(_episode_dates(arc_id)) | {row_key})
+    episode_number = dates.index(row_key) + 1
     entity = {
         "PartitionKey": arc_id,
         "RowKey": row_key,
@@ -582,14 +596,17 @@ def save_episode(
     entity = _attach_html_payload(entity, html_content_it, "_it")
     entity = _attach_html_payload(entity, html_content_fa, "_fa")
     episodes_table.upsert_entity(entity=entity, mode=UpdateMode.REPLACE)
-    arcs_table.upsert_entity(
-        entity={
-            "PartitionKey": _ARC_PARTITION,
-            "RowKey": arc_id,
-            "episodes_count": episode_number,
-            "last_episode_date": episode_date.isoformat(),
-            "last_story_summary": storyboard_summary[:MAX_TABLE_PROPERTY_CHARS],
-        },
-        mode=UpdateMode.MERGE,
-    )
+
+    # `last_episode_date` / `last_story_summary` are the arc's "where the story stands" —
+    # the next episode's Director reads them. They may only ever move FORWARD: an episode
+    # saved for an older date must not overwrite the newest episode's state.
+    arc_update = {
+        "PartitionKey": _ARC_PARTITION,
+        "RowKey": arc_id,
+        "episodes_count": len(dates),
+    }
+    if row_key >= max(dates):
+        arc_update["last_episode_date"] = episode_date.isoformat()
+        arc_update["last_story_summary"] = storyboard_summary[:MAX_TABLE_PROPERTY_CHARS]
+    arcs_table.upsert_entity(entity=arc_update, mode=UpdateMode.MERGE)
     return entity

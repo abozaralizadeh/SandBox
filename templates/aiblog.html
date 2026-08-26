@@ -190,6 +190,17 @@
             color: #ccc;
         }
 
+        /* Days with no post: the app was down, so nothing was written. Not selectable. */
+        .calendar-grid .day.disabled {
+            color: #ddd;
+            cursor: not-allowed;
+            pointer-events: none;
+        }
+
+        .calendar-grid .day.disabled:hover {
+            background-color: transparent;
+        }
+
         /* Time picker for dates before Jan 25, 2025 */
         .time-picker {
             margin-top: 15px;
@@ -341,6 +352,96 @@
         let displayedMonth = selectedDate.getMonth();
         let displayedYear = selectedDate.getFullYear();
 
+        // ---- published editions (gap-aware navigation) ----
+        // The archive is not dense: every day the app was offline simply has no post, and no
+        // post can be written for it after the fact. So ◀/▶ step over the dates that EXIST
+        // (from /aiblogindex) rather than over the calendar, and the calendar greys out the
+        // rest. Without this, one arrow press lands on a gap and looks broken.
+        let editions = [];            // ascending ISO datetimes, "YYYY-MM-DDT00:00:00"
+        let editionDays = new Set();  // the same list as "YYYY-MM-DD", for the calendar
+
+        function isoDay(date) {
+            return date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0')
+                 + '-' + String(date.getDate()).padStart(2, '0');
+        }
+
+        function parseEdition(iso) {
+            // Parse as LOCAL time; new Date('...T00:00:00') without a zone already is local,
+            // but be explicit so a future format change cannot silently shift a day.
+            const m = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}))?/.exec(iso || '');
+            return m ? new Date(+m[1], +m[2] - 1, +m[3], m[4] ? +m[4] : 0) : null;
+        }
+
+        async function loadEditions() {
+            try {
+                const res = await fetch('/aiblogindex');
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                const data = await res.json();
+                editions = (data.editions || []).filter(Boolean);
+                editionDays = new Set(editions.map(iso => iso.slice(0, 10)));
+            } catch (e) {
+                // No index: fall back to plain ±1-day stepping (old behaviour).
+                console.error('Failed to load the edition index:', e);
+                editions = [];
+                editionDays = new Set();
+            }
+            return editions;
+        }
+
+        // With no index loaded (endpoint unreachable) every day stays selectable, so the
+        // calendar degrades to its old behaviour instead of locking the reader out.
+        function hasEdition(date) {
+            return editionDays.size === 0 || editionDays.has(isoDay(date));
+        }
+
+        // Editions are matched on the FULL stamp, not just the day: the early archive
+        // published several editions on the same day (hourly), so day-level matching would
+        // always find the first one and the arrows would oscillate inside that day.
+        function isoStamp(date) {
+            return isoDay(date) + 'T' + String(date.getHours()).padStart(2, '0') + ':00:00';
+        }
+
+        function editionIndexOf(date) {
+            return editions.indexOf(isoStamp(date));
+        }
+
+        // The closest edition at or before `date` (else the earliest one) — where a link to a
+        // gap day should land.
+        function nearestEdition(date) {
+            const stamp = isoStamp(date);
+            let best = null;
+            for (const iso of editions) {
+                if (iso <= stamp) best = iso;
+                else break;
+            }
+            return best || editions[0] || null;
+        }
+
+        function stepEdition(delta) {
+            if (!editions.length) {          // no index — step the calendar as before
+                currentDate.setHours(0, 0, 0, 0);
+                currentDate.setHours(currentDate.getHours() + 24 * delta);
+                updateIframe();
+                return;
+            }
+            const stamp = isoStamp(currentDate);
+            const idx = editionIndexOf(currentDate);
+            let next;
+            if (idx >= 0) {
+                next = idx + delta;
+            } else if (delta < 0) {
+                // Sitting on a gap day (e.g. a shared link): step to the closest post
+                // BEFORE it — not one further, which would skip a published day.
+                next = editions.filter(iso => iso < stamp).length - 1;
+            } else {
+                next = editions.findIndex(iso => iso > stamp);
+            }
+            // Nothing further in that direction: stay put (also keeps ▶ out of the future).
+            if (next < 0 || next >= editions.length || next === idx) return;
+            currentDate = parseEdition(editions[next]);
+            updateIframe();
+        }
+
         function updateIframe() {
             //const formattedDate = currentDate.toISOString();
             var tzoffset = (currentDate).getTimezoneOffset() * 60000; //offset in milliseconds
@@ -384,25 +485,10 @@
             //iframeDocument.documentElement.style.backgroundColor = "rgba(255, 255, 255, 0.5)";
         }
 
-        document.getElementById('previousBtn').addEventListener('click', () => {
-            if (currentDate >= new Date("2025-01-25T00:00:00")) {
-                currentDate.setHours(0, 0, 0, 0);
-                currentDate.setHours(currentDate.getHours() - 24); // Decrease by 24 hours after January 27th
-            } else {
-                currentDate.setHours(currentDate.getHours() - 1); // Decrease by 1 hour before January 27th
-            }
-            updateIframe();
-        });
-
-        document.getElementById('nextBtn').addEventListener('click', () => {
-            if (currentDate >= new Date("2025-01-25T00:00:00")) {
-                currentDate.setHours(0, 0, 0, 0);
-                currentDate.setHours(currentDate.getHours() + 24); // Increase by 24 hours after January 27th
-            } else {
-                currentDate.setHours(currentDate.getHours() + 1); // Increase by 1 hour before January 27th
-            }
-            updateIframe();
-        });
+        // Step to the neighbouring PUBLISHED post, skipping the days that have none (and
+        // never running past the newest post into the future).
+        document.getElementById('previousBtn').addEventListener('click', () => stepEdition(-1));
+        document.getElementById('nextBtn').addEventListener('click', () => stepEdition(1));
 
         // Date picker functionality
         function initDatePicker() {
@@ -505,7 +591,8 @@
                     dayElement.textContent = daysInPrevMonth - firstDay + i + 1;
                     // Set date for previous month days
                     const prevMonthDate = new Date(displayedYear, displayedMonth - 1, daysInPrevMonth - firstDay + i + 1);
-                    dayElement.addEventListener('click', () => selectDay(prevMonthDate));
+                    if (!hasEdition(prevMonthDate)) dayElement.classList.add('disabled');
+                    else dayElement.addEventListener('click', () => selectDay(prevMonthDate));
                     calendarGrid.appendChild(dayElement);
                 }
 
@@ -523,7 +610,9 @@
                         dayElement.classList.add('selected');
                     }
                     
-                    dayElement.addEventListener('click', () => selectDay(currentMonthDate));
+                    // Days with no post are greyed out and not clickable.
+                    if (!hasEdition(currentMonthDate)) dayElement.classList.add('disabled');
+                    else dayElement.addEventListener('click', () => selectDay(currentMonthDate));
                     calendarGrid.appendChild(dayElement);
                 }
 
@@ -536,7 +625,8 @@
                     dayElement.textContent = i;
                     // Set date for next month days
                     const nextMonthDate = new Date(displayedYear, displayedMonth + 1, i);
-                    dayElement.addEventListener('click', () => selectDay(nextMonthDate));
+                    if (!hasEdition(nextMonthDate)) dayElement.classList.add('disabled');
+                    else dayElement.addEventListener('click', () => selectDay(nextMonthDate));
                     calendarGrid.appendChild(dayElement);
                 }
 
@@ -574,8 +664,17 @@
         // Initialize the date picker
         document.addEventListener('DOMContentLoaded', initDatePicker);
 
-        // Initial iframe load
-        updateIframe();
+        // Load the edition index BEFORE the first fetch, so a link pointing at a day with no
+        // post (a shared URL from a gap) opens the closest post that exists instead of a
+        // dead end. Today is always in the index, so a normal visit is unaffected.
+        (async () => {
+            await loadEditions();
+            if (editions.length && !hasEdition(currentDate)) {
+                const near = nearestEdition(currentDate);
+                if (near) currentDate = parseEdition(near);
+            }
+            updateIframe();
+        })();
     </script>
 </body>
 

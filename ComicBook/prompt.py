@@ -46,6 +46,12 @@ def _release_lock(flat_date: str):
         pass
 
 
+_NO_EPISODE_HTML = (
+    "<p style='color:#9aa;padding:24px 0;text-align:center'>"
+    "No episode was published on this date.</p>"
+)
+
+
 def get_comicbook(parsed_date: Optional[datetime] = None, lang: str = "en"):
     target_date = parsed_date or datetime.now(timezone.utc)
     flat_date = get_flat_date(target_date)
@@ -54,6 +60,15 @@ def get_comicbook(parsed_date: Optional[datetime] = None, lang: str = "en"):
         content_key = "html_content" if lang == "en" else f"html_content_{lang}"
         html = cached.get(content_key, "") or cached.get("html_content", "")
         return html, target_date, cached.get("PartitionKey")
+
+    if flat_date != get_flat_date():
+        # An older date with no episode is a gap (the app was down that day), and it must NOT
+        # be generated now. Episodes are chapters: `save_episode` numbers them and advances
+        # the arc's last_episode_date/last_story_summary, so writing a back-dated episode
+        # today would leave the running arc describing an episode that is not its newest —
+        # and the next real episode would continue from the wrong state. Reachable from a
+        # shared link (?date=…) even though the UI's picker already refuses gap dates.
+        return _NO_EPISODE_HTML, target_date, ""
 
     if not _try_acquire_lock(flat_date):
         return "<p>This episode is already being generated. Please try again shortly.</p>", target_date, ""

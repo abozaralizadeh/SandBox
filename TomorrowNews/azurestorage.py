@@ -158,6 +158,33 @@ def insert_history(rowkey, html_content, language="en"):
         print(f"Error inserting row: {e}")
 
 
+def list_edition_keys():
+    """Every RowKey that actually holds an edition, ascending.
+
+    The archive is not dense — a day the app was down simply has no row — so the reader's
+    ◀/▶ navigation steps over the editions that exist rather than over the calendar.
+    `html_blob_name` is the availability marker (see the AIBlog twin): `_attach_html_payload`
+    always writes it, a title-only row never gets it. Only these two properties are
+    selected, so the (large) HTML is never fetched here.
+
+    Keys come in three historical shapes — `YYYYMMDD_HH` (the early hourly editions),
+    `YYYYMMDD_00` (daily, before languages) and `YYYYMMDD_00_{lang}` — and are returned
+    verbatim; grouping them by language is the caller's job."""
+    try:
+        entities = table_client.query_entities(
+            query_filter="PartitionKey eq 'getimagetool'",
+            select=["RowKey", "html_blob_name"],
+            results_per_page=1000,
+        )
+        return sorted(
+            e["RowKey"] for e in entities
+            if e.get("RowKey") and "html_blob_name" in e
+        )
+    except Exception as e:
+        print(f"Error listing TomorrowNews edition keys: {e}")
+        return []
+
+
 def get_last_n_rows(n=10):
     try:
         # Query all entities

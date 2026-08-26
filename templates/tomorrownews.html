@@ -411,6 +411,106 @@
             }
         }
 
+        // ---- published editions (gap-aware navigation) ----
+        // The archive is not dense: a day the app was offline has no edition, and none can be
+        // written for it afterwards (an edition predicts tomorrow from THAT day's real news).
+        // So ◀/▶ step over the editions that EXIST (from /tomorrownewsindex) instead of over
+        // the calendar, and the calendar greys out the rest. The list is per language: fa/it
+        // only exist for recent dates, so switching language switches lists.
+        let editionsByLang = {};      // {lang: [ISO datetime, ...]} ascending
+        let editions = [];            // the active language's list
+        let editionDays = new Set();  // the same list as "YYYY-MM-DD"
+
+        function isoDay(date) {
+            return date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0')
+                 + '-' + String(date.getDate()).padStart(2, '0');
+        }
+
+        function parseEdition(iso) {
+            // Parse as LOCAL time so an edition never lands on the neighbouring day. The hour
+            // is preserved for the early archive, which published several editions a day.
+            const m = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}))?/.exec(iso || '');
+            return m ? new Date(+m[1], +m[2] - 1, +m[3], m[4] ? +m[4] : 0) : null;
+        }
+
+        function applyLangEditions() {
+            editions = editionsByLang[getSelectedLang()] || editionsByLang['en'] || [];
+            editionDays = new Set(editions.map(iso => iso.slice(0, 10)));
+        }
+
+        async function loadEditions() {
+            try {
+                const res = await fetch('/tomorrownewsindex');
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                const data = await res.json();
+                editionsByLang = data.editions || {};
+            } catch (e) {
+                // No index: fall back to plain ±1-day stepping (old behaviour).
+                console.error('Failed to load the edition index:', e);
+                editionsByLang = {};
+            }
+            applyLangEditions();
+            return editions;
+        }
+
+        // With no index loaded every day stays selectable, so the calendar degrades to its
+        // old behaviour instead of locking the reader out.
+        function hasEdition(date) {
+            if (editionDays.size === 0) return date <= getMaxSelectableDate();
+            return editionDays.has(isoDay(date));
+        }
+
+        // Editions are matched on the FULL stamp, not just the day: the early archive
+        // published several editions on the same day (hourly), so day-level matching would
+        // always find the first one and the arrows would oscillate inside that day.
+        function isoStamp(date) {
+            return isoDay(date) + 'T' + String(date.getHours()).padStart(2, '0') + ':00:00';
+        }
+
+        function editionIndexOf(date) {
+            return editions.indexOf(isoStamp(date));
+        }
+
+        // The closest edition at or before `date` (else the earliest) — where a link into a
+        // gap, or a language switch from a date that language never had, should land.
+        function nearestEdition(date) {
+            const stamp = isoStamp(date);
+            let best = null;
+            for (const iso of editions) {
+                if (iso <= stamp) best = iso;
+                else break;
+            }
+            return best || editions[0] || null;
+        }
+
+        function stepEdition(delta) {
+            if (!editions.length) {          // no index — step the calendar as before
+                const candidate = new Date(currentDate);
+                candidate.setHours(0, 0, 0, 0);
+                candidate.setHours(candidate.getHours() + 24 * delta);
+                if (candidate > getMaxSelectableDate()) return;
+                currentDate = candidate;
+                updateIframe();
+                return;
+            }
+            const stamp = isoStamp(currentDate);
+            const idx = editionIndexOf(currentDate);
+            let next;
+            if (idx >= 0) {
+                next = idx + delta;
+            } else if (delta < 0) {
+                // Sitting on a gap day (e.g. a shared link): step to the closest edition
+                // BEFORE it — not one further, which would skip a published day.
+                next = editions.filter(iso => iso < stamp).length - 1;
+            } else {
+                next = editions.findIndex(iso => iso > stamp);
+            }
+            // Nothing further in that direction: stay put (also keeps ▶ out of the future).
+            if (next < 0 || next >= editions.length || next === idx) return;
+            currentDate = parseEdition(editions[next]);
+            updateIframe();
+        }
+
         function updateIframe() {
             var tzoffset = (currentDate).getTimezoneOffset() * 60000;
             var localISOTime = (new Date(currentDate - tzoffset)).toISOString().slice(0, -1);
@@ -455,36 +555,21 @@
             iframeDocument.documentElement.style.backgroundColor = "rgba(255, 255, 255, 0.5)";
         }
 
-        document.getElementById('previousBtn').addEventListener('click', () => {
-            if (currentDate >= new Date("2025-01-25T00:00:00")) {
-                currentDate.setHours(0, 0, 0, 0);
-                currentDate.setHours(currentDate.getHours() - 24); // Decrease by 24 hours after January 27th
-            } else {
-                currentDate.setHours(currentDate.getHours() - 1); // Decrease by 1 hour before January 27th
-            }
-            updateIframe();
-        });
+        // Step to the neighbouring PUBLISHED edition, skipping the days that have none.
+        document.getElementById('previousBtn').addEventListener('click', () => stepEdition(-1));
+        document.getElementById('nextBtn').addEventListener('click', () => stepEdition(1));
 
-        document.getElementById('nextBtn').addEventListener('click', () => {
-            const candidate = new Date(currentDate);
-            if (candidate >= new Date("2025-01-25T00:00:00")) {
-                candidate.setHours(0, 0, 0, 0);
-                candidate.setHours(candidate.getHours() + 24); // Increase by 24 hours after January 27th
-            } else {
-                candidate.setHours(candidate.getHours() + 1); // Increase by 1 hour before January 27th
-            }
-            // Do not navigate into the future
-            if (candidate > getMaxSelectableDate()) {
-                return;
-            }
-            currentDate = candidate;
-            updateIframe();
-        });
-
-        // Language selector: reload content when changed
+        // Language selector: switch to that language's edition list, then reload. If the
+        // current date has no edition in the new language (fa/it start much later than en),
+        // land on the closest one that exists rather than showing an empty page.
         document.getElementById('languageSelect').addEventListener('change', () => {
             document.getElementById('spinner').style.display = 'block';
             document.getElementById('newsIframe').style.display = 'none';
+            applyLangEditions();
+            if (editions.length && !hasEdition(currentDate)) {
+                const near = nearestEdition(currentDate);
+                if (near) currentDate = parseEdition(near);
+            }
             updateIframe();
         });
 
@@ -592,7 +677,7 @@
                     dayElement.textContent = daysInPrevMonth - firstDay + i + 1;
                     // Set date for previous month days
                     const prevMonthDate = new Date(displayedYear, displayedMonth - 1, daysInPrevMonth - firstDay + i + 1);
-                    if (prevMonthDate > maxDate) {
+                    if (prevMonthDate > maxDate || !hasEdition(prevMonthDate)) {
                         dayElement.classList.add('disabled');
                     } else {
                         dayElement.addEventListener('click', () => selectDay(prevMonthDate));
@@ -614,7 +699,7 @@
                         dayElement.classList.add('selected');
                     }
 
-                    if (currentMonthDate > maxDate) {
+                    if (currentMonthDate > maxDate || !hasEdition(currentMonthDate)) {
                         dayElement.classList.add('disabled');
                     } else {
                         dayElement.addEventListener('click', () => selectDay(currentMonthDate));
@@ -631,7 +716,7 @@
                     dayElement.textContent = i;
                     // Set date for next month days
                     const nextMonthDate = new Date(displayedYear, displayedMonth + 1, i);
-                    if (nextMonthDate > maxDate) {
+                    if (nextMonthDate > maxDate || !hasEdition(nextMonthDate)) {
                         dayElement.classList.add('disabled');
                     } else {
                         dayElement.addEventListener('click', () => selectDay(nextMonthDate));
@@ -676,8 +761,17 @@
         // Restore language selection from the URL query param before the first load
         document.getElementById('languageSelect').value = getUrlLang();
 
-        // Initial iframe load
-        updateIframe();
+        // Load the edition index BEFORE the first fetch, so a link pointing at a day with no
+        // edition (a shared URL from a gap) opens the closest edition that exists instead of a
+        // dead end. Today is always in the index, so a normal visit is unaffected.
+        (async () => {
+            await loadEditions();
+            if (editions.length && !hasEdition(currentDate)) {
+                const near = nearestEdition(currentDate);
+                if (near) currentDate = parseEdition(near);
+            }
+            updateIframe();
+        })();
     </script>
 </body>
 
