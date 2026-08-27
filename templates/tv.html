@@ -494,7 +494,7 @@
     }
 
     function getContent(date = null) {
-      const url = date ? `/get-string?date=${date.toISOString()}` : '/get-string';
+      const url = date ? `/get-string?date=${dateParam(date)}` : '/get-string';
       return fetch(url)
         .then(response => {
           if (!response.ok) {
@@ -530,6 +530,17 @@
       // Build in LOCAL time; new Date('YYYY-MM-DD') would parse as UTC and can land a day off.
       const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s || '');
       return m ? new Date(+m[1], +m[2] - 1, +m[3]) : null;
+    }
+
+    // Every date sent to the server goes through this: the plain LOCAL calendar day.
+    // NEVER toISOString() — channel dates are local midnight, and midnight east of
+    // Greenwich is the PREVIOUS day in UTC (CEST midnight is 22:00Z the day before), so the
+    // TV would ask for yesterday's channel. On an archive with holes that lands on a gap and
+    // the live channel reports "Tuning in..." forever while its bulletin sits in storage.
+    function dateParam(date) {
+      const d = date || new Date();
+      return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0')
+           + '-' + String(d.getDate()).padStart(2, '0');
     }
 
     async function loadChannels() {
@@ -790,7 +801,7 @@
 
     async function fetchVideoStatus(date) {
       try {
-        const url = `/genbox-video-status?date=${(date || new Date()).toISOString()}`;
+        const url = `/genbox-video-status?date=${dateParam(date)}`;
         const r = await fetch(url);
         if (!r.ok) return { status: 'absent', audio_status: 'absent' };
         return await r.json();
@@ -813,7 +824,7 @@
         // Narration ready (fast) -> enable it, and start it if we're showing text now.
         if (s.audio_status === 'ready' && s.audio_url && !audioAvailable) {
           audioAvailable = true;
-          currentAudioUrl = `/genbox-audio?date=${pollDate.toISOString()}`;
+          currentAudioUrl = `/genbox-audio?date=${dateParam(pollDate)}`;
           // Preload now (even while hidden) so the duration is known by reveal time and the
           // scroll syncs to the narration immediately, without a restart/jump.
           if (sameDay(pollDate, currentDate) && audioEl.getAttribute('src') !== currentAudioUrl) {
@@ -825,7 +836,7 @@
         // Video ready (slow) -> auto-switch to it (the default mode) for the current day.
         if (s.status === 'ready' && s.video_url && !videoAvailable) {
           videoAvailable = true;
-          currentVideoUrl = `/genbox-video?date=${pollDate.toISOString()}`;
+          currentVideoUrl = `/genbox-video?date=${dateParam(pollDate)}`;
           if (sameDay(pollDate, currentDate)) showVideo(currentVideoUrl);
         }
         // No video will play for this day -> reveal the text (and its narration) instead of
