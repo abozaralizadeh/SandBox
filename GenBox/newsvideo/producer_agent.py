@@ -16,6 +16,7 @@ from agents import Agent, ModelSettings, OpenAIResponsesModel, RunConfig, Runner
 from openai import AsyncAzureOpenAI
 from langsmith.wrappers import wrap_openai
 
+from llm_runtime import STATELESS_MODEL_SETTINGS
 from GenBox.newsvideo import config
 from GenBox.newsvideo.tracing import traceable
 
@@ -211,7 +212,8 @@ async def produce_shot_list(decision_text: str) -> dict:
         agent,
         decision_text,
         max_turns=2,
-        run_config=RunConfig(tracing_disabled=True),
+        run_config=RunConfig(tracing_disabled=True,
+                             model_settings=STATELESS_MODEL_SETTINGS),
     )
     raw = str(result.final_output)
     try:

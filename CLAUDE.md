@@ -182,6 +182,20 @@ where it cannot be sent. Override with `COMICBOOK_MODEL_SUPPORTS_TEMPERATURE`.
   clip's create→poll→download lifecycle must stay pinned to one resource
   (`newsvideo/sora_client.py` handles affinity + failover). Never put the Sora endpoints behind
   a round-robin gateway.
+- The same rule binds the **Responses API**, and here it BITES: in production
+  `AZURE_OPENAI_ENDPOINT` is the APIM load balancer
+  (`https://pocs-abozar-apim.azure-api.net/abopenailb/` in the `genbox` App Service settings —
+  *not* the single resource the local `.env` points at), which round-robins three independent
+  Azure OpenAI resources. With the API default `store=true`, each turn's output items carry ids
+  minted by the serving resource (`fc_*`, `rs_*`) and the SDK replays them as the next turn's
+  input; another resource rejects them with *"The requested item was created under a different
+  Azure OpenAI resource"*. Every multi-turn run — ComicBook's whole handoff chain, GenBox's
+  Producer — therefore failed on 2 of 3 backends and was retried by the gateway. Fixed by
+  `llm_runtime.py`: every `Runner.run` passes `store=False`, which carries the conversation in
+  the request and mints no ids. On the `gpt-5.6-luna` reasoning deployment `store=False` returns
+  the reasoning item with `encrypted_content` automatically, so cross-resource replay keeps the
+  reasoning that `_strip_tools_keep_reasoning` protects — no `response_include` needed. Never
+  add a `Runner.run` here without that run config.
 
 ## Gotchas
 

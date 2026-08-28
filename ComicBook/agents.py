@@ -31,6 +31,7 @@ from langsmith.wrappers import OpenAIAgentsTracingProcessor
 set_trace_processors([OpenAIAgentsTracingProcessor()])
 from openai import AsyncAzureOpenAI
 
+from llm_runtime import STATELESS_RUN_CONFIG
 from ComicBook.azurestorage import (
     close_arc,
     get_active_arc,
@@ -1349,7 +1350,9 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
         async def _run(agent, stage_input, label):
             logger.info("STAGE → %s", label)
             with trace(name=f"Stage-{agent.name}", run_type="chain"):
-                res = await Runner.run(agent, stage_input, max_turns=MAX_TURNS, hooks=_WEB_SEARCH_HOOKS)
+                res = await Runner.run(agent, stage_input, max_turns=MAX_TURNS,
+                                       hooks=_WEB_SEARCH_HOOKS,
+                                       run_config=STATELESS_RUN_CONFIG)
             all_items.extend(res.new_items)
             logger.info("STAGE done: %s (last_agent=%s, html_en=%s, html_it=%s, html_fa=%s)",
                          label, getattr(res.last_agent, "name", "?"),
