@@ -684,9 +684,11 @@ This reference image is your visual anchor for the entire arc. Every panel must 
 STEP 3 — GENERATE EACH PANEL (SEQUENTIAL — ONE AT A TIME):
 You MUST generate panels one by one, in order: call generate_panel_image for panel 1,
 wait for its result, then call it for panel 2, and so on. Never call multiple
-generate_panel_image tools in parallel. Each completed panel image is automatically
-added as a reference for the next panel — this is how visual consistency is maintained
-across the episode. Parallel calls skip this mechanism and produce drifting visuals.
+generate_panel_image tools in parallel. The panels you have already drawn in this episode
+(up to the last five) are automatically attached as references to the next one, alongside
+the character sheet — this is how characters, costumes and locations stay consistent across
+the episode. That window only exists because you work sequentially: panels issued in
+parallel are not finished yet, so they cannot be referenced, and the visuals drift.
 
 For every panel in the script, call generate_panel_image with:
 - prompt: describe ONLY WHAT IS IN FRAME:

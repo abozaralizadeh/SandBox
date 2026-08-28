@@ -188,6 +188,12 @@ where it cannot be sent. Override with `COMICBOOK_MODEL_SUPPORTS_TEMPERATURE`.
 - `sitecustomize.py` and the top of `main.py` both strip `/agents/python` from `sys.path` —
   Azure App Service ships outdated stdlib shims there that shadow modern libraries. Keep both.
 - `AIBlog/tools/searchinternet.py` requires `TAVILY_API_KEY` at import time.
+- ComicBook panel prompts carry a reference stack built in priority order: character sheet →
+  one mid-arc key panel → the last `COMICBOOK_RECENT_PANEL_REFS` (default 5) panels already drawn
+  in this episode → one prior-episode anchor, truncated to the endpoint's 16-image ceiling. The
+  5-panel window is only possible because panels are generated **sequentially** — a parallel call
+  has nothing finished to reference. More references buy character/scene consistency and cost
+  style fidelity (each one pulls the render toward its own look), so treat the count as a dial.
 - ComicBook panel images are served through `/cbimg`, a lazy WebP transcode/302 proxy with an
   open-relay guard (`imageproxy.py`) — comic HTML must go through `rewrite_comic_images()`.
 - The image API distinguishes **moderation blocks** (`ContentModerationError` — rewrite the

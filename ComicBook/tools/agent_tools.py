@@ -62,6 +62,15 @@ _MAX_CONTENT_BLOCKS = 3
 # Env-gated so it can be rolled back without a deploy if the cost/latency is not worth it.
 _PANEL_QUALITY = os.environ.get("COMICBOOK_PANEL_QUALITY", "high")
 
+# How many of THIS episode's already-drawn panels to show the model when drawing the next one.
+# Possible only because panels are generated sequentially, never in parallel.
+_RECENT_PANEL_REFS = max(0, int(os.environ.get("COMICBOOK_RECENT_PANEL_REFS", "5")))
+
+# Hard ceiling of the images.edit endpoint. The reference list is assembled in priority order
+# (character sheet, key panel, recent panels, arc history) and truncated here, so exceeding it
+# costs the least important references rather than the character anchors.
+_MAX_REFERENCE_IMAGES = 16
+
 logger = logging.getLogger("ComicBook")
 
 
@@ -482,17 +491,23 @@ def build_comic_tools(state: Dict[str, Any], target_date: datetime) -> Dict[str,
                 if u and u not in seen:
                     seen.add(u)
                     image_urls.append(u)
-            # Reference count is a STYLE-FIDELITY dial, not only a consistency dial: each
-            # reference pulls the render toward its own look, so a deep stack averages the
-            # panels toward the mean and flattens exactly the texture the style lives in.
-            # Trimmed from <=8 to <=4 — enough to hold characters, few enough to keep surface.
-            _add(reference_url)                          # character sheet — always first
+            # Built in PRIORITY order, then truncated to the API ceiling, so if the cap ever
+            # binds it drops the least important references rather than the anchors.
+            _add(reference_url)                          # character sheet — the arc's anchor
             for u in state["key_panel_urls"][-1:]:       # mid-arc character key panel
                 _add(u)
-            for u in state["generated_panel_urls"][-1:]: # previous panel from this session
+            # The last few panels of THIS episode, oldest-to-newest. Panels are generated
+            # strictly one at a time (the Cartoonist is forbidden from parallel calls), so by
+            # the time this panel is drawn the earlier ones already exist and can be shown to
+            # the model — that sequencing is exactly what makes a window this deep possible.
+            # It costs some style fidelity (every reference also pulls the render toward its
+            # own look, flattening texture), and buys character/scene consistency across the
+            # episode, which is the trade we want here.
+            for u in state["generated_panel_urls"][-_RECENT_PANEL_REFS:]:
                 _add(u)
             for u in state["prev_episode_images"][-1:]:  # arc history anchor
                 _add(u)
+            image_urls = image_urls[:_MAX_REFERENCE_IMAGES]
 
             if len(image_urls) > 1:
                 url = await create_image_with_references(prompt, image_urls, size, _PANEL_QUALITY)
