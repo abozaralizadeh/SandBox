@@ -64,7 +64,7 @@ from ComicBook.style import (
     starved_families,
 )
 from ComicBook.tools.agent_tools import build_comic_tools
-from ComicBook.tools.getimage import create_image
+from ComicBook.tools.getimage import create_image, create_image_with_references
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
 logger = logging.getLogger("ComicBook")
@@ -1446,13 +1446,63 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
                 if state.get("html_en") and not state.get(key):
                     await _run(author, "Write and assemble your edition from the saved beat sheet now.", label)
 
-        # 3) STYLE AUDIT — the only check in the pipeline that looks at actual pixels rather
+        # 3) CHARACTER SHEET BACKSTOP — make sure the arc actually ends up with an anchor.
+        await _ensure_character_sheet()
+
+        # 4) STYLE AUDIT — the only check in the pipeline that looks at actual pixels rather
         #    than at what something was labelled. It runs once per arc, on the character sheet,
         #    because that sheet is reference image #1 for every panel of every episode: if it
         #    drifted to the model's default look, the whole arc inherits that drift.
         await _audit_arc_style(_run)
 
         return plan, script
+
+    async def _ensure_character_sheet() -> None:
+        """Guarantee the arc has a character sheet, generating one directly if the Cartoonist
+        did not leave us a usable one.
+
+        `generate_character_sheet` deliberately refuses to cache a placeholder as the arc's
+        anchor — a grey tile must never become reference image #1 for every panel of every
+        episode. That is right, but on its own it means a sheet that failed on episode 1 leaves
+        the arc with NO anchor at all: the "character sheet" button never appears, and every
+        later episode loses the strongest character-consistency reference it has.
+
+        So if the sheet is missing once the chain is done, build it here in code. This is the
+        same deterministic-recovery philosophy as the stage re-runs above: do not depend on an
+        agent having got it right. Never fatal — a failure here just leaves things as they were.
+        """
+        arc = state.get("arc")
+        if not arc or arc.get("character_sheet_url"):
+            return
+        characters = arc.get("characters", "")
+        if not characters:
+            logger.warning("No character sheet and no character roster — cannot build a sheet.")
+            return
+
+        # Prefer building the sheet FROM the panels this episode already drew. Those panels
+        # are how the characters actually ended up looking, so a sheet derived from them
+        # matches the published episode; a sheet generated from the text description alone
+        # would be a second, independent interpretation and could contradict it.
+        refs = [u for u in state.get("generated_panel_urls", []) if u][-4:]
+        prompt = compose_sheet_prompt(load_style_card(arc), characters)
+        logger.info("No character sheet on arc '%s' — generating one directly (%d panel refs).",
+                     arc.get("title", arc.get("RowKey", "")), len(refs))
+        try:
+            if refs:
+                url = await create_image_with_references(prompt, refs, "wide", "high")
+            else:
+                url = await create_image(prompt, size="wide", quality="high")
+        except Exception as exc:
+            logger.warning("Character-sheet backstop failed (%s) — arc stays without a sheet.",
+                           str(exc)[:200])
+            return
+
+        try:
+            update_arc_metadata(arc["RowKey"], character_sheet_url=url)
+            arc["character_sheet_url"] = url
+            logger.info("Character sheet backfilled for the arc: %s", url[:120])
+        except Exception as exc:
+            logger.warning("Could not persist the backfilled character sheet: %s", str(exc)[:200])
 
     async def _audit_arc_style(_run) -> None:
         """Verify the arc's reference sheet actually renders as its declared style; regenerate
