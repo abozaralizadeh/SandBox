@@ -18,7 +18,7 @@ from agents import (
     handoff,
     set_trace_processors,
 )
-from agents.extensions.handoff_filters import remove_all_tools
+from agents.handoffs import HandoffInputData
 from agents.extensions.handoff_prompt import prompt_with_handoff_instructions
 from agents.items import ItemHelpers, MessageOutputItem
 from langsmith import traceable, trace
@@ -68,6 +68,61 @@ from ComicBook.tools.getimage import create_image
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
 logger = logging.getLogger("ComicBook")
+
+
+# ---------------------------------------------------------------------------
+# Handoff input filter — tool noise out, reasoning/message pairing intact
+# ---------------------------------------------------------------------------
+# The SDK's `remove_all_tools` strips ReasoningItem along with the tool calls, but KEEPS the
+# assistant messages. On a reasoning deployment (gpt-5.x) every message the model emits is
+# bound to the reasoning item produced in the same turn, so replaying that history without it
+# is rejected outright:
+#
+#   400 invalid_request_error — Item 'msg_...' of type 'message' was provided without its
+#   required 'reasoning' item: 'rs_...'
+#
+# That killed the whole chain at the Director -> Storyteller handoff: the arc and outline were
+# already written, then nothing downstream could run. It only bites when the handing-off agent
+# emitted a message alongside its reasoning, which is why it looked intermittent.
+#
+# We therefore drop the same tool items but PRESERVE reasoning items, so every message keeps
+# the partner the API demands. The point of the filter — keeping the previous stage's
+# tool-call noise (especially the Cartoonist's image calls) out of the next stage's
+# context — is unaffected.
+_TOOL_ITEM_TYPES = frozenset({
+    "function_call", "function_call_output",
+    "computer_call", "computer_call_output",
+    "file_search_call", "tool_search_call", "tool_search_output", "web_search_call",
+    "mcp_call", "mcp_list_tools", "mcp_approval_request", "mcp_approval_response",
+    "code_interpreter_call", "image_generation_call",
+    "local_shell_call", "local_shell_call_output",
+    "shell_call", "shell_call_output",
+    "apply_patch_call", "apply_patch_call_output",
+    "custom_tool_call", "custom_tool_call_output",
+})  # deliberately NOT "reasoning"
+
+
+def _raw_item_type(item: Any) -> str:
+    """Type string of a RunItem's payload or of a raw input dict."""
+    raw = getattr(item, "raw_item", item)
+    if isinstance(raw, dict):
+        return str(raw.get("type", ""))
+    return str(getattr(raw, "type", "") or "")
+
+
+def _strip_tools_keep_reasoning(data: HandoffInputData) -> HandoffInputData:
+    def _filter(items):
+        if items is None:
+            return None
+        return tuple(i for i in items if _raw_item_type(i) not in _TOOL_ITEM_TYPES)
+
+    history = data.input_history
+    return data.clone(
+        input_history=_filter(history) if isinstance(history, tuple) else history,
+        pre_handoff_items=_filter(data.pre_handoff_items),
+        new_items=_filter(data.new_items),
+        input_items=_filter(getattr(data, "input_items", None)),
+    )
 
 # How many times the style audit may regenerate an arc's reference sheet before accepting what
 # it has. Each regeneration is one wide/high image, and this runs once per arc, so the ceiling
@@ -1027,7 +1082,7 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
 
     # Agents form a handoff chain: Director → Storyteller → Cartoonist → Reteller.
     # Targets must be defined before the agents that hand off to them, so the chain is
-    # built tail-first. Each handoff uses remove_all_tools so the next agent inherits the
+    # built tail-first. Each handoff uses _strip_tools_keep_reasoning so the next agent inherits the
     # plan/script MESSAGES but not the previous stage's tool-call noise (esp. the
     # Cartoonist's image-generation turns). Agents pull structured context via tools.
 
@@ -1103,7 +1158,7 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
             agent_tools["assemble_layout"],
         ],
         model=model,
-        handoffs=[handoff(reteller, input_filter=remove_all_tools)],
+        handoffs=[handoff(reteller, input_filter=_strip_tools_keep_reasoning)],
     )
 
     storyteller = Agent(
@@ -1112,7 +1167,7 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
         tools=[],
         model=model,
         model_settings=_model_settings(model_name, 0.5),
-        handoffs=[handoff(cartoonist, input_filter=remove_all_tools)],
+        handoffs=[handoff(cartoonist, input_filter=_strip_tools_keep_reasoning)],
     )
 
     # The originality check is its own agent (it reasons over past arcs), not a tool with an
@@ -1185,7 +1240,7 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
         ],
         model=model,
         model_settings=_model_settings(model_name, 1.2),
-        handoffs=[handoff(storyteller, input_filter=remove_all_tools)],
+        handoffs=[handoff(storyteller, input_filter=_strip_tools_keep_reasoning)],
     )
 
     # ------------------------------------------------------------------
@@ -1261,12 +1316,32 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
     # conversation — that previously made a downstream agent skip its own work.)
     all_items: list = []
 
-    def _agent_text(agent_name: str) -> str:
-        msgs = [
+    def _agent_messages(agent_name: str) -> list:
+        return [
             it for it in all_items
             if isinstance(it, MessageOutputItem) and getattr(it.agent, "name", "") == agent_name
         ]
+
+    def _agent_text(agent_name: str) -> str:
+        msgs = _agent_messages(agent_name)
         return ItemHelpers.text_message_outputs(msgs).strip() if msgs else ""
+
+    def _agent_refusals(agent_name: str) -> str:
+        """Refusal text an agent produced, which _agent_text cannot see.
+
+        ItemHelpers.text_message_outputs concatenates only ResponseOutputText parts, so a
+        model REFUSAL comes back as an empty string — indistinguishable from "the agent said
+        nothing at all". That ambiguity made a whole class of failed runs undiagnosable: the
+        stored fallback page showed an empty <pre> whether the chain had refused, stalled, or
+        never spoken. Read the refusal parts directly.
+        """
+        out = []
+        for it in _agent_messages(agent_name):
+            for part in getattr(it.raw_item, "content", []) or []:
+                refusal = getattr(part, "refusal", None)
+                if refusal:
+                    out.append(str(refusal))
+        return "\n".join(out).strip()
 
     async def _drive():
         async def _run(agent, stage_input, label):
@@ -1519,12 +1594,31 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
     html_it = state.get("html_it", "")
     html_fa = state.get("html_fa", "")
 
+    generation_failed = not html
     if not html:
+        # Diagnose before giving up. A run that reaches here has produced NO page, and the
+        # three causes look identical from the outside: the chain refused, it stalled without
+        # speaking, or images failed. Log which one it was.
+        refusals = {
+            name: _agent_refusals(name)
+            for name in ("Director", "Storyteller", "Cartoonist", "Reteller")
+        }
+        refusals = {k: v for k, v in refusals.items() if v}
         logger.error(
-            "No English HTML produced — the Cartoonist did not complete assemble_layout "
-            "(usually an upstream image-generation failure)."
+            "No English HTML produced — the Cartoonist did not complete assemble_layout. "
+            "stages_with_text=%s refusals=%s panels_generated=%d sheet=%s",
+            [n for n in ("Director", "Storyteller", "Cartoonist") if _agent_text(n)],
+            list(refusals) or "none",
+            len(state.get("generated_panel_urls", [])),
+            bool((state.get("arc") or {}).get("character_sheet_url")),
         )
-        fallback_text = _agent_text("Cartoonist") or storyteller_script or director_plan or ""
+        for name, text in refusals.items():
+            logger.error("  REFUSAL from %s: %s", name, text[:500])
+        fallback_text = (
+            _agent_text("Cartoonist") or storyteller_script or director_plan
+            or ("\n\n".join(f"{k} refused: {v}" for k, v in refusals.items()))
+            or ""
+        )
         html = (
             "<div style='padding:40px;text-align:center;color:#888;font-family:sans-serif'>"
             "<p>Comic generation completed but layout assembly was skipped.</p>"
@@ -1548,4 +1642,8 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
         "panel_notes": storyteller_script,
         "arc": state["arc"],
         "episode_number": state["episode_number"],
+        # The caller MUST NOT persist a failed run: a stored blank page is served from cache
+        # forever (so the day never retries), burns an episode slot, and blanks the arc's
+        # last_story_summary that the next day's Director reads.
+        "failed": generation_failed,
     }

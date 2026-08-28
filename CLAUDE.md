@@ -53,7 +53,14 @@ repo only reads it. Never add account data or absolute amounts to the dashboard 
    AIOpenProblemSolver `iteration_lock`, `AIOPS_ITERATION_LOCK_TTL` 5400s — its iteration runs
    from a *blocking* request, so without the lock every concurrent visitor started its own).
    There are 4 gunicorn workers — never assume in-process state is shared.
-5. Content endpoints (`/tomorrownewscontent`, `/aiblogcontent`, `/comicbookcontent`, `/traide/*`)
+5. **A failed generation must never be persisted.** `run_comic_pipeline` returns `failed: True`
+   when the Cartoonist never produced a page, and `get_comicbook` then stores nothing. A stored
+   fallback page would be served from cache for that date forever (so the day could never
+   regenerate), would consume an episode slot via `episodes_count`, and would blank the arc's
+   `last_story_summary` — the "where the story stands" note the next day's Director reads.
+   Failures are counted per date (`generation_failure` partition) and capped at 3 attempts so a
+   persistently failing day stops re-running the whole image pipeline on every page view.
+6. Content endpoints (`/tomorrownewscontent`, `/aiblogcontent`, `/comicbookcontent`, `/traide/*`)
    are **Referer-guarded** against hotlinking; keep the guard on new data endpoints.
 
 ## Gaps in the archives (every generator)
@@ -122,6 +129,17 @@ retype it. Constraints that were learned the hard way; do not undo them:
 - `COMICBOOK_PANEL_QUALITY` (default `high`) and `COMICBOOK_RESTYLE_ARC` (re-style a running arc
   today rather than waiting for the next arc boundary) are the two rollout dials.
 
+## Handoffs on reasoning models
+
+Do NOT use the SDK's `remove_all_tools` as a handoff `input_filter` here. It strips
+`ReasoningItem` while keeping the assistant messages, and on a reasoning deployment every
+message is bound to the reasoning item from the same turn — so replaying that history is
+rejected with `400 ... Item 'msg_...' of type 'message' was provided without its required
+'reasoning' item`. That killed the whole chain at the Director→Storyteller handoff *after* the
+arc and outline had been written, and looked intermittent because it only fires when the
+handing-off agent emitted a message alongside its reasoning. `_strip_tools_keep_reasoning` in
+`agents.py` drops the same tool items but preserves reasoning items.
+
 ## Model capability
 
 Reasoning-family deployments (`gpt-5.x`, `o1`/`o3`/`o4` — and `AZURE_OPENAI_MODEL` is currently
@@ -174,6 +192,9 @@ where it cannot be sent. Override with `COMICBOOK_MODEL_SUPPORTS_TEMPERATURE`.
   open-relay guard (`imageproxy.py`) — comic HTML must go through `rewrite_comic_images()`.
 - The image API distinguishes **moderation blocks** (`ContentModerationError` — rewrite the
   prompt, don't retry) from transient failures (retry/fallback). Preserve that split.
+  `COMICBOOK_IMAGE_ATTEMPTS` (default 3) drives the transient retry; it was effectively 1
+  (no retries) once, and a single connection blip then tripped the run's 2-failure circuit
+  breaker and rendered every remaining panel as a grey placeholder.
 - `TomorrowNews/ReAct.py`, `multiagent.py`, `supervisor.py` are legacy/alternate architectures;
   the Flask path uses `graph.py`'s per-language graphs. `langgraph.json` still exposes the
   supervisor for the dev server.

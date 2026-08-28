@@ -100,6 +100,14 @@ async def make_placeholder_image_url() -> str:
     return _placeholder_url_cache
 
 
+# Transient failures (connection reset, gateway 5xx, timeout) are retried with backoff; a
+# moderation block raises immediately from inside _call_with_retries and never burns an attempt.
+# This used to be 1 — i.e. no retries at all — so a single momentary network blip counted as a
+# hard failure, and two of them tripped the run's circuit breaker and rendered every remaining
+# panel as a grey placeholder. Cheap insurance against a whole episode of blank art.
+_IMAGE_ATTEMPTS = max(1, int(os.environ.get("COMICBOOK_IMAGE_ATTEMPTS", "3")))
+
+
 def _get_model() -> str:
     return os.environ.get("AZURE_OPENAI_MODEL_DALLE", "gpt-image-1")
 
@@ -197,7 +205,7 @@ async def create_image(prompt: str, size: str = "square", quality: str = "medium
             _set_span_output(span, url)
             return url
 
-    return await _call_with_retries(_gen, attempts=1, label="generate")
+    return await _call_with_retries(_gen, attempts=_IMAGE_ATTEMPTS, label="generate")
 
 
 async def create_image_with_reference(prompt: str, reference_url: str, size: str = "square", quality: str = "medium") -> str:
@@ -228,7 +236,7 @@ async def create_image_with_reference(prompt: str, reference_url: str, size: str
             return url
 
     try:
-        return await _call_with_retries(_edit, attempts=1, label="edit(1 ref)")
+        return await _call_with_retries(_edit, attempts=_IMAGE_ATTEMPTS, label="edit(1 ref)")
     except ContentModerationError:
         raise  # prompt content is the problem; prompt-only fallback would be blocked too
     except Exception as exc:
@@ -281,7 +289,7 @@ async def create_image_with_references(
             return url
 
     try:
-        return await _call_with_retries(_edit, attempts=1, label=f"edit({len(ref_bytes)} refs)")
+        return await _call_with_retries(_edit, attempts=_IMAGE_ATTEMPTS, label=f"edit({len(ref_bytes)} refs)")
     except ContentModerationError:
         raise  # prompt content is the problem; prompt-only fallback would be blocked too
     except Exception as exc:
