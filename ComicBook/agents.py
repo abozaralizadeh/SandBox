@@ -31,7 +31,7 @@ from langsmith.wrappers import OpenAIAgentsTracingProcessor
 set_trace_processors([OpenAIAgentsTracingProcessor()])
 from openai import AsyncAzureOpenAI
 
-from llm_runtime import STATELESS_RUN_CONFIG
+from llm_runtime import STATELESS_RUN_CONFIG, supports_custom_temperature
 from ComicBook.azurestorage import (
     close_arc,
     get_active_arc,
@@ -140,13 +140,8 @@ _TEMPERATURE_UNSUPPORTED_PREFIXES = ("gpt-5", "o1", "o3", "o4")
 
 
 def _supports_temperature(model_name: str) -> bool:
-    override = os.environ.get("COMICBOOK_MODEL_SUPPORTS_TEMPERATURE", "").strip().lower()
-    if override in ("true", "1", "yes"):
-        return True
-    if override in ("false", "0", "no"):
-        return False
-    name = (model_name or "").strip().strip('"').lower()
-    return not name.startswith(_TEMPERATURE_UNSUPPORTED_PREFIXES)
+    # Shared with every other generator; COMICBOOK_MODEL_SUPPORTS_TEMPERATURE still overrides.
+    return supports_custom_temperature(model_name)
 
 
 def _model_settings(model_name: str, temperature: float) -> ModelSettings:

@@ -16,7 +16,7 @@ from agents import Agent, ModelSettings, OpenAIResponsesModel, RunConfig, Runner
 from openai import AsyncAzureOpenAI
 from langsmith.wrappers import wrap_openai
 
-from llm_runtime import STATELESS_MODEL_SETTINGS
+from llm_runtime import STATELESS_MODEL_SETTINGS, temperature_kwargs
 from GenBox.newsvideo import config
 from GenBox.newsvideo.tracing import traceable
 
@@ -202,7 +202,8 @@ async def produce_shot_list(decision_text: str) -> dict:
         instructions=PRODUCER_INSTRUCTIONS.format(MAX_CLIPS=config.MAX_CLIPS),
         tools=[WebSearchTool(search_context_size="high")],
         model=model,
-        model_settings=ModelSettings(temperature=0.6),
+        # Dropped on a reasoning deployment, which takes only temperature 1 (see llm_runtime).
+        model_settings=ModelSettings(**temperature_kwargs(0.6)),
     )
     # Disable the Agents SDK's own exporter for this run only.  Do not call the
     # process-global set_tracing_disabled(True): this module is loaded lazily in a

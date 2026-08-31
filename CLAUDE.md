@@ -142,10 +142,25 @@ handing-off agent emitted a message alongside its reasoning. `_strip_tools_keep_
 
 ## Model capability
 
-Reasoning-family deployments (`gpt-5.x`, `o1`/`o3`/`o4` — and `AZURE_OPENAI_MODEL` is currently
-`gpt-5.5`) reject `temperature` with a 400. Every ComicBook agent sets a deliberate temperature,
-so they go through `_model_settings(model_name, temp)` in `agents.py`, which omits the parameter
-where it cannot be sent. Override with `COMICBOOK_MODEL_SUPPORTS_TEMPERATURE`.
+Reasoning-family deployments accept **only the default `temperature` of 1** and reject every
+other value with a 400 (production `AZURE_OPENAI_MODEL` is `gpt-5.6-luna`). The error text
+misleads twice over: it blames the parameter rather than the value, and it differs by surface —
+Responses says *"Unsupported parameter: 'temperature' is not supported with this model"*, chat
+completions says *"Unsupported value: 'temperature' does not support 0.8"*. Measured on
+`gpt-5.6-luna`: 1 succeeds on both surfaces, 0.6/0.8/1.3 fail on both.
+
+So a deliberate creative temperature must be **dropped**, not clamped — omitting it sends
+exactly the 1 the model requires. `temperature_kwargs(value)` / `supports_custom_temperature()`
+in `llm_runtime.py` do that for the whole repo (ComicBook's `_model_settings` delegates to
+them); override with `LLM_MODEL_SUPPORTS_TEMPERATURE` or the older
+`COMICBOOK_MODEL_SUPPORTS_TEMPERATURE`. The prefix rule over-matches on purpose: `gpt-5.4`
+chat completions *does* accept 0.6-0.9, but dropping never 400s.
+
+Beware which client you are using — the guard is only needed where the value reaches the wire.
+LangChain's `init_chat_model` strips temperature for these models on its own (which is why
+AIOpenProblemSolver kept running through the switch), while a directly-constructed
+`AzureChatOpenAI(temperature=…)` (TomorrowNews) and the Agents SDK's `ModelSettings(temperature=…)`
+(GenBox's Producer) both send it and 400.
 
 ## LangSmith tracing
 

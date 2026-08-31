@@ -12,6 +12,8 @@ from langgraph.prebuilt import ToolNode, tools_condition
 
 from langchain_openai import AzureChatOpenAI
 
+from llm_runtime import temperature_kwargs
+
 if "AZURE_OPENAI_API_KEY" not in os.environ:
     raise Exception("No AZURE_OPENAI_API_KEY found in environment!")
 
@@ -26,7 +28,11 @@ llm = AzureChatOpenAI(
     api_version=os.environ["AZURE_OPENAI_API_VERSION"],
     output_version="responses/v1",
     use_responses_api=True,
-    temperature=1.3,
+    # 1.3 is deliberate: a speculative newspaper wants variety. Reasoning deployments
+    # (the production model is gpt-5.6-luna) accept ONLY temperature 1 and reject anything
+    # else with "Unsupported parameter: 'temperature' is not supported with this model", so
+    # the value is dropped there rather than clamped -- omitting it sends the 1 they require.
+    **temperature_kwargs(1.3),
     timeout=None,
     max_retries=2,
 )
