@@ -233,6 +233,44 @@
     .fam-tag.f-fade_extreme { color: var(--violet); border-color: rgba(167,139,250,0.35); }
     .fam-tag.f-breakout     { color: var(--amber);  border-color: rgba(255,176,32,0.35); }
     .fam-tag.f-range_edge   { color: var(--up);     border-color: rgba(0,230,168,0.35); }
+    .fam-tag.f-funding_carry{ color: var(--up);     border-color: rgba(0,230,168,0.35); }
+    .fam-tag.f-macro_event  { color: var(--amber);  border-color: rgba(255,176,32,0.35); }
+
+    /* ── macro calendar — scheduled releases (CPI/FOMC/NFP) ──
+       The one news input that needs no latency: these dates are published a year ahead, so the bot
+       reads a calendar rather than racing a headline. Code opens no NEW risk in the window before a
+       high-impact print; the window after is a tradeable playbook. Both states are shown here. */
+    .macro-state { display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+      background: var(--s2); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
+    .macro-state .badge { font-family: var(--mono); font-size: 0.78rem; font-weight: 700; letter-spacing: 1px;
+      text-transform: uppercase; padding: 7px 13px; border-radius: 8px; border: 1px solid currentColor; white-space: nowrap; }
+    .macro-state .badge.m-block { color: var(--amber); box-shadow: 0 0 14px rgba(255,176,32,0.18); }
+    .macro-state .badge.m-live  { color: var(--cyan);  box-shadow: 0 0 14px rgba(45,212,255,0.18); }
+    .macro-state .badge.m-clear { color: var(--text-3); }
+    .macro-state .vtext { font-size: 0.8rem; color: var(--text-2); line-height: 1.45; flex: 1; min-width: 220px; }
+    .macro-state .vtext b { color: var(--text); }
+    .macro-list { margin-top: 12px; }
+    .macro-ev { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 9px;
+      background: var(--s2); border: 1px solid var(--border); margin-bottom: 7px; }
+    .macro-ev:last-child { margin-bottom: 0; }
+    .macro-ev.soon { border-color: rgba(255,176,32,0.4); }
+    .macro-ev .mdot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-3); flex: none; }
+    .macro-ev.soon .mdot { background: var(--amber); box-shadow: 0 0 8px rgba(255,176,32,0.6); }
+    .macro-ev .mname { font-family: var(--mono); font-size: 0.78rem; color: var(--text); flex: 1;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .macro-ev .mwhen { font-family: var(--mono); font-size: 0.72rem; color: var(--text-2); white-space: nowrap; }
+    .macro-ev.soon .mwhen { color: var(--amber); font-weight: 700; }
+    .macro-ev .mimp { font-family: var(--mono); font-size: 0.56rem; text-transform: uppercase; letter-spacing: 0.5px;
+      padding: 2px 6px; border-radius: 999px; border: 1px solid var(--border2); color: var(--text-3); }
+    .macro-stale { font-family: var(--mono); font-size: 0.68rem; color: var(--amber); margin-top: 10px; }
+
+    /* ── exit discipline — were the bot's own closes better than the brackets they overrode? ──
+       R-multiples only (a ratio to the trade's own risk), never dollars, so it is safe to publish. */
+    .xd-cmp { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-top: 12px; }
+    .xd-cell { background: var(--s2); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; text-align: center; }
+    .xd-cell .xl { font-family: var(--mono); font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.6px;
+      color: var(--text-3); margin-bottom: 6px; }
+    .xd-cell .xv { font-family: var(--mono); font-size: 1.18rem; font-weight: 700; }
 
     /* ── strategy edge — does the DIRECTION CALL predict, and which playbook is paying? ──
        Deliberately distinct from the win/loss panel: win rate conflates the direction call with fill
@@ -437,6 +475,25 @@
       <div id="edgeBox"><div class="empty">Measuring…</div></div>
     </div>
 
+    <!-- Exit discipline — the bot's own closes vs the brackets they overrode. -->
+    <div class="panel">
+      <div class="panel-head">
+        <div class="panel-title t-violet"><span class="tick"></span> Exit discipline
+          <span style="color:var(--text-3);font-weight:400;font-family:var(--mono);font-size:0.7rem">· closing early vs letting the bracket run</span></div>
+      </div>
+      <div id="exitDiscBox"><div class="empty">Measuring…</div></div>
+    </div>
+
+    <!-- ═══════════ MACRO CALENDAR — scheduled releases, known a year ahead ═══════════ -->
+    <div class="section-label">Macro calendar</div>
+    <div class="panel">
+      <div class="panel-head">
+        <div class="panel-title t-amber"><span class="tick"></span> Scheduled releases
+          <span style="color:var(--text-3);font-weight:400;font-family:var(--mono);font-size:0.7rem">· no new risk opened into a high-impact print</span></div>
+      </div>
+      <div id="macroBox"><div class="empty">No calendar published yet</div></div>
+    </div>
+
     <!-- ═══════════ LIVE BOOK — what the bot has working right now ═══════════ -->
     <div class="section-label">Live book</div>
     <div class="grid-2">
@@ -522,6 +579,11 @@
       return (v >= 0 ? '+' : '') + Number(v).toFixed(digits) + '%';
     }
     function cls(v) { return v > 0 ? 'up' : (v < 0 ? 'down' : 'flat'); }
+    // R-multiples: a ratio to the trade's own risk, always signed so +/- reads at a glance.
+    function fmtR(v) {
+      const n = Number(v);
+      return Number.isFinite(n) ? `${n >= 0 ? '+' : ''}${n.toFixed(2)}R` : '—';
+    }
 
     /* Coin icons — free, CDN-hosted set (spothq/cryptocurrency-icons via jsDelivr).
        No API key or rate limit; unknown tickers fall back to a generic coin glyph. */
@@ -1151,7 +1213,8 @@
     // cost it has to clear. Each setup family is scored separately, and risk follows whichever pays.
     const FAM_LABEL = {
       continuation: 'Continuation', fade_extreme: 'Fade extreme',
-      breakout: 'Breakout', range_edge: 'Range edge', other: 'Other',
+      breakout: 'Breakout', range_edge: 'Range edge',
+      funding_carry: 'Funding carry', macro_event: 'Macro event', other: 'Other',
     };
     // Family chip shown on individual positions/orders (aggregate scores live in the edge panel).
     function famTag(f) {
@@ -1224,6 +1287,127 @@
       box.innerHTML = html;
     }
 
+    // Minutes -> a human gap ("in 22m", "in 3h 05m", "in 2d 4h").
+    function fmtIn(mins) {
+      const m = Math.max(0, Math.round(Number(mins) || 0));
+      if (m < 60) return `in ${m}m`;
+      if (m < 1440) return `in ${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m`;
+      return `in ${Math.floor(m / 1440)}d ${Math.floor((m % 1440) / 60)}h`;
+    }
+
+    function renderMacroEvents(s) {
+      const box = el('macroBox');
+      if (!box) return;
+      const mx = s && s.macroEvents;
+      if (!mx) { box.innerHTML = '<div class="empty">Not published yet</div>'; return; }
+
+      const w = mx.activeWindow;
+      const blocked = !!mx.entriesBlockedNow;
+      const before = mx.windowBeforeMin != null ? mx.windowBeforeMin : 60;
+      const after = mx.windowAfterMin != null ? mx.windowAfterMin : 60;
+
+      let badge, cls_, text;
+      if (blocked && w) {
+        badge = 'blackout'; cls_ = 'm-block';
+        text = `<b>${esc(w.name)}</b> lands in <b>${Math.round(w.minutesTo)} min</b> — no <b>new</b> risk is being opened. `
+             + 'Open positions are untouched and keep their brackets.';
+      } else if (w && w.phase === 'after') {
+        badge = 'event window'; cls_ = 'm-live';
+        text = `<b>${esc(w.name)}</b> was <b>${Math.round(w.minutesSince)} min</b> ago — the resolution window is live, `
+             + 'so a <b>macro event</b> setup can be taken and is scored like any other playbook.';
+      } else if (mx.enabled === false) {
+        badge = 'disabled'; cls_ = 'm-clear';
+        text = 'The macro guard is switched off. The calendar below is shown for information only.';
+      } else {
+        badge = 'clear'; cls_ = 'm-clear';
+        text = `No high-impact release within ${before} min, so trading is unrestricted. `
+             + 'These dates are published a year ahead — the bot reads a calendar, it does not race headlines.';
+      }
+
+      let html = `<div class="macro-state">
+          <span class="badge ${cls_}">${badge}</span>
+          <span class="vtext">${text}</span>
+        </div>`;
+
+      const ups = mx.upcoming || [];
+      if (ups.length) {
+        html += '<div class="macro-list">' + ups.map(e => {
+          const soon = (e.inMinutes != null) && e.inMinutes <= before;
+          return `<div class="macro-ev${soon ? ' soon' : ''}">
+            <span class="mdot"></span>
+            <span class="mname" title="${esc(e.name)}">${esc(e.name)}</span>
+            <span class="mimp">${esc(e.impact || 'high')}</span>
+            <span class="mwhen">${fmtIn(e.inMinutes)}</span>
+          </div>`;
+        }).join('') + '</div>';
+      } else {
+        html += '<div class="empty" style="margin-top:12px">No upcoming releases on the calendar — '
+              + 'nothing is blocked. The research agent refreshes this.</div>';
+      }
+
+      // A stale calendar means NO blackout is in force. Say so rather than let an empty list imply calm.
+      const age = mx.calendarAgeHours;
+      if (age == null) {
+        html += '<div class="macro-stale">Calendar has never been fetched — no blackout can be in force.</div>';
+      } else if (age > 48) {
+        html += `<div class="macro-stale">Calendar last refreshed ${Math.round(age)}h ago — it may be missing recent events.</div>`;
+      }
+      html += `<div class="edge-meta"><span>blackout <b>${before}m</b> before</span>`
+            + `<span>event window <b>${after}m</b> after</span></div>`;
+      box.innerHTML = html;
+    }
+
+    function renderExitDiscipline(s) {
+      const box = el('exitDiscBox');
+      if (!box) return;
+      const x = s && s.exitDiscipline;
+      if (!x) { box.innerHTML = '<div class="empty">Not published yet</div>'; return; }
+
+      const v = x.verdict || 'insufficient data';
+      const n = x.n || 0;
+      // deltaR is positive when closing early HELPED — this panel must be able to say either.
+      const d = x.deltaR;
+      const badgeCls = v === 'closes add value' ? 'v-edge' : (v === 'closes destroy value' ? 'v-none' : 'v-wait');
+      const headline = {
+        'closes add value': 'Closing early is <b>beating</b> the brackets — mostly by stepping out before a stop.',
+        'closes destroy value': 'Closing early is <b>costing</b> more than it saves. A bracket already states the thesis and its invalidation level; leaving before either is reached only helps when something genuinely changed.',
+        'neutral': 'Closing early and letting the bracket run are coming out about level.',
+        'insufficient data': 'Not enough closes scored yet. Each discretionary exit is compared with what its own bracket would have returned.',
+      }[v] || '';
+
+      let html = `<div class="edge-verdict">
+          <span class="badge ${badgeCls}">${esc(v === 'insufficient data' ? 'measuring' : v.replace('closes ', ''))}</span>
+          <span class="vtext">${headline}</span>
+        </div>`;
+
+      if (n) {
+        html += `<div class="xd-cmp">
+          <div class="xd-cell"><div class="xl">Taken by closing</div><div class="xv ${cls(x.takenR)}">${fmtR(x.takenR)}</div></div>
+          <div class="xd-cell"><div class="xl">If brackets ran</div><div class="xv ${cls(x.bracketR)}">${fmtR(x.bracketR)}</div></div>
+          <div class="xd-cell"><div class="xl">Difference</div><div class="xv ${cls(d)}">${fmtR(d)}</div></div>
+          <div class="xd-cell"><div class="xl">Beat their bracket</div><div class="xv">${x.beatBracket || 0}<span style="color:var(--text-3);font-size:0.8rem">/${n}</span></div></div>
+        </div>`;
+
+        const fams = x.byFamily || {};
+        const names = Object.keys(fams);
+        if (names.length) {
+          names.sort((a, b) => (fams[a].deltaR ?? 0) - (fams[b].deltaR ?? 0));
+          html += '<div class="fam-grid">' + names.map(name => {
+            const f = fams[name] || {};
+            return `<div class="fam">
+              <div class="fh"><span class="fname">${esc(FAM_LABEL[name] || name)}</span></div>
+              <div class="frow"><span>Closes scored</span><b>${f.n || 0}</b></div>
+              <div class="frow"><span>Difference</span><b class="${cls(f.deltaR)}">${fmtR(f.deltaR)}</b></div>
+            </div>`;
+          }).join('') + '</div>';
+        }
+        html += `<div class="edge-meta"><span>closes scored <b>${n}</b></span>`
+              + (x.deltaRPerTrade != null ? `<span>per trade <b class="${cls(x.deltaRPerTrade)}">${fmtR(x.deltaRPerTrade)}</b></span>` : '')
+              + '</div>';
+      }
+      box.innerHTML = html;
+    }
+
     function renderKpis(s) {
       const k = s.kpis || {};
       const wins = k.wins || 0, losses = k.losses || 0, total = wins + losses;
@@ -1274,6 +1458,8 @@
         renderDonut(s.kpis);
         renderVenue(s.kpis);
         renderStrategyEdge(s);
+        renderExitDiscipline(s);
+        renderMacroEvents(s);
         if (!window._tradesLoaded) { renderTrades(s.trades); }   // fast seed; loadTrades() pulls fuller history
         renderPositions(s.positions);
         renderPending(s.pendingOrders);
@@ -1325,7 +1511,7 @@
       el('modePill').className = 'pill muted';
       el('modePill').innerHTML = '<span class="dot" style="background:var(--amber)"></span> warming up';
       el('updatedPill').textContent = 'no data yet';
-      ['feedBox','positionsBox','pendingBox','coinsBox','closedBox','researchPlans','notesBox','edgeBox'].forEach(id => {
+      ['feedBox','positionsBox','pendingBox','coinsBox','closedBox','researchPlans','notesBox','edgeBox','exitDiscBox','macroBox'].forEach(id => {
         el(id).innerHTML = '<div class="empty">Agents warming up… data appears once the bot publishes its first snapshot.</div>';
       });
       renderEquity([]); renderDonut({}); renderTrades([]);
