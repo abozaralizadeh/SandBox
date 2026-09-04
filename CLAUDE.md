@@ -122,6 +122,15 @@ retype it. Constraints that were learned the hard way; do not undo them:
   (clean flat turnaround on white) than any style adjective, and that sheet is reference #1 for
   every panel of the arc, so its look propagates everywhere. Use `sheet_conceit` — an artefact
   the medium itself would produce.
+- **The character sheet is IMMUTABLE once panels have been drawn from it.** The style audit
+  runs after the chain, so the episode is already rendered; it may only strengthen the stored
+  `render_directive`, never swap `character_sheet_url`. Replacing it produced exactly the bug it
+  was meant to prevent — the page showed a reference image the art was never drawn from, and the
+  next episode was anchored on a different sheet, so the cast changed between episodes. Style
+  does not travel through the sheet any more (`compose_image_prompt` injects the directive into
+  every panel prompt), so a failed audit costs nothing by leaving the anchor alone. To change a
+  running arc's look, use `COMICBOOK_RESTYLE_ARC=true`, which drops the sheet *before* the chain
+  so anchor and panels are made together.
 - **Style names are not the anti-repetition test**; `commit_style_card` compares production
   family, figure construction and physical process, computed LRU-style from arc history.
 - New style fields must be added to the explicit `select=[...]` in `get_recent_arc_summaries` or
