@@ -313,6 +313,41 @@
     .fam .rbar i { display: block; height: 100%; border-radius: 3px; background: var(--up); }
     .fam .rbar i.dim { background: var(--amber); }
 
+    /* ── taker flow — WHO is pushing price, from the public trade tape ──
+       Every other panel here reads closed candles: what price DID. This reads the aggressor side of
+       each trade — who made it move — sampled every poll, so it changes between agent runs. It is an
+       experiment in progress: the reading is stamped onto each direction call and scored forward,
+       and nothing in the trading path acts on the result either way. */
+    .flow-sub { font-family: var(--mono); font-size: 0.62rem; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.9px; color: var(--text-3); margin: 16px 0 -2px; }
+    .flow-note { font-family: var(--mono); font-size: 0.66rem; color: var(--text-3); line-height: 1.55; margin-top: 10px; }
+    .flow-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin-top: 12px; }
+    .flow { background: var(--s2); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+    .flow .fh { display: flex; align-items: center; gap: 7px; margin-bottom: 8px; }
+    .flow .fsym { font-family: var(--mono); font-size: 0.76rem; font-weight: 700; color: var(--text); flex: 1; }
+    .flow .fage { font-family: var(--mono); font-size: 0.6rem; color: var(--text-3); white-space: nowrap; }
+    .flow .fage.stale { color: var(--amber); }
+    .flow .fbig { font-family: var(--mono); font-size: 1.14rem; font-weight: 700; }
+    .flow .fbig u { font-size: 0.6rem; font-weight: 400; text-decoration: none; text-transform: uppercase;
+      letter-spacing: 0.5px; color: var(--text-3); margin-left: 6px; }
+    /* Split bar: buy share left, sell share right. The tick is the smoothed level across polls, so a
+       bar running ahead of its own tick is a push that is building rather than one already spent. */
+    .flow .fbar { position: relative; display: flex; height: 6px; border-radius: 3px;
+      background: rgba(255,255,255,0.07); margin: 9px 0 6px; }
+    .flow .fbar i { display: block; height: 100%; }
+    .flow .fbar i.buy { background: var(--up); border-radius: 3px 0 0 3px; }
+    .flow .fbar i.sell { background: var(--down); border-radius: 0 3px 3px 0; }
+    .flow .fbar u { position: absolute; top: -3px; width: 2px; height: 12px; margin-left: -1px;
+      background: var(--text); opacity: 0.7; border-radius: 1px; }
+    .flow .frow { display: flex; justify-content: space-between; gap: 8px; font-family: var(--mono);
+      font-size: 0.7rem; color: var(--text-3); padding: 2px 0; }
+    .flow .frow b { color: var(--text-2); font-weight: 600; white-space: nowrap; }
+    /* "informative" is a third state the other panels do not have: real signal that does not pay for
+       itself. It must not read as a green light, hence its own colour rather than v-edge. */
+    .edge-verdict .badge.v-info { color: var(--cyan); box-shadow: 0 0 14px rgba(45,212,255,0.18); }
+    .fam .fv.v-info { color: var(--cyan); }
+    .fam .fse { color: var(--text-3); font-weight: 400; }
+
     /* ── open positions — live TP/SL bracket ── */
     .pos { background: var(--s2); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; margin-bottom: 10px; }
     .pos:last-child { margin-bottom: 0; }
@@ -491,6 +526,15 @@
           <span style="color:var(--text-3);font-weight:400;font-family:var(--mono);font-size:0.7rem">· forward return from the price at signal time, vs cost</span></div>
       </div>
       <div id="edgeBox"><div class="empty">Measuring…</div></div>
+    </div>
+
+    <!-- Taker flow — the aggressor side of the tape, and whether it has ever predicted anything. -->
+    <div class="panel">
+      <div class="panel-head">
+        <div class="panel-title t-green"><span class="tick"></span> Taker flow
+          <span style="color:var(--text-3);font-weight:400;font-family:var(--mono);font-size:0.7rem">· who is hitting the tape, and does it predict?</span></div>
+      </div>
+      <div id="takerFlowBox"><div class="empty">Measuring…</div></div>
     </div>
 
     <!-- Exit discipline — the bot's own closes vs the brackets they overrode. -->
@@ -1305,6 +1349,134 @@
       box.innerHTML = html;
     }
 
+    // ── Taker flow ───────────────────────────────────────────────────────────────────────────────
+    // Every other panel here reads closed candles: what price DID. This one reads WHO was pushing it
+    // — the share of taker volume lifting the offer, sampled from the public trade tape each poll.
+    //
+    // Two halves, answering different questions. The live readings are the current state of the
+    // market and move between agent runs. The horizon table is the experiment: that reading is
+    // stamped onto every direction call, and what is shown is the forward return of calls made WITH
+    // the flow minus those made AGAINST it. The spread form matters — "with-flow calls returned
+    // +0.1%" says nothing if every call returned +0.1%, so subtracting the against group cancels the
+    // book's own directional bias.
+    //
+    // Verdicts are staged deliberately: `informative` means the spread clears its own error bar,
+    // `tradable` means it also clears the round trip. Only the second would be worth acting on, and
+    // at a ~0.2% round trip against a few basis points of short-horizon drift it is expected to fail.
+    // Nothing in the trading path reads any of this — it is published so the experiment can be
+    // watched while it runs rather than graded once in private.
+    const HZ_LABEL = { '5m': '5 minutes', '15m': '15 minutes', '60m': '1 hour', '240m': '4 hours' };
+    function flowVerdictClass(v) {
+      return v === 'tradable' ? 'v-edge'
+        : (v === 'informative' ? 'v-info'
+        : (v === 'no information' ? 'v-none' : 'v-wait'));
+    }
+    // Seconds-since, not a timestamp — the publisher sends an age so the reading dates itself.
+    function fmtAge(sec) {
+      if (sec == null || isNaN(sec)) return '—';
+      const s = Math.max(0, Math.round(Number(sec)));
+      if (s < 60) return s + 's ago';
+      if (s < 3600) return Math.floor(s / 60) + 'm ago';
+      return Math.floor(s / 3600) + 'h ago';
+    }
+
+    function renderTakerFlow(s) {
+      const box = el('takerFlowBox');
+      if (!box) return;
+      const t = s && s.takerFlow;
+      if (!t) { box.innerHTML = '<div class="empty">Not published yet</div>'; return; }
+
+      const v = t.verdict || 'insufficient data';
+      const band = t.neutralBand != null ? Number(t.neutralBand) : 0.05;
+      const headline = {
+        'tradable': 'Calls taken <b>with</b> the tape are beating calls taken against it by more than a round trip costs — the bar this was not expected to clear. Worth reading against coverage and sample count before believing it.',
+        'informative': 'The tape <b>separates</b> the calls that worked from the ones that did not, but the gap does not cover the round trip. Information, not yet a trade.',
+        'no information': 'The tape at signal time does <b>not</b> separate the calls that worked from the ones that did not — the expected result. Order-flow imbalance is largely contemporaneous, and the forecastable part decays inside a minute.',
+        'insufficient data': 'Collecting. Every direction call is stamped with the tape reading that was current when it was made, then scored once its horizon elapses.',
+      }[v] || '';
+
+      let html = `<div class="edge-verdict">
+          <span class="badge ${flowVerdictClass(v)}">${esc(v === 'insufficient data' ? 'measuring' : v)}</span>
+          <span class="vtext">${headline}</span>
+        </div>`;
+
+      const live = t.live || {};
+      // Most lopsided tape first: a book split 50/50 is the absence of the thing this panel measures.
+      const syms = Object.keys(live).sort((a, b) =>
+        Math.abs((live[b].buyShare != null ? live[b].buyShare : 0.5) - 0.5)
+        - Math.abs((live[a].buyShare != null ? live[a].buyShare : 0.5) - 0.5));
+      if (syms.length) {
+        html += '<div class="flow-sub">Live tape · share of taker volume lifting the offer</div>';
+        html += '<div class="flow-grid">' + syms.map(sym => {
+          const r = live[sym] || {};
+          const share = Number(r.buyShare);
+          const pct = Math.max(0, Math.min(1, share)) * 100;
+          const ew = r.buyShareEwma != null ? Math.max(0, Math.min(1, Number(r.buyShareEwma))) * 100 : null;
+          const tone = share > 0.5 + band ? 'up' : (share < 0.5 - band ? 'down' : 'flat');
+          // The bot polls every ~10 min, so a reading older than that means the sampler stalled —
+          // and a stale tape looks exactly like a calm one unless it is labelled.
+          const stale = r.ageSec != null && r.ageSec > 900;
+          const span = r.spanSec != null ? Math.round(Number(r.spanSec)) + 's' : '—';
+          return `<div class="flow" title="Volume-weighted against one-vote-per-trade: a buy share well above the by-trade share is a few large buyers among many small sellers.">
+            <div class="fh">
+              ${coinIcon(sym, 15)}
+              <span class="fsym">${esc(sym.replace(/-?USDT$/i, ''))}</span>
+              <span class="fage${stale ? ' stale' : ''}">${fmtAge(r.ageSec)}</span>
+            </div>
+            <div class="fbig ${tone}">${isFinite(share) ? (share * 100).toFixed(0) + '%' : '—'}<u>buy</u></div>
+            <div class="fbar">
+              <i class="buy" style="width:${pct.toFixed(1)}%"></i><i class="sell" style="width:${(100 - pct).toFixed(1)}%"></i>
+              ${ew != null ? `<u style="left:${ew.toFixed(1)}%" title="smoothed across polls: ${ew.toFixed(0)}%"></u>` : ''}
+            </div>
+            <div class="frow"><span>Smoothed</span><b>${ew != null ? ew.toFixed(0) + '%' : '—'}</b></div>
+            <div class="frow"><span>By trade count</span><b>${r.buyTradeShare != null ? (Number(r.buyTradeShare) * 100).toFixed(0) + '%' : '—'}</b></div>
+            <div class="frow"><span>Tape</span><b>${r.trades || 0} fills · ${span}</b></div>
+          </div>`;
+        }).join('') + '</div>';
+      } else if (t.enabled === false) {
+        html += '<div class="empty" style="margin-top:12px">Tape sampling is switched off — '
+              + 'the measurement below reports what it already collected.</div>';
+      } else {
+        html += '<div class="empty" style="margin-top:12px">No tape reading from the last poll yet.</div>';
+      }
+
+      const hz = t.byHorizon || {};
+      const keys = Object.keys(hz).sort((a, b) => parseFloat(a) - parseFloat(b));
+      if (keys.length) {
+        html += '<div class="flow-sub">Does it predict? · calls with the flow, minus calls against it</div>';
+        html += '<div class="fam-grid">' + keys.map(k => {
+          const r = hz[k] || {};
+          const w = r.with || {}, a = r.against || {};
+          const fv = r.verdict || 'insufficient data';
+          // The error bar belongs beside the spread: at these sample sizes it is usually the larger
+          // of the two numbers, and a spread quoted without it invites reading noise as a result.
+          const se = r.spread_stderr_pct != null
+            ? ` <span class="fse">± ${Math.abs(Number(r.spread_stderr_pct)).toFixed(2)}</span>` : '';
+          return `<div class="fam">
+            <div class="fh">
+              <span class="fname">${esc(HZ_LABEL[k] || k)}</span>
+              <span class="fv ${flowVerdictClass(fv)}">${esc(fv === 'insufficient data' ? 'untested' : fv)}</span>
+            </div>
+            <div class="frow"><span>With flow</span><b class="${cls(w.mean_pct)}">${fmtPct(w.mean_pct)}</b></div>
+            <div class="frow"><span>Against flow</span><b class="${cls(a.mean_pct)}">${fmtPct(a.mean_pct)}</b></div>
+            <div class="frow"><span>Spread</span><b class="${cls(r.spread_pct)}">${fmtPct(r.spread_pct)}${se}</b></div>
+            <div class="frow"><span>Samples</span><b>${w.n || 0} with / ${a.n || 0} against</b></div>
+          </div>`;
+        }).join('') + '</div>';
+      }
+
+      const meta = [];
+      if (t.coverage != null) meta.push(`<span>coverage <b>${(Number(t.coverage) * 100).toFixed(0)}%</b> of calls</span>`);
+      if (t.costPct != null) meta.push(`<span>cost hurdle <b>${fmtPct(t.costPct)}</b></span>`);
+      meta.push(`<span>neutral band <b>±${(band * 100).toFixed(0)}%</b></span>`);
+      meta.push(`<span>scored <b>${t.n || 0}</b></span>`);
+      html += `<div class="edge-meta">${meta.join('')}</div>`;
+      html += '<div class="flow-note">Read the verdict against coverage — a spread measured over a fraction of '
+            + 'the calls is a claim about that fraction. Nothing in the trading path acts on this panel: the tape '
+            + 'is recorded and scored, never obeyed.</div>';
+      box.innerHTML = html;
+    }
+
     // Minutes -> a human gap ("in 22m", "in 3h 05m", "in 2d 4h").
     function fmtIn(mins) {
       const m = Math.max(0, Math.round(Number(mins) || 0));
@@ -1476,6 +1648,7 @@
         renderDonut(s.kpis);
         renderVenue(s.kpis);
         renderStrategyEdge(s);
+        renderTakerFlow(s);
         renderExitDiscipline(s);
         renderMacroEvents(s);
         if (!window._tradesLoaded) { renderTrades(s.trades); }   // fast seed; loadTrades() pulls fuller history
@@ -1529,7 +1702,7 @@
       el('modePill').className = 'pill muted';
       el('modePill').innerHTML = '<span class="dot" style="background:var(--amber)"></span> warming up';
       el('updatedPill').textContent = 'no data yet';
-      ['feedBox','positionsBox','pendingBox','coinsBox','closedBox','researchPlans','notesBox','edgeBox','exitDiscBox','macroBox'].forEach(id => {
+      ['feedBox','positionsBox','pendingBox','coinsBox','closedBox','researchPlans','notesBox','edgeBox','takerFlowBox','exitDiscBox','macroBox'].forEach(id => {
         el(id).innerHTML = '<div class="empty">Agents warming up… data appears once the bot publishes its first snapshot.</div>';
       });
       renderEquity([]); renderDonut({}); renderTrades([]);

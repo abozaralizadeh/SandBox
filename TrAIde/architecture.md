@@ -40,7 +40,7 @@ local prune.
 
 | Store | Name / keys | Contents |
 |---|---|---|
-| Blob | `live.json` | Full current snapshot: KPIs, **strategy edge**, positions, pending orders, coin universe, recently-closed positions, decision feed, equity tail, notes, research |
+| Blob | `live.json` | Full current snapshot: KPIs, **strategy edge**, **taker flow**, positions, pending orders, coin universe, recently-closed positions, decision feed, equity tail, notes, research |
 | Blob | `rollups/{daily,weekly,monthly,alltime}.json` | Pre-bucketed equity series + KPIs |
 | Table | PK `equity`, RK `{day:08d}` | `indexClose`, `drawdownPct`, optional `dayRealizedPnl` |
 | Table | PK `decision`, RK `{ts:010d}-{symbol}` | `data` = JSON of one sanitized decision |
@@ -77,6 +77,49 @@ Percentages, counts and verdicts only — no balance, equity, position size or a
 involved, so it is safe under the default `normalized` disclosure mode. The renderer sorts families
 worst-first (the one costing money leads) and degrades to an empty state when the key is absent, so
 an older producer that does not publish it still renders fine.
+
+## Taker flow (`live.json` → `takerFlow`, rendered by the "Taker flow" panel)
+
+Every other panel here is derived from closed candles — what price *did*. `takerFlow` is the only one
+that shows **who was pushing it**: the share of taker volume lifting the offer, sampled from KuCoin's
+public trade tape each poll. It has two halves because they answer different questions.
+
+`live` is the current state of the market and moves between agent runs — `buyShare` is
+volume-weighted, `buyTradeShare` is one vote per trade, and the gap between them is the large-order /
+small-order split. `ageSec` is published so a stalled sampler cannot be mistaken for a calm tape.
+
+`byHorizon` is an **experiment in progress**. The tape reading is stamped onto every direction call
+and scored forward; what is shown is the forward return of calls made *with* the flow minus those
+made *against* it. The spread form is deliberate — "with-flow calls returned +0.1%" says nothing if
+every call returned +0.1%, so subtracting the against group cancels the book's directional bias.
+Verdicts are staged: `informative` = the spread clears its own standard error; `tradable` = the
+with-flow group also clears the round trip. Only the second would be worth acting on, and at a ~0.2%
+round trip against a few basis points of short-horizon drift it is expected to fail. Read either
+against `coverage`, which is the fraction of scored calls that carried a reading at all.
+
+```jsonc
+"takerFlow": {
+  "enabled": true,
+  "verdict": "no information",       // tradable | informative | no information | insufficient data
+  "n": 96, "coverage": 0.41, "costPct": 0.21, "neutralBand": 0.05,
+  "byHorizon": {
+    "5m": {
+      "with":    {"n": 34, "mean_pct":  0.041, "hit_rate": 0.56, "stderr_pct": 0.033},
+      "against": {"n": 28, "mean_pct": -0.012, "hit_rate": 0.46, "stderr_pct": 0.040},
+      "spread_pct": 0.053, "spread_stderr_pct": 0.052, "verdict": "informative"
+    }
+  },
+  "live": {
+    "SOL-USDT": {"buyShare": 0.74, "buyShareEwma": 0.66, "buyTradeShare": 0.59,
+                 "trades": 100, "spanSec": 311.2, "ageSec": 63, "samples": 214}
+  }
+}
+```
+
+Shares, counts, ages and percentages only — no balance, size or account identifier is involved, so it
+is safe in every disclosure mode. **Nothing in the producer's trading path reads any of this**; it is
+published so the experiment can be watched while it runs rather than graded once in private. Like
+`strategyEdge`, the renderer degrades to an empty state when the key is absent.
 
 ## Routes (`main.py`)
 
