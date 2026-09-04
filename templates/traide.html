@@ -126,9 +126,16 @@
     .up { color: var(--up); } .down { color: var(--down); } .flat { color: var(--text-2); }
 
     /* ── Panels / grid ── */
-    .grid { display: grid; grid-template-columns: 2fr 1fr; gap: 14px; }
-    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    /* `1fr` is really `minmax(auto, 1fr)`, and `auto` floors the track at the item's MIN-CONTENT
+       width — so one wide row (the decision feed: a 78px symbol + a nowrap action badge like
+       FUTURES_BUY_TRIGGERED + a nowrap timestamp) pushed the Agents column to 428px inside a 335px
+       phone, and that section alone rendered wider than every other panel on the page.
+       `minmax(0, …)` lets the track shrink; `min-width: 0` does the same for the panel as a grid
+       item. Without both, the page scrolls sideways and headings get cut off. */
+    .grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 14px; }
+    .grid-2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; }
     .panel {
+      min-width: 0;
       background: linear-gradient(180deg, var(--s1), var(--s0));
       border: 1px solid var(--border); border-radius: 16px; padding: 16px 18px; margin-bottom: 14px;
     }
@@ -187,13 +194,13 @@
       .feed-panel .feed-wrap .feed { position: absolute; inset: 0; max-height: none; }
     }
     .feed-item {
-      display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center;
+      display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center;
       background: var(--s2); border: 1px solid var(--border); border-left-width: 3px; border-radius: 10px; padding: 9px 11px;
       animation: slidein 0.4s ease;
     }
     @keyframes slidein { from { opacity: 0; transform: translateX(-6px); } to { opacity: 1; transform: none; } }
     .feed-item .a-sym { font-family: var(--mono); font-weight: 700; font-size: 0.82rem; min-width: 78px; display: flex; align-items: center; gap: 7px; }
-    .feed-item .a-reason { color: var(--text-2); font-size: 0.76rem; line-height: 1.35; overflow: hidden; }
+    .feed-item .a-reason { color: var(--text-2); font-size: 0.76rem; line-height: 1.35; overflow: hidden; min-width: 0; overflow-wrap: anywhere; }
     .feed-item .a-action {
       font-family: var(--mono); font-size: 0.6rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
       padding: 2px 7px; border-radius: 5px; white-space: nowrap;
@@ -212,8 +219,10 @@
     /* notes */
     .note { background: var(--s2); border: 1px solid var(--border); border-radius: 10px; padding: 11px 13px; margin-bottom: 9px; }
     .note .who { font-family: var(--mono); font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.5px; color: var(--cyan); margin-bottom: 5px; }
-    .note .body { font-size: 0.8rem; color: var(--text-2); line-height: 1.45; }
-    .note .ttl { font-weight: 600; color: var(--text); font-size: 0.82rem; margin-bottom: 3px; }
+    /* Agent prose carries unbreakable tokens (slash-joined coin lists, ids, URLs) that otherwise
+       set a min-content width wider than the phone and overflow the card. */
+    .note .body { font-size: 0.8rem; color: var(--text-2); line-height: 1.45; overflow-wrap: anywhere; }
+    .note .ttl { font-weight: 600; color: var(--text); font-size: 0.82rem; margin-bottom: 3px; overflow-wrap: anywhere; }
     .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
     .chip { font-family: var(--mono); font-size: 0.64rem; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--border2); color: var(--text-2); display: inline-flex; align-items: center; gap: 5px; }
 
@@ -362,7 +371,7 @@
     #researchPlans::-webkit-scrollbar, #notesBox::-webkit-scrollbar, #closedBox::-webkit-scrollbar { width: 7px; }
     #researchPlans::-webkit-scrollbar-thumb, #notesBox::-webkit-scrollbar-thumb, #closedBox::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 6px; }
     .note .acts { margin: 8px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
-    .note .acts li { font-family: var(--mono); font-size: 0.68rem; color: var(--text-2); line-height: 1.34; padding-left: 14px; position: relative; }
+    .note .acts li { font-family: var(--mono); font-size: 0.68rem; color: var(--text-2); line-height: 1.34; padding-left: 14px; position: relative; overflow-wrap: anywhere; }
     .note .acts li::before { content: '▸'; position: absolute; left: 0; color: var(--up); opacity: 0.7; }
 
     footer { text-align: center; margin-top: 30px; color: var(--text-3); font-size: 0.74rem; }
@@ -372,7 +381,7 @@
 
     @media (max-width: 900px) {
       .kpis { grid-template-columns: repeat(2, 1fr); }
-      .grid, .grid-2 { grid-template-columns: 1fr; }
+      .grid, .grid-2 { grid-template-columns: minmax(0, 1fr); }
 
       /* Mobile repaint fix. A position:fixed layer carrying a large blur() filter (the glows) or a
          mask (the grid) makes iOS/Android browsers drop or clip page content when scrolling back on
@@ -389,6 +398,15 @@
          enormous. Viewport-relative caps adapt to the phone; momentum scrolling keeps it smooth. The
          compositing/"content disappears" bug that once motivated expanding them is fixed above by
          dropping the fixed-layer blur/mask, so a nested scroller is safe here. */
+      /* Reflow the decision row on phones. Three columns (78px symbol | reason | timestamp) left
+         the reason ~123px wide — about fifteen characters a line. Symbol and timestamp share the
+         first row, the reason gets the full width of the second, which roughly doubles the text
+         column without making the row taller. */
+      .feed-item { grid-template-columns: auto 1fr; row-gap: 7px; align-items: start; }
+      .feed-item > :first-child { grid-column: 1; grid-row: 1; }
+      .feed-item .a-meta { grid-column: 2; grid-row: 1; justify-self: end; align-self: start; }
+      .feed-item .a-reason { grid-column: 1 / -1; grid-row: 2; }
+
       .feed { max-height: 55vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
       #closedBox { max-height: 60vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
       #researchPlans { max-height: 45vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
