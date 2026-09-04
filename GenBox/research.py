@@ -35,6 +35,8 @@ def _build_llm():
     Mirrors AIBlog/graph.py's config (same deployment, api version, responses/v1 output)."""
     from langchain_openai import AzureChatOpenAI
 
+    from llm_runtime import STATELESS_CHAT_KWARGS
+
     llm = AzureChatOpenAI(
         azure_deployment=os.environ["AZURE_OPENAI_MODEL"],
         api_version=os.environ["AZURE_OPENAI_API_VERSION"],
@@ -43,6 +45,7 @@ def _build_llm():
         temperature=1,
         max_retries=2,
         timeout=90,
+        **STATELESS_CHAT_KWARGS,
     )
     return llm.bind_tools([{"type": "web_search"}])
 

@@ -34,6 +34,15 @@ from agents import ModelSettings, RunConfig
 STATELESS_MODEL_SETTINGS = ModelSettings(store=False)
 STATELESS_RUN_CONFIG = RunConfig(model_settings=STATELESS_MODEL_SETTINGS)
 
+# The LangChain half of the same rule. LangGraph subprojects reach the Responses API through
+# `AzureChatOpenAI(use_responses_api=True)` / `output_version="responses/v1"`, and they replay
+# the previous turn's `rs_*` / `fc_*` / `resp_*` ids on the next call — which the load
+# balancer's other backends reject with "The requested item was created under a different
+# Azure OpenAI resource". Measured: with `store` unset a replayed turn fails on a different
+# resource and succeeds on the minting one; with `store=False` it succeeds on both.
+# AIOpenProblemSolver lost 16 daily runs to this between 2026-08-29 and 2026-09-04.
+STATELESS_CHAT_KWARGS = {"store": False}
+
 # ---------------------------------------------------------------------------
 # Temperature support
 # ---------------------------------------------------------------------------

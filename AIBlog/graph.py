@@ -1,4 +1,5 @@
 import getpass
+import logging
 import os
 
 from typing import Annotated
@@ -14,6 +15,8 @@ from langgraph.graph import StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode, tools_condition
 
+from llm_runtime import STATELESS_CHAT_KWARGS
+
 from AIBlog.token_controller import TokenAwareAzureChatOpenAI
 
 if "AZURE_OPENAI_API_KEY" not in os.environ:
@@ -21,6 +24,9 @@ if "AZURE_OPENAI_API_KEY" not in os.environ:
 
 if "AZURE_OPENAI_ENDPOINT" not in os.environ:
     raise Exception("No AZURE_OPENAI_ENDPOINT found in environment!")
+
+logger = logging.getLogger("AIBlog.graph")
+
 
 async def get_react_agent():
     savetitletool = set_title
@@ -51,6 +57,7 @@ async def get_react_agent():
         timeout=None,
         max_retries=3,
         output_version=os.environ.get("AZURE_OPENAI_OUTPUT_VERSION", "responses/v1"),
+        **STATELESS_CHAT_KWARGS,
         max_input_tokens=max_input_tokens,
         tool_message_token_limit=tool_token_limit,
         summary_chunk_tokens=summary_chunk_tokens,
@@ -59,8 +66,22 @@ async def get_react_agent():
         # other params...
     )
 
-    from langgraph.prebuilt import create_react_agent
+    from langgraph.prebuilt import ToolNode, create_react_agent
+
+    def _tool_failed(exc: Exception) -> str:
+        """Report a tool failure to the model instead of ending the post.
+
+        The browse tools fail routinely — a paper 404s, a host aborts the navigation
+        (`Page.goto: net::ERR_ABORTED`) — and LangGraph's default handler re-raises anything
+        that is not a `ToolInvocationError`, so a single dead link killed the whole run.
+        LangSmith counted 20 blog posts lost that way between 2026-06 and 2026-09."""
+        logger.warning("Tool call failed, continuing without it: %s: %s",
+                       type(exc).__name__, str(exc)[:200])
+        return (f"TOOL_FAILED ({type(exc).__name__}): {str(exc)[:300]} — this source is "
+                "unavailable. Do not retry it; use another source and continue.")
+
     # Name the agent so LangSmith traces show "AIBlog" instead of the default
     # "LangGraph" root run name.
-    react_agent = create_react_agent(llm, tools=tools, name="AIBlog")
+    react_agent = create_react_agent(
+        llm, tools=ToolNode(tools, handle_tool_errors=_tool_failed), name="AIBlog")
     return react_agent, browser_aclose

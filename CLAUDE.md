@@ -219,7 +219,13 @@ AIOpenProblemSolver kept running through the switch), while a directly-construct
   the request and mints no ids. On the `gpt-5.6-luna` reasoning deployment `store=False` returns
   the reasoning item with `encrypted_content` automatically, so cross-resource replay keeps the
   reasoning that `_strip_tools_keep_reasoning` protects — no `response_include` needed. Never
-  add a `Runner.run` here without that run config.
+  add a `Runner.run` here without that run config. The **LangGraph** subprojects reach the
+  same API through `use_responses_api=True` / `output_version="responses/v1"` and replay the
+  same ids, so they take the LangChain half of the rule: `**STATELESS_CHAT_KWARGS`
+  (`store=False`) on every chat model — AIBlog, TomorrowNews, GenBox research,
+  AIOpenProblemSolver. AIOPS lost 16 daily runs to this in six days before it was applied;
+  verified that a replayed turn fails on another resource with `store` unset and succeeds
+  with `store=False`.
 
 ## Gotchas
 
@@ -239,6 +245,11 @@ AIOpenProblemSolver kept running through the switch), while a directly-construct
   `COMICBOOK_IMAGE_ATTEMPTS` (default 3) drives the transient retry; it was effectively 1
   (no retries) once, and a single connection blip then tripped the run's 2-failure circuit
   breaker and rendered every remaining panel as a grey placeholder.
+- **The same containment applies to AIBlog's browser tools.** `create_react_agent` builds a
+  default `ToolNode` too, so a dead link (`Page.goto: net::ERR_ABORTED`, a 404'd arXiv paper)
+  ended the whole post — 20 lost blog runs across 15 days in LangSmith. It is now built as
+  `create_react_agent(llm, tools=ToolNode(tools, handle_tool_errors=...))`. Any new LangGraph
+  agent here needs that handler; the default one re-raises everything but `ToolInvocationError`.
 - **An image failure must never kill a TomorrowNews edition.** `get_image_by_text` used to let
   the API's exception propagate, and LangGraph's `ToolNode` absorbs only `ToolInvocationError` —
   everything else is re-raised, failing the `tools` node, cancelling the sibling images

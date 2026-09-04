@@ -13,7 +13,7 @@ from langgraph.prebuilt import ToolNode, tools_condition
 
 from langchain_openai import AzureChatOpenAI
 
-from llm_runtime import temperature_kwargs
+from llm_runtime import STATELESS_CHAT_KWARGS, temperature_kwargs
 
 if "AZURE_OPENAI_API_KEY" not in os.environ:
     raise Exception("No AZURE_OPENAI_API_KEY found in environment!")
@@ -39,6 +39,7 @@ llm = AzureChatOpenAI(
     **temperature_kwargs(1.3),
     timeout=None,
     max_retries=2,
+    **STATELESS_CHAT_KWARGS,
 )
 
 imagetool = get_image_by_text

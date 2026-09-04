@@ -10,6 +10,7 @@ except ImportError as exc:  # pragma: no cover - runtime guard
         "deepagents package is required for the Open Problem Solver agent."
     ) from exc
 
+from llm_runtime import STATELESS_CHAT_KWARGS
 from AIOpenProblemSolver.tools.browseweb import get_browse_web_tools
 from AIOpenProblemSolver.tools.mathtools import python_math_sandbox, symbolic_calculator
 from AIOpenProblemSolver.tools.searchinternet import (
@@ -36,6 +37,7 @@ async def get_open_deep_search_agent():
         max_tokens=None,
         timeout=None,
         max_retries=3,
+        **STATELESS_CHAT_KWARGS,
     )
 
     #search_tools: List = [ddg_search_results, ddg_search, tavily_search]
