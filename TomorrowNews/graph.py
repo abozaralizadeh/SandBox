@@ -1,3 +1,4 @@
+import logging
 import os
 from typing import Annotated
 
@@ -19,6 +20,9 @@ if "AZURE_OPENAI_API_KEY" not in os.environ:
 
 if "AZURE_OPENAI_ENDPOINT" not in os.environ:
     raise Exception("No AZURE_OPENAI_ENDPOINT found in environment!")
+
+logger = logging.getLogger("TomorrowNews.graph")
+
 
 class State(TypedDict):
     messages: Annotated[list, add_messages]
@@ -52,7 +56,20 @@ def create_news_graph(news_tool, name="Tomorrow News"):
         return {"messages": [llm_with_tools.invoke(state["messages"])]}
 
     graph_builder.add_node("agent", agent)
-    tool_node = ToolNode(tools=tools)
+
+    def _tool_failed(exc: Exception) -> str:
+        """Report a tool failure back to the model instead of killing the run.
+
+        LangGraph's default handler absorbs only `ToolInvocationError` and re-raises the
+        rest, so a single rejected image used to fail this node, cancel the other tool calls
+        running in parallel, and end the edition. A newspaper missing one photo is a far
+        better outcome than no newspaper."""
+        logger.warning("Tool call failed, continuing without it: %s: %s",
+                       type(exc).__name__, str(exc)[:200])
+        return (f"TOOL_FAILED ({type(exc).__name__}): {str(exc)[:300]} — this is not a URL "
+                "or usable content. Continue the article without it.")
+
+    tool_node = ToolNode(tools=tools, handle_tool_errors=_tool_failed)
     graph_builder.add_node("tools", tool_node)
     graph_builder.add_conditional_edges("agent", tools_condition)
     graph_builder.add_edge("tools", "agent")

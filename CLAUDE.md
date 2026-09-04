@@ -230,6 +230,20 @@ AIOpenProblemSolver kept running through the switch), while a directly-construct
   `COMICBOOK_IMAGE_ATTEMPTS` (default 3) drives the transient retry; it was effectively 1
   (no retries) once, and a single connection blip then tripped the run's 2-failure circuit
   breaker and rendered every remaining panel as a grey placeholder.
+- **An image failure must never kill a TomorrowNews edition.** `get_image_by_text` used to let
+  the API's exception propagate, and LangGraph's `ToolNode` absorbs only `ToolInvocationError` —
+  everything else is re-raised, failing the `tools` node, cancelling the sibling images
+  generating in parallel, and ending the run. One rejected photo therefore cost the whole
+  newspaper (LangSmith: the `fa` editions on 2026-09-03/04). The tool now degrades to an
+  `IMAGE_UNAVAILABLE` string, and `ToolNode` carries a `handle_tool_errors` callback as a second
+  layer. `_generate_all` also isolates each language: the loop is sequential (en → fa → it), so
+  an unguarded `fa` failure meant `it` was never attempted at all.
+- **gpt-image output-stage moderation is deterministic, and the trigger is depicted minors, not
+  the language.** Measured: three real blocked prompts re-ran 9/9 blocked (`moderation_stage:
+  output`, `categories: ['other']`), so retrying the same prompt is pure waste — but the same
+  scene with the people removed generated every time, in Persian *and* English. That is why the
+  moderation retry appends a people-free framing instead of retrying verbatim, and why Persian
+  looked singled out (its paper ran classroom stories those days).
 - `TomorrowNews/ReAct.py`, `multiagent.py`, `supervisor.py` are legacy/alternate architectures;
   the Flask path uses `graph.py`'s per-language graphs. `langgraph.json` still exposes the
   supervisor for the dev server.

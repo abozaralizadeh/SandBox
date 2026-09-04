@@ -209,15 +209,29 @@ def gettomorrownews(parsed_date, lang="en"):
 
 
 def _generate_all(parsed_date):
-    """Generate TomorrowNews for all languages sequentially (en → fa → it)."""
+    """Generate TomorrowNews for all languages sequentially (en → fa → it).
+
+    Each language is isolated: the loop is sequential, so an exception used to abandon every
+    language AFTER the failing one — a Persian failure meant the Italian edition was never
+    even attempted, and the reader's request 500'd. Now a language that fails is simply
+    absent from the results and the others still get written."""
     results = {}
+    failures = {}
     for lang in GENERATION_ORDER:
         if not strtobool(os.environ.get("DEBUG", False)):
             cached = _try_cache(parsed_date, lang)
             if cached:
                 results[lang] = cached
                 continue
-        results[lang] = _generate_single(parsed_date, lang)
+        try:
+            results[lang] = _generate_single(parsed_date, lang)
+        except Exception as exc:
+            failures[lang] = exc
+            print(f"TomorrowNews: {lang} edition failed ({type(exc).__name__}: {exc}); "
+                  "continuing with the other languages")
+    if not results and failures:
+        # Nothing at all was produced — surface the first failure rather than a silent blank.
+        raise next(iter(failures.values()))
     return results
 
 
