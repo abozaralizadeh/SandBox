@@ -86,7 +86,11 @@ public trade tape each poll. It has two halves because they answer different que
 
 `live` is the current state of the market and moves between agent runs — `buyShare` is
 volume-weighted, `buyTradeShare` is one vote per trade, and the gap between them is the large-order /
-small-order split. `ageSec` is published so a stalled sampler cannot be mistaken for a calm tape.
+small-order split. `ageSec` is published so a stalled sampler cannot be mistaken for a calm tape, and
+a reading has a shelf life: symbols rotate through the producer's sampling cap, and one that rotated
+out stops being refreshed rather than being marked dead. Past ~10 polls the producer drops it
+entirely instead of publishing it, so a symbol vanishing from `live` means "no longer sampled", never
+"balanced flow" — the panel flags anything well short of that as stale.
 
 `byHorizon` is an **experiment in progress**. The tape reading is stamped onto every direction call
 and scored forward; what is shown is the forward return of calls made *with* the flow minus those

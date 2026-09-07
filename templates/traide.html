@@ -1413,9 +1413,11 @@
           const pct = Math.max(0, Math.min(1, share)) * 100;
           const ew = r.buyShareEwma != null ? Math.max(0, Math.min(1, Number(r.buyShareEwma))) * 100 : null;
           const tone = share > 0.5 + band ? 'up' : (share < 0.5 - band ? 'down' : 'flat');
-          // The bot polls every ~10 min, so a reading older than that means the sampler stalled —
-          // and a stale tape looks exactly like a calm one unless it is labelled.
-          const stale = r.ageSec != null && r.ageSec > 900;
+          // The producer samples the tape every poll (~60s) and stops publishing a symbol entirely
+          // once it is ~10 min old, so anything that arrives here is at most that. Flag well below
+          // the drop point instead: several missed polls is a stalling sampler, and a stale tape
+          // looks exactly like a calm one unless it is labelled.
+          const stale = r.ageSec != null && r.ageSec > 300;
           const span = r.spanSec != null ? Math.round(Number(r.spanSec)) + 's' : '—';
           return `<div class="flow" title="Volume-weighted against one-vote-per-trade: a buy share well above the by-trade share is a few large buyers among many small sellers.">
             <div class="fh">
