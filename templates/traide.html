@@ -319,7 +319,18 @@
        experiment in progress: the reading is stamped onto each direction call and scored forward,
        and nothing in the trading path acts on the result either way. */
     .flow-sub { font-family: var(--mono); font-size: 0.62rem; font-weight: 600; text-transform: uppercase;
-      letter-spacing: 0.9px; color: var(--text-3); margin: 16px 0 -2px; }
+      letter-spacing: 0.9px; color: var(--text-3); margin: 16px 0 -2px;
+      display: flex; align-items: center; gap: 10px; }
+    /* The live tape is COLLAPSED by default. It is sorted most-lopsided-first, so the few cards on
+       show are the reading itself; the full dozen ran the whole length of a phone screen and put
+       everything below this panel out of reach. */
+    .flow-more { font-family: var(--mono); font-size: 0.6rem; font-weight: 600; letter-spacing: 0.4px;
+      text-transform: uppercase; cursor: pointer; margin-left: auto; padding: 3px 9px; border-radius: 7px;
+      white-space: nowrap;
+      color: var(--text-2); background: rgba(255,255,255,0.03); border: 1px solid var(--border);
+      transition: color 0.15s, border-color 0.15s, background 0.15s; }
+    .flow-more:hover { color: var(--cyan); border-color: var(--border2); background: var(--s2); }
+    .flow-more.open { color: var(--cyan); border-color: rgba(45,212,255,0.35); background: rgba(45,212,255,0.08); }
     .flow-note { font-family: var(--mono); font-size: 0.66rem; color: var(--text-3); line-height: 1.55; margin-top: 10px; }
     .flow-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin-top: 12px; }
     .flow { background: var(--s2); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
@@ -446,6 +457,9 @@
       #closedBox { max-height: 60vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
       #researchPlans { max-height: 45vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
       #notesBox { max-height: 40vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+      /* Same rule for the live tape once it is EXPANDED: one card per row here, so a full list is
+         as long as the decision feed. Collapsed it is short enough to need no cap. */
+      .flow-grid.open { max-height: 60vh; overflow-y: auto; -webkit-overflow-scrolling: touch; padding-right: 2px; }
 
       .pos-chart { height: 200px; }
       /* Icon-only chart toggle on phones so the position header never overflows; the cyan
@@ -1380,9 +1394,21 @@
       return Math.floor(s / 3600) + 'h ago';
     }
 
+    // Expanded state and the snapshot to re-render from, kept outside the function because the panel
+    // is rebuilt from scratch every 30s poll and the toggle has to survive that.
+    let flowExpanded = false;
+    let lastTakerFlowSnapshot = null;
+    // How many tape cards the collapsed state shows. On a phone the grid is one card per row, so the
+    // count is what bounds the page — two is a comparison and still leaves the panel under a
+    // screenful; on a desktop four is a single row of the auto-fit grid.
+    function flowPreviewCount() {
+      return window.matchMedia('(max-width: 900px)').matches ? 2 : 4;
+    }
+
     function renderTakerFlow(s) {
       const box = el('takerFlowBox');
       if (!box) return;
+      lastTakerFlowSnapshot = s;
       const t = s && s.takerFlow;
       if (!t) { box.innerHTML = '<div class="empty">Not published yet</div>'; return; }
 
@@ -1406,8 +1432,18 @@
         Math.abs((live[b].buyShare != null ? live[b].buyShare : 0.5) - 0.5)
         - Math.abs((live[a].buyShare != null ? live[a].buyShare : 0.5) - 0.5));
       if (syms.length) {
-        html += '<div class="flow-sub">Live tape · share of taker volume lifting the offer</div>';
-        html += '<div class="flow-grid">' + syms.map(sym => {
+        const hiddenCount = Math.max(0, syms.length - flowPreviewCount());
+        const open = flowExpanded || !hiddenCount;
+        const shown = open ? syms : syms.slice(0, flowPreviewCount());
+        html += '<div class="flow-sub">Live tape · share of taker volume lifting the offer'
+          + (hiddenCount
+              ? `<button type="button" class="flow-more${flowExpanded ? ' open' : ''}"
+                   aria-expanded="${flowExpanded}" aria-controls="flowGrid"
+                   title="${flowExpanded ? 'Show only the most lopsided' : 'Show every symbol being sampled'}"
+                 >${flowExpanded ? 'Show fewer' : '+' + hiddenCount + ' more'}</button>`
+              : '')
+          + '</div>';
+        html += `<div class="flow-grid${open ? ' open' : ''}" id="flowGrid">` + shown.map(sym => {
           const r = live[sym] || {};
           const share = Number(r.buyShare);
           const pct = Math.max(0, Math.min(1, share)) * 100;
@@ -1734,6 +1770,14 @@
         if (cb) { togglePendChart(Number(cb.dataset.idx)); return; }
         const ib = e.target.closest('.pos-iv-btn');
         if (ib) { setPendChartIv(Number(ib.dataset.idx), ib.dataset.iv); }
+      });
+      // Delegated too — the taker-flow panel is rebuilt every 30s poll, so the button is a new node
+      // each time; re-render from the stored snapshot rather than waiting for the next fetch.
+      const flowBox = el('takerFlowBox');
+      if (flowBox) flowBox.addEventListener('click', e => {
+        if (!e.target.closest('.flow-more')) return;
+        flowExpanded = !flowExpanded;
+        renderTakerFlow(lastTakerFlowSnapshot);
       });
       loadLive();
       loadEquity('all');

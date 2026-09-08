@@ -269,3 +269,12 @@ AIOpenProblemSolver kept running through the switch), while a directly-construct
   supervisor for the dev server.
 - Mobile ComicBook layout is a single column with text **below** each photo (flex order in the
   `@600` media block); desktop keeps the overlay look. Don't regress this when touching CSS.
+- **A long list in `templates/traide.html` must be BOUNDED on mobile, one way or the other.** The
+  house rule is a viewport-capped scroller (`.feed` 55vh, `#closedBox` 60vh, `#researchPlans` 45vh,
+  `#notesBox` 40vh in the `@900` block) — otherwise each panel grows to its full length and nothing
+  below it can be reached. The taker-flow tape does both: it is COLLAPSED to the few most lopsided
+  symbols (`flowPreviewCount()`, 2 on a phone / 4 = one desktop row) behind a `+N more` toggle, and
+  the expanded grid is then capped at 60vh like the rest. `flowExpanded` and
+  `lastTakerFlowSnapshot` live outside `renderTakerFlow` and the toggle is delegated on
+  `#takerFlowBox`, because the panel is rebuilt from scratch on every 30s poll — state kept inside
+  the render, or a handler bound to the button itself, is gone one poll later.
