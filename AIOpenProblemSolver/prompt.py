@@ -1,5 +1,6 @@
 import json
 import os
+import threading
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -368,28 +369,55 @@ def _has_iteration_for_today(problem: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-async def ensure_latest_iteration(problem: str) -> Optional[Dict[str, Any]]:
-    """Run today's iteration unless it exists or another worker is already running it.
+def _run_iteration_in_background(problem: str) -> None:
+    """Own the lock for the whole run, in this thread's own event loop.
 
-    An iteration takes minutes and is triggered from a blocking request, so without the
-    single-flight lock every concurrent visitor — across 4 gunicorn workers — starts its
-    own run and the day ends up with several notebook entries. Callers that lose the race
-    get None and simply serve the history that is already there."""
+    `_run_iteration` drives Playwright, so it needs a loop of its own here (the same shape as
+    GenBox's `_run_video_generation`); the browser is torn down inside that loop by
+    `_run_iteration`'s own `finally`."""
+    import asyncio
+
+    try:
+        asyncio.run(_run_iteration(problem, datetime.utcnow()))
+    except Exception as exc:  # noqa: BLE001 - a failed iteration must not take the app down
+        print(f"AIOPS iteration failed for {problem!r}: {type(exc).__name__}: {exc}")
+    finally:
+        release_iteration_lock(problem)
+
+
+async def ensure_latest_iteration(problem: str) -> Optional[Dict[str, Any]]:
+    """Start today's iteration if it is missing, WITHOUT blocking the request.
+
+    An iteration takes 2-10 minutes (measured in LangSmith). Azure App Service cuts any HTTP
+    request at ~230s, so running it inline meant the reader always got a 500 — "Failed to load
+    progress" — even though the work carried on server-side and the entry appeared later. Worse,
+    every timed-out attempt released the lock on its way out and the next visitor started
+    ANOTHER 5-10 minute run: 11 overlapping iterations on 2026-09-07 alone.
+
+    So this only kicks the work off in a background daemon thread and returns immediately; the
+    page renders the stored history and picks the new entry up on a later load. The
+    single-flight lock is still what stops 4 gunicorn workers starting four runs, and the
+    background thread now owns it for the run's whole life instead of only for the request's.
+    """
     existing = _has_iteration_for_today(problem)
     if existing:
         return _format_entity(existing)
 
-    if not try_acquire_iteration_lock(problem):
-        return None   # another worker is generating today's iteration right now
-
     try:
-        # Re-check inside the lock: the run we queued behind may have just finished.
-        existing = _has_iteration_for_today(problem)
-        if existing:
-            return _format_entity(existing)
-        return await _run_iteration(problem, datetime.utcnow())
-    finally:
+        if not try_acquire_iteration_lock(problem):
+            return None   # another worker is generating today's iteration right now
+    except Exception as exc:  # noqa: BLE001 - storage hiccup must not 500 the page
+        print(f"AIOPS could not take the iteration lock: {type(exc).__name__}: {exc}")
+        return None
+
+    # Re-check inside the lock: the run we queued behind may have just finished.
+    existing = _has_iteration_for_today(problem)
+    if existing:
         release_iteration_lock(problem)
+        return _format_entity(existing)
+
+    threading.Thread(target=_run_iteration_in_background, args=(problem,), daemon=True).start()
+    return None
 
 
 async def get_problem_history(
@@ -399,8 +427,10 @@ async def get_problem_history(
     limit: int = DEFAULT_PAGE_SIZE,
     ensure_latest: bool = False,
 ) -> Dict[str, Any]:
+    generating = False
     if ensure_latest and offset == 0:
-        await ensure_latest_iteration(problem)
+        # Non-blocking: returns None while today's iteration runs in the background.
+        generating = await ensure_latest_iteration(problem) is None
 
     slice_entries, next_offset = get_iteration_slice(problem, offset=offset, limit=limit)
     formatted = [_format_entity(entity) for entity in slice_entries]
@@ -414,4 +444,7 @@ async def get_problem_history(
         "next_offset": next_offset,
         "progress_percent": latest_progress,
         "progress_comment": latest_comment,
+        # True when today's entry is still being produced in the background, so the page can
+        # say "in progress" rather than implying the archive is all there is.
+        "generating": generating,
     }

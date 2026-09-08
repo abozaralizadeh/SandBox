@@ -28,12 +28,63 @@ if "AZURE_OPENAI_ENDPOINT" not in os.environ:
 logger = logging.getLogger("AIBlog.graph")
 
 
+def _resilient_tool(tool):
+    """Make a tool report its failure as text instead of raising.
+
+    The browse tools fail routinely — a paper 404s, a host aborts the navigation
+    (`Page.goto: net::ERR_ABORTED`) — and LangGraph's ToolNode absorbs only
+    `ToolInvocationError`, re-raising everything else and ending the whole post. LangSmith
+    counted 20 blog runs lost that way between 2026-06 and 2026-09.
+
+    Wrapping each tool (the pattern AIOpenProblemSolver uses for `_truncate_tool_output`)
+    rather than the node keeps hosted-tool dicts like `{"type": "web_search"}` untouched —
+    they have no `invoke` and are passed straight through to `create_react_agent`.
+    """
+    if isinstance(tool, dict) or getattr(tool, "__wrapped_resilient__", False):
+        return tool
+
+    def _report(exc):
+        logger.warning("Tool call failed, continuing without it: %s: %s",
+                       type(exc).__name__, str(exc)[:200])
+        return (f"TOOL_FAILED ({type(exc).__name__}): {str(exc)[:300]} — this source is "
+                "unavailable. Do not retry it; use another source and continue.")
+
+    if hasattr(tool, "invoke"):
+        original = tool.invoke
+
+        def invoke(*args, **kwargs):
+            try:
+                return original(*args, **kwargs)
+            except Exception as exc:  # noqa: BLE001 - any tool failure degrades to text
+                return _report(exc)
+
+        object.__setattr__(tool, "invoke", invoke)
+
+    if hasattr(tool, "ainvoke"):
+        original_a = tool.ainvoke
+
+        async def ainvoke(*args, **kwargs):
+            try:
+                return await original_a(*args, **kwargs)
+            except Exception as exc:  # noqa: BLE001
+                return _report(exc)
+
+        object.__setattr__(tool, "ainvoke", ainvoke)
+
+    try:
+        object.__setattr__(tool, "__wrapped_resilient__", True)
+    except Exception:
+        pass
+    return tool
+
+
 async def get_react_agent():
     savetitletool = set_title
     imagetool = get_image_by_text
     tools = [{"type": "web_search"}, imagetool, savetitletool]
     browse_tools, browser_aclose = await get_browsewebtools()
     tools += browse_tools
+    tools = [_resilient_tool(t) for t in tools]
 
     max_input_tokens = int(os.environ.get("AZURE_OPENAI_MAX_INPUT_TOKENS", "270000"))
     tool_token_limit = int(
@@ -68,20 +119,13 @@ async def get_react_agent():
 
     from langgraph.prebuilt import ToolNode, create_react_agent
 
-    def _tool_failed(exc: Exception) -> str:
-        """Report a tool failure to the model instead of ending the post.
-
-        The browse tools fail routinely — a paper 404s, a host aborts the navigation
-        (`Page.goto: net::ERR_ABORTED`) — and LangGraph's default handler re-raises anything
-        that is not a `ToolInvocationError`, so a single dead link killed the whole run.
-        LangSmith counted 20 blog posts lost that way between 2026-06 and 2026-09."""
-        logger.warning("Tool call failed, continuing without it: %s: %s",
-                       type(exc).__name__, str(exc)[:200])
-        return (f"TOOL_FAILED ({type(exc).__name__}): {str(exc)[:300]} — this source is "
-                "unavailable. Do not retry it; use another source and continue.")
-
     # Name the agent so LangSmith traces show "AIBlog" instead of the default
-    # "LangGraph" root run name.
-    react_agent = create_react_agent(
-        llm, tools=ToolNode(tools, handle_tool_errors=_tool_failed), name="AIBlog")
+    # "LangGraph" root run name. `tools` MUST be passed as the plain list: it contains the
+    # hosted `{"type": "web_search"}` dict, which create_react_agent understands (it splits
+    # hosted tools from executable ones) but `ToolNode` rejects outright with "The first
+    # argument must be a string or a callable". Wrapping this list in a ToolNode to attach an
+    # error handler therefore raised at CONSTRUCTION, before any graph existed — AIBlog 500'd
+    # with no LangSmith trace at all from 2026-09-04 until it was reverted. Resilience comes
+    # from _resilient_tool below instead, which is applied per tool and leaves the dict alone.
+    react_agent = create_react_agent(llm, tools=tools, name="AIBlog")
     return react_agent, browser_aclose

@@ -650,7 +650,9 @@
                 if (reset) entriesContainer.innerHTML = "";
 
                 if (entries.length === 0 && offset === 0) {
-                    updateStatus("No recorded progress yet. Triggering a fresh research iteration.");
+                    updateStatus(payload.generating
+                        ? "No recorded progress yet. A first research iteration is running now — it takes several minutes; reload to see it."
+                        : "No recorded progress yet.");
                 }
 
                 entries.forEach(formatEntry);
@@ -675,7 +677,9 @@
                         }
                         renderProgress(percent, comment, true);
                     }
-                    updateStatus(`Showing ${entriesContainer.children.length} updates for "${currentProblem}".`);
+                    updateStatus(payload.generating
+                        ? `Showing ${entriesContainer.children.length} updates for "${currentProblem}". Today's iteration is running now — it takes several minutes; reload to see it.`
+                        : `Showing ${entriesContainer.children.length} updates for "${currentProblem}".`);
                 } else if (!hasMore) {
                     updateStatus(`No results stored for "${currentProblem}" yet. Re-run later.`);
                 }

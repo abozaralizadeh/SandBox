@@ -42,9 +42,18 @@ repo only reads it. Never add account data or absolute amounts to the dashboard 
 
 1. Flask route checks Azure **Table Storage** keyed by flat date (`YYYYMMDD`, sometimes
    `YYYYMMDD_HH` or `YYYYMMDD_00_{lang}`; helpers in `utils.py`).
-2. Cache miss → generate: synchronously in-request (TomorrowNews, AIBlog, ComicBook), in a
-   background daemon thread (GenBox text/video/audio), or on `ensure_latest=true`
-   (AIOpenProblemSolver).
+2. Cache miss → generate: synchronously in-request (TomorrowNews, AIBlog, ComicBook) or in a
+   **background daemon thread** (GenBox text/video/audio, AIOpenProblemSolver).
+   **Anything that runs for minutes belongs in the thread.** AIOPS generated inline on
+   `ensure_latest=true` and its iterations measure 2-10.5 min in LangSmith; the reader's request
+   died long before that with `Failed to load progress: Server error (500)` — Azure App Service
+   drops a request at ~230s — while the work carried on server-side and the entry appeared
+   later. Every timed-out attempt then released the single-flight lock on its way out and the
+   next visitor started ANOTHER run: 11 overlapping iterations on 2026-09-07. It now starts a
+   daemon thread that owns the lock for the whole run and returns immediately with
+   `generating: true`, which the page shows as "running now — reload to see it".
+   ComicBook still has this shape (19-25 min pipelines) and hides it because the episode simply
+   appears on the next load; move it to a thread if its page ever needs to report progress.
 3. HTML larger than **32,000 chars** doesn't fit a table property — it is offloaded to Blob
    Storage and the table row keeps an `html_blob_name` pointer, hydrated on read. Preserve this
    in any storage change.
@@ -245,11 +254,19 @@ AIOpenProblemSolver kept running through the switch), while a directly-construct
   `COMICBOOK_IMAGE_ATTEMPTS` (default 3) drives the transient retry; it was effectively 1
   (no retries) once, and a single connection blip then tripped the run's 2-failure circuit
   breaker and rendered every remaining panel as a grey placeholder.
-- **The same containment applies to AIBlog's browser tools.** `create_react_agent` builds a
-  default `ToolNode` too, so a dead link (`Page.goto: net::ERR_ABORTED`, a 404'd arXiv paper)
-  ended the whole post — 20 lost blog runs across 15 days in LangSmith. It is now built as
-  `create_react_agent(llm, tools=ToolNode(tools, handle_tool_errors=...))`. Any new LangGraph
-  agent here needs that handler; the default one re-raises everything but `ToolInvocationError`.
+- **AIBlog's browser tools need the same containment — but NOT via `ToolNode`.** A dead link
+  (`Page.goto: net::ERR_ABORTED`, a 404'd arXiv paper) used to end the whole post, because
+  `create_react_agent`'s default ToolNode re-raises everything but `ToolInvocationError` — 20 lost
+  blog runs across 15 days in LangSmith. The obvious fix, passing
+  `tools=ToolNode(tools, handle_tool_errors=…)`, **breaks the app**: AIBlog's list contains the
+  hosted `{"type": "web_search"}` dict, which `create_react_agent` understands (it splits hosted
+  from executable tools) but `ToolNode` rejects with *"The first argument must be a string or a
+  callable"* — raised at CONSTRUCTION, so `/aiblogcontent` 500s with **no LangSmith trace at all**
+  (that signature — a dead subproject with zero runs, not failed ones — means the failure is
+  before the graph exists). It cost four days of posts in 2026-09. Containment is per tool
+  instead: `_resilient_tool()` wraps `invoke`/`ainvoke` so failures become text, and passes
+  dicts through untouched. TomorrowNews may use the ToolNode handler only because its ToolNode
+  gets executable tools alone, with the hosted dict going to `bind_tools`.
 - **An image failure must never kill a TomorrowNews edition.** `get_image_by_text` used to let
   the API's exception propagate, and LangGraph's `ToolNode` absorbs only `ToolInvocationError` —
   everything else is re-raised, failing the `tools` node, cancelling the sibling images
