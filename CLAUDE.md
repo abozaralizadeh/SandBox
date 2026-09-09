@@ -254,6 +254,25 @@ AIOpenProblemSolver kept running through the switch), while a directly-construct
   `COMICBOOK_IMAGE_ATTEMPTS` (default 3) drives the transient retry; it was effectively 1
   (no retries) once, and a single connection blip then tripped the run's 2-failure circuit
   breaker and rendered every remaining panel as a grey placeholder.
+- **Playwright is OPTIONAL — never let a missing browser end a run.** Azure App Service's Python
+  image stopped shipping Chromium's system libraries on 2026-09-08: `BrowserType.launch: Host
+  system is missing dependencies to run browsers` (libglib2.0-0, libnss3, …). The bundled
+  `_ensure_playwright()` runs `playwright install-deps`, which cannot fix it from inside the
+  running container (and would be lost on the next restart anyway). Because the launch happens
+  in `get_react_agent()` / `get_open_deep_search_agent()` **before the agent exists**, it took
+  down two subprojects at once: AIBlog 500'd on `/aiblogcontent` with no LangSmith trace, and
+  AIOPS's daily iteration failed inside its background thread — silently, since that thread
+  swallows exceptions. Both `browseweb.py` helpers now catch the launch failure and return
+  `([], noop_aclose)`, so a run continues with the hosted `web_search` tool and Tavily/DDG.
+  `startup.sh` now bootstraps the browser on every cold start (`playwright install-deps
+  chromium`, falling back to an explicit `apt-get install` of the library list, then
+  `playwright install chromium`) — in the BACKGROUND, because the site failed to start twice on
+  2026-09-08 and was briefly blocked for consecutive cold-start failures, so gunicorn must not
+  wait behind apt. Every step logs a `[playwright-setup]` marker: grep the container stream log
+  for it to see which path worked, since `install-deps` needs root and the fallback's output is
+  the only evidence of whether apt is usable in that container at all. Note the container
+  filesystem is ephemeral, so this reinstall happens on EVERY cold start — and until it
+  finishes, runs simply proceed search-only.
 - **AIBlog's browser tools need the same containment — but NOT via `ToolNode`.** A dead link
   (`Page.goto: net::ERR_ABORTED`, a 404'd arXiv paper) used to end the whole post, because
   `create_react_agent`'s default ToolNode re-raises everything but `ToolInvocationError` — 20 lost
@@ -263,7 +282,10 @@ AIOpenProblemSolver kept running through the switch), while a directly-construct
   from executable tools) but `ToolNode` rejects with *"The first argument must be a string or a
   callable"* — raised at CONSTRUCTION, so `/aiblogcontent` 500s with **no LangSmith trace at all**
   (that signature — a dead subproject with zero runs, not failed ones — means the failure is
-  before the graph exists). It cost four days of posts in 2026-09. Containment is per tool
+  before the graph exists). It cost the posts of 2026-09-05..07; from 09-08 the Playwright
+  failure above took over as the cause, which is why fixing this one alone did not bring
+  AIBlog back — the production traceback, not the diff, is what distinguished them.
+  Containment is per tool
   instead: `_resilient_tool()` wraps `invoke`/`ainvoke` so failures become text, and passes
   dicts through untouched. TomorrowNews may use the ToolNode handler only because its ToolNode
   gets executable tools alone, with the hosted dict going to `bind_tools`.
