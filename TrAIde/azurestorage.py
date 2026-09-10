@@ -26,6 +26,17 @@ container_name = os.getenv("traide_blob_name", "traide-dashboard")
 table_name = os.getenv("traide_table_name", "traidedashboard")
 
 PK_EQUITY = "equity"
+
+# Equity-index sanity band, mirroring the publisher's own guard in trAIde's dashboard_publisher.
+# The index compounds daily onto the previous close, so ONE bad point is permanent and every later
+# point carries it. The writer already refuses to publish such points, but this reader queries the
+# durable table DIRECTLY — and Azure history is never rewritten — so the corrupt rows are still there
+# and were being served straight to the chart. Live on 2026-09-10: days 20693-20695 held ~7.27e7
+# against a base of 100, which pinned the y-axis at [0, 8e7] and flattened four months of real
+# history into a line along zero with one spike. Filtering belongs in BOTH the writer and the reader:
+# a guard that only exists on the write path cannot clean data that predates it.
+INDEX_BASE = 100.0
+INDEX_SANITY_FACTOR = 1000.0     # a value outside base/1000 .. base*1000 is corruption, not return
 PK_DECISION = "decision"
 PK_TRADE = "trade"
 PK_PLAN = "plan"
@@ -91,20 +102,35 @@ def get_equity_series(start_day=None, end_day=None) -> list:
             filt += f" and RowKey le '{int(end_day):08d}'"
         rows = _table_client.query_entities(query_filter=filt, results_per_page=1000)
         out = []
+        dropped = 0
+        _lo, _hi = INDEX_BASE / INDEX_SANITY_FACTOR, INDEX_BASE * INDEX_SANITY_FACTOR
         for r in rows:
             try:
                 day = int(r["RowKey"])
             except (KeyError, ValueError):
                 continue
+            close = r.get("indexClose")
+            if close is not None:
+                try:
+                    close_f = float(close)
+                except (TypeError, ValueError):
+                    dropped += 1
+                    continue
+                if not (_lo <= close_f <= _hi):
+                    dropped += 1
+                    continue
             point = {
                 "day": day,
-                "indexClose": r.get("indexClose"),
+                "indexClose": close,
                 "drawdownPct": r.get("drawdownPct"),
             }
             if "dayRealizedPnl" in r:
                 point["dayRealizedPnl"] = r.get("dayRealizedPnl")
             out.append(point)
         out.sort(key=lambda p: p["day"])
+        if dropped:
+            print(f"[TrAIde] equity series: hid {dropped} corrupt point(s) outside "
+                  f"{_lo:g}..{_hi:g}; the underlying rows remain in the durable table.")
         return out
     except Exception as exc:
         print(f"[TrAIde] get_equity_series error: {exc}")
