@@ -1629,9 +1629,15 @@
             </div>`;
           }).join('') + '</div>';
         }
-        html += `<div class="edge-meta"><span>closes scored <b>${n}</b></span>`
+        html += `<div class="edge-meta"><span>your closes scored <b>${n}</b></span>`
               + (x.deltaRPerTrade != null ? `<span>per trade <b class="${cls(x.deltaRPerTrade)}">${fmtR(x.deltaRPerTrade)}</b></span>` : '')
               + '</div>';
+      }
+      const pr = (x.otherExits || {}).protection;
+      if (pr && pr.n) {
+        html += `<div class="edge-meta" style="margin-top:6px"><span>trailing-stop exits <b>${pr.n}</b></span>`
+              + `<span>vs letting the bracket run <b class="${cls(pr.deltaR)}">${fmtR(pr.deltaR)}</b></span>`
+              + `<span style="color:var(--text-3)">(the code's trail, not the model — not in the verdict)</span></div>`;
       }
       box.innerHTML = html;
     }
