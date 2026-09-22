@@ -1638,6 +1638,16 @@
         html += `<div class="edge-meta" style="margin-top:6px"><span>trailing-stop exits <b>${pr.n}</b></span>`
               + `<span>vs letting the bracket run <b class="${cls(pr.deltaR)}">${fmtR(pr.deltaR)}</b></span>`
               + `<span style="color:var(--text-3)">(the code's trail, not the model — not in the verdict)</span></div>`;
+        // Same record split by the entry's regime: the trail is expected to be negative in a trend and
+        // positive in chop. Only once both rows exist is a regime-adaptive trail justified.
+        const tbr = x.trailByRegime || {};
+        const keys = Object.keys(tbr);
+        if (keys.length) {
+          keys.sort((a, b) => (tbr[a].deltaR ?? 0) - (tbr[b].deltaR ?? 0));
+          html += `<div class="edge-meta" style="margin-top:4px"><span style="color:var(--text-3)">by regime at entry</span>`
+                + keys.map(k => `<span>${esc(k)} <b>${tbr[k].n}</b> <b class="${cls(tbr[k].deltaR)}">${fmtR(tbr[k].deltaR)}</b></span>`).join('')
+                + `</div>`;
+        }
       }
       box.innerHTML = html;
     }

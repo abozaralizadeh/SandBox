@@ -237,7 +237,14 @@ AIOpenProblemSolver kept running through the switch), while a directly-construct
   with `store=False`.
 
 ## Gotchas
-
+- **"My change isn't live" — check the deploy before the code.** A failed Deploy stage leaves
+  the old build serving happily, so the site looks healthy while every push is silently dropped.
+  Azure Pipelines posts its result to GitHub as check-runs, readable without any Azure access:
+  `curl https://api.github.com/repos/abozaralizadeh/SandBox/commits/<sha>/check-runs`. On
+  2026-09-19 Deploy began failing with `Resource 'genbox' doesn't exist` while Build passed: the
+  web app had left `anna_pocs_rg` (which is now empty), so the service connection
+  (`azureServiceConnectionId` in `azure-pipelines.yml`) could no longer see it. Two days of
+  commits, a Clarity tag among them, never reached production.
 - `sitecustomize.py` and the top of `main.py` both strip `/agents/python` from `sys.path` —
   Azure App Service ships outdated stdlib shims there that shadow modern libraries. Keep both.
 - `AIBlog/tools/searchinternet.py` requires `TAVILY_API_KEY` at import time.
