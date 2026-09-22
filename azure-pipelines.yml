@@ -8,7 +8,7 @@ trigger:
 
 variables:
   # Azure Resource Manager connection created during pipeline creation
-  azureServiceConnectionId: '6c062487-90bc-4892-b2d4-2c32f18cdc88'
+  azureServiceConnectionId: 'e16bc106-7828-4d4b-b99d-67adf53d59d8'
 
   # Web app name
   webAppName: 'genbox'
