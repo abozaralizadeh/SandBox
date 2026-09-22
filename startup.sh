@@ -1,5 +1,19 @@
 #!/bin/bash
-# App Service startup. Two jobs: bootstrap Playwright's browser, then serve.
+# App Service startup. Three jobs: keep the App Insights agent out of Python, bootstrap
+# Playwright's browser, then serve.
+#
+# With ApplicationInsightsAgent_EXTENSION_VERSION=~3, the platform PREPENDS /agents/python to
+# PYTHONPATH, and the agent's bootstrap runs at interpreter startup and imports its OWN, older
+# typing_extensions — before main.py exists. main.py's sys.path strip is therefore too late: the
+# stale module is already in sys.modules, and everything after it inherits it. Since openai-agents
+# pulls in mcp -> a recent anyio (`from typing_extensions import sentinel`), every worker then dies
+# at import with exit code 3. This took the site down on 2026-09-22; it had also failed every
+# agent-on start since at least 09-18 and only survived because Azure retried with the agent off.
+# Removing it here, before any Python runs, is exactly the configuration of every successful
+# start in that period.
+PYTHONPATH=$(printf '%s' "${PYTHONPATH:-}" | tr ':' '\n' | grep -v '/agents/python' | paste -sd: -)
+export PYTHONPATH
+echo "[startup] PYTHONPATH=${PYTHONPATH}"
 #
 # Chromium needs system libraries (libglib2.0-0, libnss3, libatk…) that are NOT guaranteed to
 # be in the App Service Python image, and the container filesystem is ephemeral — anything

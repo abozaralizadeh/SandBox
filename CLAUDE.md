@@ -245,8 +245,22 @@ AIOpenProblemSolver kept running through the switch), while a directly-construct
   web app had left `anna_pocs_rg` (which is now empty), so the service connection
   (`azureServiceConnectionId` in `azure-pipelines.yml`) could no longer see it. Two days of
   commits, a Clarity tag among them, never reached production.
-- `sitecustomize.py` and the top of `main.py` both strip `/agents/python` from `sys.path` —
-  Azure App Service ships outdated stdlib shims there that shadow modern libraries. Keep both.
+- **`/agents/python` must be stripped in `startup.sh`, not in Python.** It is the App Insights
+  agent (`ApplicationInsightsAgent_EXTENSION_VERSION=~3`): the platform prepends it to
+  `PYTHONPATH`, and its bootstrap imports its own older `typing_extensions` at interpreter startup.
+  `main.py`'s `sys.path` strip (and `sitecustomize.py`, which is shadowed by the agent's own) runs
+  too late — the stale module is already in `sys.modules`. Once `openai-agents` pulled in `mcp` → a
+  recent `anyio` (`from typing_extensions import sentinel`), every agent-on start died at import
+  with exit code 3. From 09-18 this was masked by Azure's fallback, which retries with App Insights
+  off after 2 failed starts — but if that retry ALSO fails it concludes "AppInsights was not the
+  cause" and re-enables it for good. On 2026-09-22 the retry landed while a second push was
+  re-extracting `wwwroot` (`startup.sh: not found`, exit 127), so the agent was re-enabled and the
+  site stayed down. Two lessons: the fix is the `PYTHONPATH` filter at the top of `startup.sh`
+  (reproduced locally with a stand-in agent dir: crash without it, clean gunicorn boot with it);
+  and don't push twice in a row while a site is failing to start — the overlapping deploy can
+  poison the platform's own recovery. The real traceback is in
+  `LogFiles/StartupLogs/*_failure.log` (Kudu `/api/vfs/`), NOT the `*_docker.log`, which only
+  holds platform status lines while app logging is off.
 - `AIBlog/tools/searchinternet.py` requires `TAVILY_API_KEY` at import time.
 - ComicBook panel prompts carry a reference stack built in priority order: character sheet →
   one mid-arc key panel → the last `COMICBOOK_RECENT_PANEL_REFS` (default 5) panels already drawn
