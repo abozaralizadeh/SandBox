@@ -707,10 +707,31 @@
       const x = points.map(p => dayToLabel(p.day));
       const idx = points.map(p => p.indexClose == null ? null : Number(p.indexClose));
       const dd = points.map(p => p.drawdownPct == null ? 0 : -Number(p.drawdownPct));
-      const last = idx.length ? idx[idx.length - 1] : INDEX_BASE;
-      const upColor = last >= INDEX_BASE ? '#00e6a8' : '#ff3b5c';
-      const realCount = idx.filter(v => v != null).length;
+      const real = idx.filter(v => v != null);
+      const last = real.length ? real[real.length - 1] : INDEX_BASE;
+      const first = real.length ? real[0] : INDEX_BASE;
+      // Colour and headline follow the range being VIEWED. Comparing to the all-time base painted a
+      // +12.6% week red just because the account is still below where it started months ago.
+      const periodRet = first ? (last / first - 1) * 100 : 0;
+      const up = periodRet >= 0;
+      const upColor = up ? '#00e6a8' : '#ff3b5c';
+      const realCount = real.length;
       const sparse = realCount < 2;   // a line needs >= 2 points — show the lone dot + a hint instead of a blank chart
+      // Vertical scale: never let the axis span less than 2% of the index. Autoscaling alone stretched a
+      // -0.35% day (the only two points in 1D, which is "yesterday's close -> now") across the whole
+      // chart so a wobble read as a crash. Display-only; the data is untouched.
+      const lo = real.length ? Math.min(...real) : INDEX_BASE, hi = real.length ? Math.max(...real) : INDEX_BASE;
+      const mid = (lo + hi) / 2, half = Math.max((hi - lo) / 2 * 1.12, mid * 0.01);
+      const yMin = mid - half, yMax = mid + half;
+      const yDec = (yMax - yMin) < 1 ? 2 : (yMax - yMin) < 8 ? 1 : 0;
+      const ddMin = Math.min(-1, ...dd.filter(v => v != null)) * 1.12;
+      const ddDec = ddMin > -5 ? 1 : 0;
+      const periodName = { day: '1D', week: '1W', month: '1M', all: 'ALL' }[currentPeriod] || '';
+      const badge = sparse ? [] : [{
+        type: 'text', left: 52, top: 22, silent: true, z: 10,
+        style: { text: `${periodName} ${up ? '+' : ''}${periodRet.toFixed(2)}%`, fill: upColor,
+                 fontFamily: 'JetBrains Mono', fontSize: 13, fontWeight: 700 }
+      }];
       equityChart.setOption({
         backgroundColor: 'transparent',
         graphic: sparse ? [{
@@ -718,15 +739,15 @@
           style: { text: realCount === 0 ? 'No equity history yet — appears after the first daily close'
                                           : 'Building history — the curve appears after the next daily close',
                    fill: 'rgba(138,160,180,0.6)', fontFamily: 'JetBrains Mono', fontSize: 11 }
-        }] : [],
+        }] : badge,
         grid: { left: 44, right: 50, top: 18, bottom: 26 },
         tooltip: { trigger: 'axis', backgroundColor: 'rgba(10,14,20,0.95)', borderColor: 'rgba(120,160,200,0.2)',
           textStyle: { color: '#e6edf3', fontFamily: 'JetBrains Mono', fontSize: 11 },
-          formatter: p => { const a = p[0]; const ret = (a.value - INDEX_BASE); return `${a.axisValue}<br/>index <b>${a.value == null ? '—' : a.value.toFixed(2)}</b><br/>return <b style="color:${ret>=0?'#00e6a8':'#ff3b5c'}">${ret>=0?'+':''}${ret.toFixed(2)}%</b>`; } },
+          formatter: p => { const a = p[0]; const ret = (a.value - INDEX_BASE); return `${a.axisValue}<br/>index <b>${a.value == null ? '—' : a.value.toFixed(2)}</b><br/>since start <b style="color:${ret>=0?'#00e6a8':'#ff3b5c'}">${ret>=0?'+':''}${ret.toFixed(2)}%</b>`; } },
         xAxis: { type: 'category', data: x, boundaryGap: false, ...AXIS },
         yAxis: [
-          { type: 'value', scale: true, ...AXIS, axisLabel: { ...AXIS.axisLabel, formatter: v => v.toFixed(0) } },
-          { type: 'value', position: 'right', max: 0, ...AXIS, splitLine: { show: false }, axisLabel: { ...AXIS.axisLabel, formatter: v => v.toFixed(0) + '%' } }
+          { type: 'value', min: yMin, max: yMax, ...AXIS, axisLabel: { ...AXIS.axisLabel, showMinLabel: false, showMaxLabel: false, formatter: v => v.toFixed(yDec) } },
+          { type: 'value', position: 'right', min: ddMin, max: 0, ...AXIS, splitLine: { show: false }, axisLabel: { ...AXIS.axisLabel, formatter: v => (v === 0 ? '0' : v.toFixed(ddDec)) + '%' } }
         ],
         series: [
           { name: 'drawdown', type: 'line', yAxisIndex: 1, data: dd, smooth: true, symbol: 'none',
@@ -736,13 +757,13 @@
             connectNulls: true, z: 3,
             lineStyle: { width: 2.4, color: upColor, shadowColor: upColor, shadowBlur: 14 },
             areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-              { offset: 0, color: last >= INDEX_BASE ? 'rgba(0,230,168,0.34)' : 'rgba(255,59,92,0.34)' },
+              { offset: 0, color: up ? 'rgba(0,230,168,0.34)' : 'rgba(255,59,92,0.34)' },
               { offset: 1, color: 'rgba(0,230,168,0.0)' }]) },
-            markLine: { silent: true, symbol: 'none', data: [{ yAxis: INDEX_BASE }],
+            markLine: { silent: true, symbol: 'none', data: (INDEX_BASE >= yMin && INDEX_BASE <= yMax) ? [{ yAxis: INDEX_BASE }] : [],
               lineStyle: { color: 'rgba(120,160,200,0.35)', type: 'dashed', width: 1 },
               label: { color: '#50637a', fontFamily: 'JetBrains Mono', fontSize: 9, formatter: 'base ' + INDEX_BASE } } }
         ]
-      });
+      }, { replaceMerge: ['graphic'] });   // replace, not merge: a stale badge/hint must not survive a range switch
     }
 
     function renderDonut(kpis) {
