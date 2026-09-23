@@ -144,7 +144,7 @@ retype it. Constraints that were learned the hard way; do not undo them:
   family, figure construction and physical process, computed LRU-style from arc history.
 - New style fields must be added to the explicit `select=[...]` in `get_recent_arc_summaries` or
   they come back empty with no error, silently breaking the rotation.
-- `COMICBOOK_PANEL_QUALITY` (default `high`) and `COMICBOOK_RESTYLE_ARC` (re-style a running arc
+- `COMICBOOK_PANEL_QUALITY` (default `high`; see *Image model capability* for `xhigh`/`max`) and `COMICBOOK_RESTYLE_ARC` (re-style a running arc
   today rather than waiting for the next arc boundary) are the two rollout dials.
 
 ## Handoffs on reasoning models
@@ -179,6 +179,34 @@ LangChain's `init_chat_model` strips temperature for these models on its own (wh
 AIOpenProblemSolver kept running through the switch), while a directly-constructed
 `AzureChatOpenAI(temperature=…)` (TomorrowNews) and the Agents SDK's `ModelSettings(temperature=…)`
 (GenBox's Producer) both send it and 400.
+
+## Image model capability
+
+`AZURE_OPENAI_MODEL_DALLE` is read by ComicBook, TomorrowNews and AIBlog. Measured on this
+resource on 2026-09-23 (gpt-image-2 vs gpt-image-2.5-sunburst, api-version 2025-04-01-preview):
+
+- **`xhigh`/`max` exist only on gpt-image-2.5**; gpt-image-2 answers *"does not support quality
+  'xhigh'"*. 2.5's OWN 400 for a bad value still lists only low/medium/high/auto — stale text, as
+  misleading as the temperature error. `_resolve_quality` (`ComicBook/tools/getimage.py`) passes
+  them through on 2.5 and falls back to `high` elsewhere; its old catch-all silently turned them
+  into `medium`, a step DOWN. The character sheet renders at `SHEET_QUALITY` (`agent_tools.py`):
+  `high`, or the panel tier when that is higher — the anchor must never be drawn below the
+  panels it anchors.
+- **The tiers were re-priced, not just extended.** Output tokens at 1024x1024 — gpt-image-2:
+  low 196 / medium 1,756 / high 7,024; 2.5: low 196 / medium 439 / high 1,756 / xhigh 3,122 /
+  max 7,024. Per-token rates are the same, so on 2.5 `high` costs what 2's `medium` did (~4x
+  cheaper, ~2x faster) and `max` costs what 2's `high` did. Fewer tokens is not proof of equal
+  fidelity — judge the tier by eye.
+- **TomorrowNews and AIBlog send no `size`/`quality` ON PURPOSE.** `auto` lets the model fit the
+  shape the prompt asks for: stored AIBlog banners range 1672x941 to 2172x724, TomorrowNews is
+  1536x1024. On realistic prompts both models' `auto` chose the same size and tier, so pinning
+  them would only break the banner shapes.
+- Both reject `webp` output (png/jpeg only) and 512x512 (*"below the current minimum pixel
+  budget"*); both return `b64_json` only; `response_format` is an unknown parameter. 2.5 also
+  supports transparent backgrounds and 2k/4k sizes. The edits endpoint still takes 16 references.
+- The 2.5 deployment 429'd repeatedly under light probing. ComicBook draws panels sequentially
+  with only `COMICBOOK_IMAGE_ATTEMPTS` (3) retries at 2s/4s/8s; raise it if episodes start
+  losing panels to placeholders.
 
 ## LangSmith tracing
 

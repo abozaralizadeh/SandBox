@@ -60,7 +60,15 @@ _MAX_CONTENT_BLOCKS = 3
 # Texture is where a style lives — impasto, halftone, canvas weave, moulding seam, newsprint
 # grain all collapse at medium into the same smooth surface — so panels now match the sheet.
 # Env-gated so it can be rolled back without a deploy if the cost/latency is not worth it.
-_PANEL_QUALITY = os.environ.get("COMICBOOK_PANEL_QUALITY", "high")
+# On gpt-image-2.5 "xhigh" and "max" are also valid (elsewhere they fall back to "high"). The
+# tiers were re-priced, not just extended: measured at 1024x1024, 2.5's "high" spends the tokens
+# 2's "medium" did (1,756) and 2.5's "max" what 2's "high" did (7,024) — so switching the model
+# alone makes "high" ~4x cheaper, and "max" is the tier that costs what panels cost before.
+_PANEL_QUALITY = os.environ.get("COMICBOOK_PANEL_QUALITY", "high").strip().lower()
+
+# The character sheet is reference #1 for every panel of the arc, so it must never be drawn
+# BELOW the panels it anchors: it stays at "high" unless the panels are raised past that.
+SHEET_QUALITY = _PANEL_QUALITY if _PANEL_QUALITY in ("xhigh", "max") else "high"
 
 # How many of THIS episode's already-drawn panels to show the model when drawing the next one.
 # Possible only because panels are generated sequentially, never in parallel.
@@ -415,7 +423,7 @@ def build_comic_tools(state: Dict[str, Any], target_date: datetime) -> Dict[str,
         card = load_style_card(state["arc"])
         prompt = compose_sheet_prompt(card, arc_chars)
         try:
-            url = await create_image(prompt, size="wide", quality="high")
+            url = await create_image(prompt, size="wide", quality=SHEET_QUALITY)
             logger.info("  -> Character sheet generated: %s", url[:120])
             if a:
                 update_arc_metadata(a["RowKey"], character_sheet_url=url)

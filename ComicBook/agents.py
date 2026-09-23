@@ -64,7 +64,7 @@ from ComicBook.style import (
     load_style_card,
     starved_families,
 )
-from ComicBook.tools.agent_tools import build_comic_tools
+from ComicBook.tools.agent_tools import SHEET_QUALITY, build_comic_tools
 from ComicBook.tools.getimage import create_image, create_image_with_references
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
@@ -1481,9 +1481,9 @@ def run_comic_pipeline(target_date: datetime) -> Dict[str, Any]:
                      arc.get("title", arc.get("RowKey", "")), len(refs))
         try:
             if refs:
-                url = await create_image_with_references(prompt, refs, "wide", "high")
+                url = await create_image_with_references(prompt, refs, "wide", SHEET_QUALITY)
             else:
-                url = await create_image(prompt, size="wide", quality="high")
+                url = await create_image(prompt, size="wide", quality=SHEET_QUALITY)
         except Exception as exc:
             logger.warning("Character-sheet backstop failed (%s) — arc stays without a sheet.",
                            str(exc)[:200])

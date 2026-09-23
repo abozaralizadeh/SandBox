@@ -232,7 +232,8 @@ sequenceDiagram
   panel → prior-episode anchor) via Azure OpenAI image editing. The reference stack is capped at
   **4** images: each reference also pulls the render toward its own look, so a deep stack
   averages panels toward the mean and flattens the texture the style lives in. Panels render at
-  `COMICBOOK_PANEL_QUALITY` (default `high`) for the same reason.
+  `COMICBOOK_PANEL_QUALITY` (default `high`; `xhigh`/`max` on gpt-image-2.5) for the same
+  reason, and the character sheet never renders below them (`SHEET_QUALITY`).
 - **Multi-language (blind native authors).** English is native. The **Reteller** is the
   **Localization Director**: it reads the English plan/script and distills a language-neutral
   **beat sheet** (per panel: what the art depicts, each speaker's intent/emotion, `must_land`

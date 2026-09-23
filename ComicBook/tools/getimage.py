@@ -118,16 +118,35 @@ def _resolve_size(size: str) -> str:
     return size_map.get(size, "1024x1024")
 
 
+# Quality tiers above "high" exist only on gpt-image-2.5. Measured on this resource
+# (2026-09-23): gpt-image-2.5-sunburst renders "xhigh" and "max", while gpt-image-2 rejects them
+# with a clear 400 ("does not support quality 'xhigh'"). Do not trust 2.5's OWN error text here:
+# its 400 for an invalid value still lists only 'low', 'medium', 'high' and 'auto'.
+_EXTENDED_QUALITY_MODELS = ("gpt-image-2.5",)
+
+
+def _supports_extended_quality(model: str) -> bool:
+    return any(prefix in (model or "").lower() for prefix in _EXTENDED_QUALITY_MODELS)
+
+
 def _resolve_quality(quality: str) -> str:
     """Map a shared quality level to the model-specific parameter value.
 
-    gpt-image-1 accepts: "low", "medium", "high"
-    dall-e-3     accepts: "standard", "hd"
+    gpt-image-2.5  accepts: "low", "medium", "high", "xhigh", "max", "auto"
+    gpt-image-1/2  accepts: "low", "medium", "high", "auto"
+    dall-e-3       accepts: "standard", "hd"
+
+    An extended tier asked of a model without it falls back to "high", never to the generic
+    "medium": the old catch-all turned COMICBOOK_PANEL_QUALITY=xhigh into medium — a visible
+    step DOWN from the "high" default, where texture collapses into one smooth surface.
     """
     model = _get_model()
+    q = (quality or "").strip().lower()
     if model == "dall-e-3":
-        return "hd" if quality == "high" else "standard"
-    return quality if quality in ("low", "medium", "high") else "medium"
+        return "hd" if q in ("high", "xhigh", "max") else "standard"
+    if q in ("xhigh", "max"):
+        return q if _supports_extended_quality(model) else "high"
+    return q if q in ("low", "medium", "high", "auto") else "medium"
 
 
 async def _download_image_bytes(url: str) -> Optional[bytes]:
