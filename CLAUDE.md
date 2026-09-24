@@ -161,7 +161,8 @@ handing-off agent emitted a message alongside its reasoning. `_strip_tools_keep_
 ## Model capability
 
 Reasoning-family deployments accept **only the default `temperature` of 1** and reject every
-other value with a 400 (production `AZURE_OPENAI_MODEL` is `gpt-5.6-luna`). The error text
+other value with a 400 (production `AZURE_OPENAI_MODEL` is `gpt-6-luna`, previously
+`gpt-5.6-luna`). The error text
 misleads twice over: it blames the parameter rather than the value, and it differs by surface —
 Responses says *"Unsupported parameter: 'temperature' is not supported with this model"*, chat
 completions says *"Unsupported value: 'temperature' does not support 0.8"*. Measured on
@@ -171,12 +172,21 @@ So a deliberate creative temperature must be **dropped**, not clamped — omitti
 exactly the 1 the model requires. `temperature_kwargs(value)` / `supports_custom_temperature()`
 in `llm_runtime.py` do that for the whole repo (ComicBook's `_model_settings` delegates to
 them); override with `LLM_MODEL_SUPPORTS_TEMPERATURE` or the older
-`COMICBOOK_MODEL_SUPPORTS_TEMPERATURE`. The prefix rule over-matches on purpose: `gpt-5.4`
-chat completions *does* accept 0.6-0.9, but dropping never 400s.
+`COMICBOOK_MODEL_SUPPORTS_TEMPERATURE`. **The rule is by generation — any `gpt-N` with N >= 5,
+plus o1/o3/o4 — never a list of names.** The old list (`gpt-5`, `o1`, `o3`, `o4`) held until
+production moved to `gpt-6-luna` on 2026-09-24; from 16:38 UTC every chat call in the app 400'd
+(TomorrowNews in all three languages, AIOPS, ComicBook), which looked like "image generation
+failed everywhere" because every image is drawn by an agent that now died first. Measured on
+`gpt-6-luna`: identical to 5.6 (1 or omitted succeeds on both surfaces, 0.7 fails on both). It
+over-matches on purpose: `gpt-5.4` chat completions *does* accept 0.6-0.9, but dropping never
+400s. GenBox's raw-HTTP decision call sends 0.75/0.9 to its own `OAIENDPOINT` deployment
+(`gpt-5.4`), which accepts them — repoint that URL at a reasoning model and it needs the guard
+too. AISMM's `supports_sampling` already matched `gpt-[5-9]` and was unaffected.
 
 Beware which client you are using — the guard is only needed where the value reaches the wire.
-LangChain's `init_chat_model` strips temperature for these models on its own (which is why
-AIOpenProblemSolver kept running through the switch), while a directly-constructed
+LangChain's `init_chat_model` strips temperature only for model names IT recognises — it knew
+gpt-5 (so AIOPS survived that switch) but not gpt-6, so AIOPS now routes through
+`temperature_kwargs` like everything else. A directly-constructed
 `AzureChatOpenAI(temperature=…)` (TomorrowNews) and the Agents SDK's `ModelSettings(temperature=…)`
 (GenBox's Producer) both send it and 400.
 

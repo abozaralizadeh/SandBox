@@ -125,7 +125,7 @@ def _strip_tools_keep_reasoning(data: HandoffInputData) -> HandoffInputData:
         input_items=_filter(getattr(data, "input_items", None)),
     )
 
-# Reasoning-family deployments (gpt-5.x, o1/o3/o4) reject `temperature` outright with a 400:
+# Reasoning-family deployments (gpt-5 and later, o1/o3/o4) reject `temperature` outright with a 400:
 #   "Unsupported parameter: 'temperature' is not supported with this model."
 # Every agent below sets a deliberate temperature (1.2 for the Director's variety, 0.1-0.3 for
 # the structural stages), so on such a deployment the whole pipeline 400s on its first turn.

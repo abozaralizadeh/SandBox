@@ -10,7 +10,7 @@ except ImportError as exc:  # pragma: no cover - runtime guard
         "deepagents package is required for the Open Problem Solver agent."
     ) from exc
 
-from llm_runtime import STATELESS_CHAT_KWARGS
+from llm_runtime import STATELESS_CHAT_KWARGS, temperature_kwargs
 from AIOpenProblemSolver.tools.browseweb import get_browse_web_tools
 from AIOpenProblemSolver.tools.mathtools import python_math_sandbox, symbolic_calculator
 from AIOpenProblemSolver.tools.searchinternet import (
@@ -33,7 +33,9 @@ async def get_open_deep_search_agent():
         model=os.environ["AZURE_OPENAI_MODEL"],
         model_provider="azure_openai",
         api_version=os.environ["AZURE_OPENAI_API_VERSION"],
-        temperature=float(os.getenv("AIOPS_LLM_TEMPERATURE", "0.8")),
+        # Through the shared guard, not LangChain's own stripping: that only covers model names
+        # LangChain recognises, and it did not recognise gpt-6-luna (400 on every run, 09-24).
+        **temperature_kwargs(float(os.getenv("AIOPS_LLM_TEMPERATURE", "0.8"))),
         max_tokens=None,
         timeout=None,
         max_retries=3,

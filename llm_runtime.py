@@ -27,6 +27,7 @@ Applied through `RunConfig.model_settings`, which merges over each agent's own s
 `_model_settings()` are untouched.
 """
 import os
+import re
 
 from agents import ModelSettings, RunConfig
 
@@ -46,7 +47,7 @@ STATELESS_CHAT_KWARGS = {"store": False}
 # ---------------------------------------------------------------------------
 # Temperature support
 # ---------------------------------------------------------------------------
-# Reasoning-family deployments (gpt-5.x, o1/o3/o4) accept ONLY the default temperature of 1
+# Reasoning-family deployments (gpt-5 and later, o1/o3/o4) accept ONLY the default temperature of 1
 # and reject every other value. The error text is misleading -- it blames the parameter, not
 # the value -- and differs by surface, which is why this looks like two unrelated bugs:
 #
@@ -58,13 +59,27 @@ STATELESS_CHAT_KWARGS = {"store": False}
 # it is exactly equivalent to sending the 1 the model insists on. Reasoning deployments expose
 # `reasoning.effort` instead as the knob that actually varies output.
 #
-# Note LangChain's `init_chat_model` already strips temperature for these models (which is why
-# AIOpenProblemSolver kept working), but a directly-constructed `AzureChatOpenAI(temperature=...)`
-# does not, and neither does the Agents SDK's `ModelSettings(temperature=...)`.
-# The prefix rule is deliberately conservative: gpt-5.4 chat completions was measured to
-# ACCEPT 0.6-0.9, while gpt-5.6-luna rejects them, so "gpt-5" over-matches. Erring toward
+# Do NOT rely on LangChain's `init_chat_model` to strip it: it does so only for model names it
+# recognises. It knew gpt-5, which is why AIOpenProblemSolver survived the switch to
+# gpt-5.6-luna — and it did not know gpt-6, so on 2026-09-24 AIOPS 400'd along with everything
+# else. A directly-constructed `AzureChatOpenAI(temperature=...)` and the Agents SDK's
+# `ModelSettings(temperature=...)` never strip it at all.
+#
+# The rule is by GENERATION, not a list of names: the previous list ("gpt-5", "o1", "o3", "o4")
+# was correct until production moved to gpt-6-luna, and then every chat call in the app 400'd
+# at once (measured on gpt-6-luna: identical to 5.6 — 1 or omitted succeeds on both surfaces,
+# 0.7 fails on both). Any gpt-N with N >= 5 is treated as reasoning. It deliberately
+# over-matches: gpt-5.4 chat completions was measured to ACCEPT 0.6-0.9, but erring toward
 # dropping never errors; set LLM_MODEL_SUPPORTS_TEMPERATURE=true for a known-good deployment.
-_TEMPERATURE_UNSUPPORTED_PREFIXES = ("gpt-5", "o1", "o3", "o4")
+_O_SERIES_PREFIXES = ("o1", "o3", "o4")
+_GPT_GENERATION = re.compile(r"^gpt-(\d+)")
+
+
+def _is_reasoning_family(name: str) -> bool:
+    if name.startswith(_O_SERIES_PREFIXES):
+        return True
+    match = _GPT_GENERATION.match(name)
+    return bool(match) and int(match.group(1)) >= 5
 
 
 def supports_custom_temperature(model_name: str = None) -> bool:
@@ -78,7 +93,7 @@ def supports_custom_temperature(model_name: str = None) -> bool:
         return False
     name = (model_name if model_name is not None else os.environ.get("AZURE_OPENAI_MODEL", ""))
     name = (name or "").strip().strip('"').lower()
-    return not name.startswith(_TEMPERATURE_UNSUPPORTED_PREFIXES)
+    return not _is_reasoning_family(name)
 
 
 def temperature_kwargs(value: float, model_name: str = None) -> dict:
