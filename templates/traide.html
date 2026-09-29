@@ -183,6 +183,7 @@
     .tag.futures { color: var(--amber); background: rgba(255,176,32,0.10); }
     /* leverage chip: a ratio (e.g. 2×) — never a size; lower-case so the × reads naturally */
     .tag.lev { color: var(--violet); background: rgba(167,139,250,0.12); text-transform: none; }
+    .a-action + .tag.lev { margin-left: 4px; }
 
     /* decision feed (ticker) */
     .feed { max-height: 420px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
@@ -820,6 +821,8 @@
             let s = `${esc(t.symbol||'')}<br/>${win ? '<b style="color:#00e6a8">WIN</b>' : '<b style="color:#ff3b5c">LOSS</b>'}`;
             if (hasUsd && typeof t.pnl === 'number') s += ` · ${Number(t.pnl).toFixed(2)}`;
             else if (typeof t.roePct === 'number') s += ` · ROE ${t.roePct >= 0 ? '+' : ''}${Number(t.roePct).toFixed(2)}%`;
+            // ROE is price return × leverage, so show the leverage it was earned at.
+            if (fmtLev(t.leverage)) s += ` <span style="color:#a78bfa">@ ${fmtLev(t.leverage)}</span>`;
             if (t.closeType) s += `<br/><span style="color:#8aa0b4">${esc(String(t.closeType).replace(/_/g,' ').toLowerCase())}</span>`;
             s += `<br/><span style="color:#50637a">${relTime(t.ts)}</span>`;
             return s;
@@ -1167,7 +1170,7 @@
             <div class="conf"><span style="width:${(conf*100).toFixed(0)}%;background:${confColor}"></span></div>
           </div>
           <div class="a-reason">
-            <span class="a-action ac-${k}">${esc(d.action||'')}</span>
+            <span class="a-action ac-${k}">${esc(d.action||'')}</span>${levTag(d.leverage)}
             ${d.paper ? '<span class="a-action" style="color:var(--cyan);background:rgba(45,212,255,0.1)">paper</span>' : ''}
             <div style="margin-top:5px">${esc(d.reason||'')}</div>
           </div>

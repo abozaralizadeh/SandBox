@@ -36,7 +36,7 @@ The 1-hour gunicorn timeout is deliberate — it matches the ComicBook generatio
 `TrAIde/` contains **no LLM code**. The producing agents live in the separate repo at
 `/Users/abozar/Documents/Projects/trAIde`; its `dashboard_publisher.py` writes a sanitized,
 privacy-safe projection (indexed equity starting at 100, no dollar amounts) to Azure, and this
-repo only reads it. Never add account data or absolute amounts to the dashboard payload. Leverage arrives as ratios only (per-position/order/closed `leverage`, top-level `leverage` block: `exposureX` = position value ÷ account value, `riskPerTradePct`, `maxEntryLeverage`, …) and renders as the Leverage KPI tile and the violet `2×` chips in `templates/traide.html`; a payload without it must still render (the chips and tile simply stay empty/`—`).
+repo only reads it. Never add account data or absolute amounts to the dashboard payload. Leverage arrives as ratios only (per-position/order/closed `leverage`, top-level `leverage` block: `exposureX` = position value ÷ account value, `riskPerTradePct`, `maxEntryLeverage`, …) and renders as the Leverage KPI tile, the violet `2×` chips (open positions, resting orders, recently closed, decision feed) and the `@ 3×` suffix on the trade-outcome tooltip (ROE is price return × leverage) in `templates/traide.html`; a payload without it must still render (the chips and tile simply stay empty/`—`).
 
 ## Core architecture pattern (all generators)
 
