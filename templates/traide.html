@@ -208,6 +208,7 @@
     .dr-row .dr-sub { display: block; color: var(--text-3); font-size: 0.62rem; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .dr-row .o-placed { color: var(--up); } .dr-row .o-refused { color: var(--amber); } .dr-row .o-error { color: var(--down); }
     .dr-row .o-shadow { color: var(--cyan); } .dr-row .o-stand_aside { color: var(--text-3); }
+    .dr-row .o-closed, .dr-row .o-protected, .dr-row .o-extended { color: var(--up); } .dr-row .o-held { color: var(--text-2); }
     .dr-probs { display: flex; height: 4px; border-radius: 2px; overflow: hidden; margin-top: 4px; background: rgba(255,255,255,0.06); }
     .dr-probs i { display: block; height: 100%; } .dr-probs .pl { background: var(--up); } .dr-probs .ps { background: var(--down); } .dr-probs .pa { background: rgba(160,180,200,0.35); }
     .dr-row .dr-lbl { display: none; color: var(--text-3); margin-right: 6px; }
@@ -1759,6 +1760,9 @@
       if (st) {
         const oc = st.outcomes || {};
         const bits = ['placed', 'shadow', 'refused', 'stand_aside', 'error'].filter(k => oc[k]).map(k => `${k.replace('_', ' ')} <b>${oc[k]}</b>`);
+        const mg = st.managed || {};
+        const mbits = Object.keys(mg).map(k => `${esc(k)} <b>${mg[k]}</b>`);
+        if (mbits.length) bits.push('own positions: ' + mbits.join(', '));
         const age = Math.max(0, Math.round((Date.now() / 1000 - st.ts) / 60));
         html += st.state === 'ok'
           ? `<div class="dr-status">last pass <b>${hhmm(st.ts)} UTC</b> (${age} min ago) · asked <b>${st.asked}</b>${bits.length ? ' · ' + bits.join(' · ') : ''}`
@@ -1778,6 +1782,7 @@
           <div class="frow"><span>t</span><b>${t.tStat != null ? Number(t.tStat).toFixed(2) : '—'}</b></div>
           <div class="frow"><span>Closes · win rate</span><b>${t.closes || 0} · ${t.winRate != null ? (t.winRate * 100).toFixed(0) + '%' : '—'}</b></div>
           <div class="frow"><span>Avg per close</span><b class="${cls(t.avgR)}">${fmtR(t.avgR)}</b></div>
+          <div class="frow"><span>Own early closes vs exit rules</span><b class="${cls((t.exits || {}).deltaR)}">${(t.exits && t.exits.n) ? fmtR(t.exits.deltaR) + ' (' + t.exits.n + ')' : '—'}</b></div>
         </div>`;
       };
       html += '<div class="fam-grid">' + cell('jev', 'Jev') + cell('llm', 'LLM agent') + '</div>';
@@ -1796,12 +1801,29 @@
         <div class="dr-hint">Each call's price move in the direction it chose, after round-trip cost, over the same window for both traders
         (overlapping calls on one coin count once). "Right way" = share of calls the market moved toward.</div>`;
 
+      // Does stated confidence mean anything? Bands of the confidence each trader stated vs what happened in 1h.
+      const cal = n => ((tr[n] || {}).calibration || []);
+      const bands = cal('jev').map(r => r.band);
+      if (bands.length && (cal('jev').some(r => r.n) || cal('llm').some(r => r.n))) {
+        const ccell = (n, band) => {
+          const r = cal(n).find(x => x.band === band);
+          return (!r || !r.n) ? '<td class="grp">—</td><td>—</td>'
+            : `<td class="grp">${r.n}</td><td>${r.rightWay != null ? (r.rightWay * 100).toFixed(0) + '%' : '—'}</td>`;
+        };
+        html += `<table class="dr-hz"><thead>
+            <tr><th></th><th colspan="2" class="grp" style="text-align:center">Jev</th><th colspan="2" class="grp" style="text-align:center">LLM agent</th></tr>
+            <tr><th>stated confidence</th><th class="grp">calls</th><th>right way (1h)</th><th class="grp">calls</th><th>right way (1h)</th></tr>
+          </thead><tbody>` + bands.map(b => `<tr><td>${esc(b)}</td>${ccell('jev', b)}${ccell('llm', b)}</tr>`).join('') + `</tbody></table>
+          <div class="dr-hint">Calibration: if confidence means something, the right-way share climbs down the table.</div>`;
+      }
+
       const oc = dr.outcomes || {}, ag = dr.agreement || {};
       const agN = (ag.agree || 0) + (ag.disagree || 0);
       html += `<div class="edge-meta">`
             + ['placed', 'shadow', 'refused', 'stand_aside', 'error'].filter(k => oc[k]).map(k => `<span>${esc(k.replace('_', ' '))} <b>${oc[k]}</b></span>`).join('')
             + (agN ? `<span>same side as the LLM <b>${ag.agree || 0}/${agN}</b></span>` : '')
             + (dr.medianLatencyMs != null ? `<span>median answer <b>${dr.medianLatencyMs} ms</b></span>` : '')
+            + (dr.orderStability ? `<span title="each direction question is asked in 3 option orders and averaged">option-order sensitivity <b>±${Number(dr.orderStability.medianSpread).toFixed(2)}</b></span>` : '')
             + (dr.since ? `<span style="color:var(--text-3)">since ${esc(new Date(dr.since * 1000).toISOString().slice(0, 16).replace('T', ' '))} UTC</span>` : '')
             + `</div>`;
 
@@ -1813,6 +1835,22 @@
           : ['15m', '60m', '240m'].map(h => f[h] == null ? `<span class="pend">…</span>` : `<span class="${cls(f[h])}">${fmtPct(f[h], 2)}</span>`).join('');
         html += '<div class="dr-list"><div class="dr-row dr-head"><span>UTC</span><span>coin</span><span>Jev</span><span>LLM then</span><span>plan → what happened</span><span>moved its way 15m · 1h · 4h</span></div>' + rows.map(r => {
           const p = r.probabilities || {};
+          if (r.kind === 'manage') {
+            // Jev looking after its OWN open position: where it stands, what it chose, what code did.
+            const pct = v => Math.max(0, Math.min(100, (Number(v) || 0) * 100)).toFixed(0);
+            const mbar = `<div class="dr-probs" title="hold ${pct(p.hold)}% · protect ${pct(p.protect)}% · extend ${pct(p.extend)}% · close ${pct(p.close)}%"><i class="pa" style="width:${pct(p.hold)}%"></i><i class="pl" style="width:${pct(p.protect)}%"></i><i style="width:${pct(p.extend)}%;background:var(--cyan)"></i><i class="ps" style="width:${pct(p.close)}%"></i></div>`;
+            const o = r.outcome || '';
+            const where = [r.side, r.currentR != null ? 'now ' + fmtR(r.currentR) : null, r.peakR != null ? 'best ' + fmtR(r.peakR) : null].filter(Boolean).join(' · ');
+            const sub = [r.detail, r.thesisIntact != null ? 'thesis intact ' + Number(r.thesisIntact).toFixed(2) : null].filter(Boolean).join(' · ');
+            return `<div class="dr-row">
+              <span class="dr-t">${esc(hhmm(r.ts))}</span>
+              <span class="sym-cell">${coinIcon(r.symbol, 14)}${esc((r.symbol || '').replace('-USDT', ''))}</span>
+              <span><span class="tag jev">MANAGE</span> <b>${esc(r.action || '—')}</b>${r.confidence != null ? ' ' + Number(r.confidence).toFixed(2) : ''}${mbar}</span>
+              <span class="dr-llm"><span class="dr-lbl">position</span>${esc(where)}</span>
+              <span class="dr-o" title="${esc([o, sub].filter(Boolean).join(' · '))}"><span class="o-${esc(o)}">${esc(o)}</span>${sub ? `<span class="dr-sub">${esc(sub)}</span>` : ''}</span>
+              <span class="dr-fwd"><span class="pend">its own position</span></span>
+            </div>`;
+          }
           const pct = v => Math.max(0, Math.min(100, (Number(v) || 0) * 100)).toFixed(0);
           const dir = r.direction === 'long' || r.direction === 'short'
             ? `<span class="tag ${r.direction}">${esc(r.direction)}</span> <b>${r.confidence != null ? Number(r.confidence).toFixed(2) : ''}</b>`
@@ -1823,7 +1861,8 @@
           const plan = (r.direction === 'long' || r.direction === 'short')
             ? [FAM_LABEL[r.setupFamily] || r.setupFamily, r.entryKind && r.entryKind.replace('_', ' '), r.targetNetR != null ? r.targetNetR + 'R target' : null, r.stopAtr != null ? 'stop ' + r.stopAtr + '×ATR' : null].filter(Boolean).join(' · ')
             : '';
-          const why = [r.detail, r.repeat ? 'repeat — not stored again' : (r.recorded ? 'scored' : null), r.stake ? 'stake ' + r.stake : null, r.heldBy ? r.heldBy + ' holds it' : null].filter(Boolean).join(' · ');
+          const res = r.result ? `trade closed ${fmtR(r.result.realizedR)}${r.result.closeType ? ' (' + String(r.result.closeType).toLowerCase().replace('_', ' ') + ')' : ''}` : null;
+          const why = [res, r.detail, r.repeat ? 'repeat — not stored again' : (r.recorded ? 'scored' : null), r.stake ? 'stake ' + r.stake : null, r.heldBy ? r.heldBy + ' holds it' : null].filter(Boolean).join(' · ');
           return `<div class="dr-row">
             <span class="dr-t">${esc(hhmm(r.ts))}</span>
             <span class="sym-cell">${coinIcon(r.symbol, 14)}${esc((r.symbol || '').replace('-USDT', ''))}</span>
