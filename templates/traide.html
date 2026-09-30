@@ -186,14 +186,39 @@
     .a-action + .tag.lev { margin-left: 4px; }
     /* dual-run chip: a row opened by Jev (typesafe.ai), the second trader; LLM rows carry no chip */
     .tag.jev { color: var(--cyan); background: rgba(45,212,255,0.14); margin-left: 4px; }
-    .dr-list { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
-    .dr-row { display: grid; grid-template-columns: 64px minmax(70px, 1fr) minmax(90px, 1.2fr) minmax(0, 2fr); gap: 10px;
-      align-items: center; font-family: var(--mono); font-size: 0.72rem; padding: 6px 10px;
+    .dr-status { font-family: var(--mono); font-size: 0.72rem; color: var(--text-2); margin-top: 10px;
+      padding: 8px 12px; border-radius: 8px; background: var(--s2); border: 1px solid var(--border); }
+    .dr-status.s-idle { color: var(--amber); } .dr-status.s-error { color: var(--down); }
+    .dr-status b { color: var(--text); }
+    .dr-hz { width: 100%; border-collapse: collapse; margin-top: 12px; font-family: var(--mono); font-size: 0.72rem; }
+    .dr-hz th { color: var(--text-3); font-weight: 500; text-align: right; padding: 4px 8px; font-size: 0.64rem;
+      text-transform: uppercase; letter-spacing: 0.5px; }
+    .dr-hz th:first-child, .dr-hz td:first-child { text-align: left; }
+    .dr-hz td { text-align: right; padding: 5px 8px; border-top: 1px solid var(--border); color: var(--text-2); }
+    .dr-hz td.grp { border-left: 1px solid var(--border); }
+    .dr-hint { font-family: var(--mono); font-size: 0.64rem; color: var(--text-3); margin-top: 6px; line-height: 1.5; }
+    .dr-list { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; max-height: 60vh; overflow-y: auto; }
+    .dr-row { display: grid; grid-template-columns: 48px minmax(64px, 0.8fr) minmax(120px, 1.3fr) minmax(90px, 1fr) minmax(0, 2fr) minmax(150px, 1.2fr);
+      gap: 10px; align-items: center; font-family: var(--mono); font-size: 0.7rem; padding: 7px 10px;
       background: var(--s2); border: 1px solid var(--border); border-radius: 8px; }
+    .dr-row.dr-head { background: none; border: 0; padding: 0 10px; color: var(--text-3); font-size: 0.6rem;
+      text-transform: uppercase; letter-spacing: 0.5px; }
     .dr-row .dr-t { color: var(--text-3); }
     .dr-row .dr-o { color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .dr-row .dr-sub { display: block; color: var(--text-3); font-size: 0.62rem; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .dr-row .o-placed { color: var(--up); } .dr-row .o-refused { color: var(--amber); } .dr-row .o-error { color: var(--down); }
-    @media (max-width: 600px) { .dr-row { grid-template-columns: 52px 1fr 1fr; } .dr-row .dr-o { grid-column: 1 / -1; } }
+    .dr-row .o-shadow { color: var(--cyan); } .dr-row .o-stand_aside { color: var(--text-3); }
+    .dr-probs { display: flex; height: 4px; border-radius: 2px; overflow: hidden; margin-top: 4px; background: rgba(255,255,255,0.06); }
+    .dr-probs i { display: block; height: 100%; } .dr-probs .pl { background: var(--up); } .dr-probs .ps { background: var(--down); } .dr-probs .pa { background: rgba(160,180,200,0.35); }
+    .dr-row .dr-lbl { display: none; color: var(--text-3); margin-right: 6px; }
+    .dr-fwd { display: flex; gap: 8px; } .dr-fwd span { min-width: 44px; text-align: right; } .dr-fwd .pend { color: var(--text-3); }
+    @media (max-width: 900px) {
+      .dr-row { grid-template-columns: 44px 1fr 1fr; }
+      .dr-row .dr-llm, .dr-row .dr-o, .dr-row .dr-fwd { grid-column: 1 / -1; }
+      .dr-row .dr-lbl { display: inline; }
+      .dr-row.dr-head { display: none; }
+      .dr-hz { font-size: 0.66rem; } .dr-hz th, .dr-hz td { padding: 4px 4px; }
+    }
 
     /* decision feed (ticker) */
     .feed { max-height: 420px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
@@ -680,6 +705,7 @@
     function cls(v) { return v > 0 ? 'up' : (v < 0 ? 'down' : 'flat'); }
     // R-multiples: a ratio to the trade's own risk, always signed so +/- reads at a glance.
     function fmtR(v) {
+      if (v == null) return '—';      // Number(null) is 0: a missing value must not read as +0.00R
       const n = Number(v);
       return Number.isFinite(n) ? `${n >= 0 ? '+' : ''}${n.toFixed(2)}R` : '—';
     }
@@ -1721,11 +1747,28 @@
       if (!dr || (dr.mode === 'off' && !dr.traders)) { panel.style.display = 'none'; return; }
       panel.style.display = '';
       const tr = dr.traders || {};
-      const modeText = { live: 'live — Jev trades trial-size real entries', shadow: 'shadow — Jev\'s calls are scored, no orders', off: 'off' }[dr.mode] || dr.mode;
+      const hhmm = ts => ts ? new Date(ts * 1000).toISOString().slice(11, 16) : '';
+      const modeText = { live: 'live — Jev places trial-size real entries through the same gates', shadow: 'shadow — every Jev call runs the full gate chain and is scored, no orders', off: 'off' }[dr.mode] || dr.mode;
       let html = `<div class="edge-verdict">
           <span class="badge ${dr.mode === 'live' ? 'v-edge' : 'v-wait'}">${esc(dr.mode || 'off')}</span>
           <span class="vtext">${esc(modeText)}${dr.model ? ` · model <b>${esc(dr.model)}</b>` : ''}</span>
         </div>`;
+
+      // Health of the most recent pass — the "is it doing anything?" line.
+      const st = dr.status;
+      if (st) {
+        const oc = st.outcomes || {};
+        const bits = ['placed', 'shadow', 'refused', 'stand_aside', 'error'].filter(k => oc[k]).map(k => `${k.replace('_', ' ')} <b>${oc[k]}</b>`);
+        const age = Math.max(0, Math.round((Date.now() / 1000 - st.ts) / 60));
+        html += st.state === 'ok'
+          ? `<div class="dr-status">last pass <b>${hhmm(st.ts)} UTC</b> (${age} min ago) · asked <b>${st.asked}</b>${bits.length ? ' · ' + bits.join(' · ') : ''}`
+            + `${st.medianLatencyMs != null ? ` · <b>${st.medianLatencyMs} ms</b>/answer` : ''}${st.resolvedModel ? ` · ${esc(st.resolvedModel)}` : ''}${st.traced ? ' · traced' : ''}</div>`
+          : `<div class="dr-status s-${esc(st.state)}">${st.state === 'idle' ? 'idle' : 'error'} since ${hhmm(st.ts)} UTC — ${esc(st.reason || 'unknown')}</div>`;
+      } else {
+        html += `<div class="dr-status s-idle">no pass yet — Jev runs right after each trading-agent run</div>`;
+      }
+
+      // The two traders side by side.
       const cell = (name, label) => {
         const t = tr[name] || {};
         return `<div class="fam">
@@ -1737,7 +1780,22 @@
           <div class="frow"><span>Avg per close</span><b class="${cls(t.avgR)}">${fmtR(t.avgR)}</b></div>
         </div>`;
       };
-      html += '<div class="fam-grid">' + cell('llm', 'LLM agent') + cell('jev', 'Jev') + '</div>';
+      html += '<div class="fam-grid">' + cell('jev', 'Jev') + cell('llm', 'LLM agent') + '</div>';
+
+      // Every horizon, like for like: how often the call pointed the right way and what it made after cost.
+      const hz = ['15m', '60m', '240m'];
+      const hcell = (name, h) => {
+        const r = ((tr[name] || {}).byHorizon || {})[h];
+        if (!r || !r.n) return '<td class="grp">—</td><td>—</td><td>—</td>';
+        return `<td class="grp">${r.n}</td><td>${r.hitRate != null ? (r.hitRate * 100).toFixed(0) + '%' : '—'}</td><td class="${cls(r.netPct)}">${fmtPct(r.netPct, 3)}</td>`;
+      };
+      html += `<table class="dr-hz"><thead>
+          <tr><th></th><th colspan="3" class="grp" style="text-align:center">Jev</th><th colspan="3" class="grp" style="text-align:center">LLM agent</th></tr>
+          <tr><th>after</th><th class="grp">calls</th><th>right way</th><th>net</th><th class="grp">calls</th><th>right way</th><th>net</th></tr>
+        </thead><tbody>` + hz.map(h => `<tr><td>${h}</td>${hcell('jev', h)}${hcell('llm', h)}</tr>`).join('') + `</tbody></table>
+        <div class="dr-hint">Each call's price move in the direction it chose, after round-trip cost, over the same window for both traders
+        (overlapping calls on one coin count once). "Right way" = share of calls the market moved toward.</div>`;
+
       const oc = dr.outcomes || {}, ag = dr.agreement || {};
       const agN = (ag.agree || 0) + (ag.disagree || 0);
       html += `<div class="edge-meta">`
@@ -1746,20 +1804,33 @@
             + (dr.medianLatencyMs != null ? `<span>median answer <b>${dr.medianLatencyMs} ms</b></span>` : '')
             + (dr.since ? `<span style="color:var(--text-3)">since ${esc(new Date(dr.since * 1000).toISOString().slice(0, 16).replace('T', ' '))} UTC</span>` : '')
             + `</div>`;
-      const rows = (dr.recent || []).slice(0, 12);
+
+      // Every recent answer: what Jev said, what the LLM said at the same time, the plan code built, what the
+      // order path did, and how the market answered.
+      const rows = dr.recent || [];
       if (rows.length) {
-        html += '<div class="dr-list">' + rows.map(r => {
-          const t = r.ts ? new Date(r.ts * 1000).toISOString().slice(11, 16) : '';
+        const fwd = f => !f ? '<span class="pend">—</span>'
+          : ['15m', '60m', '240m'].map(h => f[h] == null ? `<span class="pend">…</span>` : `<span class="${cls(f[h])}">${fmtPct(f[h], 2)}</span>`).join('');
+        html += '<div class="dr-list"><div class="dr-row dr-head"><span>UTC</span><span>coin</span><span>Jev</span><span>LLM then</span><span>plan → what happened</span><span>moved its way 15m · 1h · 4h</span></div>' + rows.map(r => {
+          const p = r.probabilities || {};
+          const pct = v => Math.max(0, Math.min(100, (Number(v) || 0) * 100)).toFixed(0);
           const dir = r.direction === 'long' || r.direction === 'short'
             ? `<span class="tag ${r.direction}">${esc(r.direction)}</span> <b>${r.confidence != null ? Number(r.confidence).toFixed(2) : ''}</b>`
-            : `<span style="color:var(--text-3)">${esc((r.direction || '—').replace('_', ' '))}</span>`;
+            : `<span style="color:var(--text-3)">${esc((r.direction || '—').replace('_', ' '))}${r.confidence != null ? ' ' + Number(r.confidence).toFixed(2) : ''}</span>`;
+          const bar = `<div class="dr-probs" title="P(long) ${pct(p.long)}% · P(short) ${pct(p.short)}% · P(stand aside) ${pct(p.stand_aside)}%"><i class="pl" style="width:${pct(p.long)}%"></i><i class="ps" style="width:${pct(p.short)}%"></i><i class="pa" style="width:${pct(p.stand_aside)}%"></i></div>`;
+          const llm = r.llm ? `<span class="tag ${r.llm.side}">${esc(r.llm.side)}</span>${r.llm.confidence != null ? ' ' + Number(r.llm.confidence).toFixed(2) : ''}${r.llm.side === r.direction ? ' ✓' : (r.direction === 'long' || r.direction === 'short' ? ' ✗' : '')}` : '<span style="color:var(--text-3)">no call</span>';
           const o = r.outcome || '';
-          const what = [FAM_LABEL[r.setupFamily] || r.setupFamily, r.entryKind && r.entryKind.replace('_', ' '), r.targetNetR != null ? r.targetNetR + 'R' : null].filter(Boolean).join(' · ');
+          const plan = (r.direction === 'long' || r.direction === 'short')
+            ? [FAM_LABEL[r.setupFamily] || r.setupFamily, r.entryKind && r.entryKind.replace('_', ' '), r.targetNetR != null ? r.targetNetR + 'R target' : null, r.stopAtr != null ? 'stop ' + r.stopAtr + '×ATR' : null].filter(Boolean).join(' · ')
+            : '';
+          const why = [r.detail, r.repeat ? 'repeat — not stored again' : (r.recorded ? 'scored' : null), r.stake ? 'stake ' + r.stake : null, r.heldBy ? r.heldBy + ' holds it' : null].filter(Boolean).join(' · ');
           return `<div class="dr-row">
-            <span class="dr-t">${esc(t)}</span>
+            <span class="dr-t">${esc(hhmm(r.ts))}</span>
             <span class="sym-cell">${coinIcon(r.symbol, 14)}${esc((r.symbol || '').replace('-USDT', ''))}</span>
-            <span>${dir}</span>
-            <span class="dr-o"><span class="o-${esc(o)}">${esc(o.replace('_', ' '))}</span>${r.detail ? ' · ' + esc(r.detail) : ''}${what && (o === 'placed' || o === 'shadow') ? ' · ' + esc(what) : ''}</span>
+            <span>${dir}${bar}</span>
+            <span class="dr-llm"><span class="dr-lbl">LLM then</span>${llm}</span>
+            <span class="dr-o" title="${esc([o.replace('_', ' '), plan, why].filter(Boolean).join(' · '))}"><span class="o-${esc(o)}">${esc(o.replace('_', ' '))}</span>${plan ? ' · ' + esc(plan) : ''}${why ? `<span class="dr-sub">${esc(why)}</span>` : ''}</span>
+            <span class="dr-fwd"><span class="dr-lbl">moved its way</span>${fwd(r.fwdPct)}</span>
           </div>`;
         }).join('') + '</div>';
       }
