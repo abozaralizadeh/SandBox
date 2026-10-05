@@ -1785,6 +1785,8 @@
           <div class="frow"><span>Own early closes vs exit rules</span><b class="${cls((t.exits || {}).deltaR)}">${(t.exits && t.exits.n) ? fmtR(t.exits.deltaR) + ' (' + t.exits.n + ')' : '—'}</b></div>
         </div>`;
       };
+      // The side-by-side covers the whole run (since Jev's first call); the footer counts only the recent answer log.
+      if (dr.since) html += `<div class="dr-hint">Each trader scored on its own calls since <b>${esc(new Date(dr.since * 1000).toISOString().slice(0, 16).replace('T', ' '))} UTC</b> (Jev's first call)</div>`;
       html += '<div class="fam-grid">' + cell('jev', 'Jev') + cell('llm', 'LLM agent') + '</div>';
 
       // Every horizon, like for like: how often the call pointed the right way and what it made after cost.
@@ -1824,7 +1826,7 @@
             + (agN ? `<span>same side as the LLM <b>${ag.agree || 0}/${agN}</b></span>` : '')
             + (dr.medianLatencyMs != null ? `<span>median answer <b>${dr.medianLatencyMs} ms</b></span>` : '')
             + (dr.orderStability ? `<span title="each direction question is asked in 3 option orders and averaged">option-order sensitivity <b>±${Number(dr.orderStability.medianSpread).toFixed(2)}</b></span>` : '')
-            + (dr.since ? `<span style="color:var(--text-3)">since ${esc(new Date(dr.since * 1000).toISOString().slice(0, 16).replace('T', ' '))} UTC</span>` : '')
+            + (dr.recentSince ? `<span style="color:var(--text-3)">last ${dr.recentN || ''} answers · since ${esc(new Date(dr.recentSince * 1000).toISOString().slice(0, 16).replace('T', ' '))} UTC</span>` : '')
             + `</div>`;
 
       // Every recent answer: what Jev said, what the LLM said at the same time, the plan code built, what the
