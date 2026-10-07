@@ -32,6 +32,10 @@
       --cyan:     #2dd4ff;
       --amber:    #ffb020;
       --violet:   #a78bfa;
+      /* Dual-run trader identity (categorical slots 1-2, validated on --s1/--s2 for CVD + contrast). Status green/red
+         stay reserved for win/loss; the neon tokens above are too light for the categorical lightness band. */
+      --jev:      #3987e5;
+      --llm:      #d95926;
 
       --text:   #e6edf3;
       --text-2: #8aa0b4;
@@ -185,7 +189,41 @@
     .tag.lev { color: var(--violet); background: rgba(167,139,250,0.12); text-transform: none; }
     .a-action + .tag.lev { margin-left: 4px; }
     /* dual-run chip: a row opened by Jev (typesafe.ai), the second trader; LLM rows carry no chip */
-    .tag.jev { color: var(--cyan); background: rgba(45,212,255,0.14); margin-left: 4px; }
+    .tag.jev { color: #8bb8f2; background: rgba(57,135,229,0.18); margin-left: 4px; }   /* Jev's identity hue (--jev), text lifted for contrast */
+    /* Head to head (dual run): identity = colored mark beside the name; values stay in text tokens. */
+    .h2h-sub { color: var(--text-3); font-weight: 400; font-family: var(--mono); font-size: 0.7rem; }
+    #h2hTitle { white-space: nowrap; }
+    .h2h-headline { font-size: 0.86rem; color: var(--text-2); line-height: 1.55; margin: 2px 0 10px; }
+    .h2h-headline b { color: var(--text); font-weight: 600; }
+    .h2h-headline .h2h-note { display: block; font-family: var(--mono); font-size: 0.68rem; color: var(--text-3); margin-top: 2px; }
+    /* Fixed counts per width (6 / 3+3 / 2+2+2) — auto-fit left the sixth tile orphaned on its own row at ~1000px. */
+    .h2h-score { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; margin: 10px 0 6px; }
+    @media (max-width: 1180px) { .h2h-score { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+    .h2h-tile { background: var(--s2); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; min-width: 0; }
+    .h2h-tile .lbl { font-family: var(--mono); font-size: 0.6rem; color: var(--text-3); letter-spacing: 0.4px; text-transform: uppercase; margin-bottom: 6px; }
+    .h2h-tile .row { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: baseline; column-gap: 8px; padding: 3px 0; }
+    .h2h-tile .who { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 0.68rem; color: var(--text-2); white-space: nowrap; }
+    .h2h-tile .who i { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+    .h2h-tile .val { font-size: 1rem; font-weight: 600; color: var(--text); white-space: nowrap; text-align: right; }
+    .h2h-tile .val small { display: block; font-family: var(--mono); font-size: 0.6rem; color: var(--text-3); font-weight: 400; margin-top: 1px; }
+    .h2h-tile .val.word { font-size: 0.78rem; font-weight: 500; white-space: normal; line-height: 1.25; }
+    .h2h-tile .val.up { color: var(--up); } .h2h-tile .val.down { color: var(--down); }
+    .h2h-tile .ahead { font-family: var(--mono); font-size: 0.56rem; color: var(--text-3); border: 1px solid var(--border2); border-radius: 4px; padding: 0 4px; margin-left: 4px; }
+    .h2h-ct { font-family: var(--mono); font-size: 0.7rem; color: var(--text-2); margin: 14px 0 0; }
+    .h2h-ct span { color: var(--text-3); }
+    .h2h-pair { gap: 18px; }
+    .h2h-more { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 8px; }
+    .h2h-more > summary { cursor: pointer; font-family: var(--mono); font-size: 0.7rem; color: var(--text-2); list-style: none; padding: 4px 0; }
+    .h2h-more > summary::-webkit-details-marker { display: none; }
+    .h2h-more > summary::before { content: "▸ "; color: var(--text-3); }
+    .h2h-more[open] > summary::before { content: "▾ "; }
+    @media (max-width: 900px) {
+      #dualRunPanel .panel-title { flex-wrap: wrap; row-gap: 2px; }
+      .h2h-sub { flex-basis: 100%; padding-left: 15px; }
+      .h2h-score { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+      .h2h-tile { padding: 9px 10px; }
+      .h2h-tile .ahead .ahead-txt { display: none; }
+    }
     .dr-status { font-family: var(--mono); font-size: 0.72rem; color: var(--text-2); margin-top: 10px;
       padding: 8px 12px; border-radius: 8px; background: var(--s2); border: 1px solid var(--border); }
     .dr-status.s-idle { color: var(--amber); } .dr-status.s-error { color: var(--down); }
@@ -568,8 +606,35 @@
       </div>
     </div>
     <div class="panel">
-      <div class="panel-head"><div class="panel-title t-violet"><span class="tick"></span> Recent trade outcomes <span style="color:var(--text-3);font-weight:400;font-family:var(--mono);font-size:0.7rem">· ROE per closed trade</span></div></div>
+      <div class="panel-head"><div class="panel-title t-violet"><span class="tick"></span> Recent trade outcomes <span style="color:var(--text-3);font-weight:400;font-family:var(--mono);font-size:0.7rem">· effect on the account per closed trade</span></div></div>
       <div class="chart sm" id="tradesChart"></div>
+    </div>
+
+    <!-- ═══════════ HEAD TO HEAD — Jev vs the LLM agent: two traders, one account, same gates, each judged on its own
+         record (dualRun = jev.dual_run_report). Named by model, so a model switch renames it. Hidden until it runs. ═══════════ -->
+    <div id="h2hSection" style="display:none">
+      <div class="section-label" id="h2hLabel">Head to head</div>
+      <div class="panel" id="dualRunPanel">
+        <div class="panel-head">
+          <div class="panel-title t-cyan"><span class="tick"></span> <span id="h2hTitle">Dual run</span>
+            <span class="h2h-sub" id="h2hSub">· two traders, one account, same gates — each scored only on its own calls</span></div>
+        </div>
+        <div class="h2h-headline" id="h2hHeadline"></div>
+        <div class="h2h-score" id="h2hScore"></div>
+        <div class="h2h-ct">Real money <span>· what each trader's own closed trades did to the account (% of equity at entry)</span></div>
+        <div class="chart" id="h2hRace"></div>
+        <div class="grid-2 h2h-pair">
+          <div>
+            <div class="h2h-ct">Call quality <span>· average move in the call's direction, after round-trip cost</span></div>
+            <div class="chart sm" id="h2hCalls"></div>
+          </div>
+          <div>
+            <div class="h2h-ct">Does stated confidence mean anything? <span>· calls that went the right way within 1h</span></div>
+            <div class="chart sm" id="h2hCal"></div>
+          </div>
+        </div>
+        <div id="dualRunBox"></div>
+      </div>
     </div>
 
     <!-- ═══════════ STRATEGY EDGE — does the direction call actually predict? ═══════════ -->
@@ -598,15 +663,6 @@
           <span style="color:var(--text-3);font-weight:400;font-family:var(--mono);font-size:0.7rem">· closing early vs letting the bracket run</span></div>
       </div>
       <div id="exitDiscBox"><div class="empty">Measuring…</div></div>
-    </div>
-
-    <!-- Dual run — the LLM trader vs Jev (typesafe.ai), each judged on its own calls. Hidden until it runs. -->
-    <div class="panel" id="dualRunPanel" style="display:none">
-      <div class="panel-head">
-        <div class="panel-title t-cyan"><span class="tick"></span> Dual run
-          <span style="color:var(--text-3);font-weight:400;font-family:var(--mono);font-size:0.7rem">· two traders, one account, same gates — each scored on its own calls</span></div>
-      </div>
-      <div id="dualRunBox"><div class="empty">Measuring…</div></div>
     </div>
 
     <!-- ═══════════ MACRO CALENDAR — scheduled releases, known a year ahead ═══════════ -->
@@ -843,10 +899,17 @@
       // realized return: $ PnL when disclosed, else the ROE % parsed from the close, else a unit
       // block so the win/loss sequence is still readable.
       const hasUsd = trades.some(t => typeof t.pnl === 'number');
+      const hasAcct = trades.some(t => typeof t.accountPct === 'number');
       const hasRoe = trades.some(t => typeof t.roePct === 'number');
       const isWin = t => t.win === true || (typeof t.pnl === 'number' && t.pnl > 0);
+      // Bars show what a trade did to the ACCOUNT. ROE is the return on that position's own margin (price move
+      // × leverage): +35% ROE was +0.24% of the account on Oct 7. Never mix the two units in one chart — an
+      // older close without an account figure gets a neutral block the size of a typical bar.
+      const acctAbs = trades.filter(t => typeof t.accountPct === 'number').map(t => Math.abs(t.accountPct)).sort((a, b) => a - b);
+      const acctUnit = acctAbs.length ? acctAbs[Math.floor(acctAbs.length / 2)] : 1;
       const magOf = t => {
         if (hasUsd && typeof t.pnl === 'number') return Math.abs(t.pnl);
+        if (hasAcct) return typeof t.accountPct === 'number' ? Math.abs(t.accountPct) : acctUnit;
         if (typeof t.roePct === 'number') return Math.abs(t.roePct);
         return 1;   // no magnitude on this row (e.g. pre-roePct close) — unit block keeps win/loss readable
       };
@@ -856,7 +919,8 @@
         return { value: win ? v : -v, itemStyle: { color: win ? '#00e6a8' : '#ff3b5c',
           shadowColor: win ? 'rgba(0,230,168,0.4)' : 'rgba(255,59,92,0.4)', shadowBlur: 8, borderRadius: [3, 3, 0, 0] } };
       });
-      const fmtMag = v => hasUsd ? Math.abs(v).toFixed(0) : (hasRoe ? Math.abs(v).toFixed(1) + '%' : '');
+      const sgnTick = v => (v < 0 ? '−' : '');   // losses sit below zero: their ticks carry the sign
+      const fmtMag = v => hasUsd ? sgnTick(v) + Math.abs(v).toFixed(0) : (hasAcct ? sgnTick(v) + Math.abs(v).toFixed(2) + '%' : (hasRoe ? sgnTick(v) + Math.abs(v).toFixed(1) + '%' : ''));
       tradesChart.setOption({
         backgroundColor: 'transparent',
         grid: { left: 40, right: 14, top: 14, bottom: 36 },
@@ -866,8 +930,9 @@
             const t = trades[p[0].dataIndex], win = isWin(t);
             let s = `${esc(t.symbol||'')}<br/>${win ? '<b style="color:#00e6a8">WIN</b>' : '<b style="color:#ff3b5c">LOSS</b>'}`;
             if (hasUsd && typeof t.pnl === 'number') s += ` · ${Number(t.pnl).toFixed(2)}`;
-            else if (typeof t.roePct === 'number') s += ` · ROE ${t.roePct >= 0 ? '+' : ''}${Number(t.roePct).toFixed(2)}%`;
-            // ROE is price return × leverage, so show the leverage it was earned at.
+            if (typeof t.accountPct === 'number') s += ` · <b>${t.accountPct >= 0 ? '+' : ''}${Number(t.accountPct).toFixed(2)}%</b> of the account`;
+            // ROE is price return × leverage on that position's margin, so show the leverage it was earned at.
+            if (typeof t.roePct === 'number') s += `<br/><span style="color:#8aa0b4">ROE ${t.roePct >= 0 ? '+' : ''}${Number(t.roePct).toFixed(2)}% on its margin</span>`;
             if (fmtLev(t.leverage)) s += ` <span style="color:#a78bfa">@ ${fmtLev(t.leverage)}</span>`;
             if (t.closeType) s += `<br/><span style="color:#8aa0b4">${esc(String(t.closeType).replace(/_/g,' ').toLowerCase())}</span>`;
             s += `<br/><span style="color:#50637a">${relTime(t.ts)}</span>`;
@@ -1085,7 +1150,10 @@
           const sym = esc((c.symbol || '').replace('-USDT', ''));
           const dur = (c.openTs && c.closeTs) ? Math.max(0, c.closeTs - c.openTs) : null;
           const durTxt = dur != null ? (dur >= 3600 ? (dur / 3600).toFixed(1) + 'h' : Math.round(dur / 60) + 'm') : '';
-          const roe = c.roePct != null ? `<span class="pos-ret ${c.win ? 'up' : 'down'}">${fmtPct(c.roePct)}</span>` : `<span class="pos-ret ${c.win ? 'up' : 'down'}">${c.win ? 'win' : 'loss'}</span>`;
+          // Headline = what the trade did to the ACCOUNT; ROE (margin return = price move × leverage) is a detail chip.
+          const head = c.accountPct != null ? c.accountPct : c.roePct;
+          const headTip = c.accountPct != null ? 'effect on the account (% of equity at entry)' : 'return on this position\'s margin (price move × leverage)';
+          const roe = head != null ? `<span class="pos-ret ${c.win ? 'up' : 'down'}" title="${headTip}">${fmtPct(head)}</span>` : `<span class="pos-ret ${c.win ? 'up' : 'down'}">${c.win ? 'win' : 'loss'}</span>`;
           const when = c.openTs ? `${fmtCandleTime(c.openTs)} → ${fmtCandleTime(c.closeTs)}` : `closed ${relTime(c.closeTs)}`;
           const eNum = fnum(c.entryPrice), xNum = fnum(c.exitPrice);
           // Explicit entry → exit prices as text (the chart labels alone were hard to read).
@@ -1095,6 +1163,7 @@
           // before working (MAE), and how stretched the entry was — so a spectator sees WHY it worked.
           const fb = [];
           if (c.realizedR != null) fb.push(`<span class="${c.realizedR >= 0 ? 'up' : 'down'}">${sgn(c.realizedR)}R</span>`);
+          if (c.accountPct != null && c.roePct != null) fb.push(`<span title="return on this position's margin: price move × leverage">ROE ${fmtPct(c.roePct)}</span>`);
           if (c.maeR != null) fb.push(`<span title="max adverse excursion before it worked">MAE ${c.maeR}R</span>`);
           if (c.entryExtensionAtr != null) fb.push(`<span title="how stretched the entry was vs the 15m VWAP">entry ${sgn(c.entryExtensionAtr)} ATR</span>`);
           const fbLine = fb.length
@@ -1741,21 +1810,256 @@
       box.innerHTML = html;
     }
 
+    // ── Head to head: Jev vs the LLM agent, each judged only on its own record (dualRun = jev.dual_run_report) ──
+    // Identity is a colored MARK beside the name (--jev / --llm, validated categorical slots); values stay in text
+    // tokens, signed values in the page's up/down colors. Every chart has a table twin under "Numbers behind the charts".
+    const h2hCharts = {};
+    function h2hChart(id) {
+      if (!h2hCharts[id]) h2hCharts[id] = echarts.init(el(id), null, { renderer: 'canvas' });
+      return h2hCharts[id];
+    }
+    window.addEventListener('resize', () => Object.values(h2hCharts).forEach(c => c.resize()));
+    const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+    const H2H_HZ = { '15m': '15m', '60m': '1h', '240m': '4h' };
+    const H2H_TIP = { backgroundColor: 'rgba(10,14,20,0.95)', borderColor: 'rgba(120,160,200,0.2)',
+                      textStyle: { color: '#e6edf3', fontFamily: 'JetBrains Mono', fontSize: 11 } };
+    const H2H_LEGEND = { top: 0, right: 0, itemGap: 16, textStyle: { color: '#8aa0b4', fontFamily: 'JetBrains Mono', fontSize: 10 } };
+    const H2H_ZERO = { silent: true, symbol: 'none', label: { show: false },
+                       lineStyle: { color: 'rgba(120,160,200,0.32)', width: 1, type: 'solid' }, data: [{ yAxis: 0 }] };
+    const lineKey = c => `<span style="display:inline-block;width:12px;height:2px;border-radius:1px;background:${c};vertical-align:middle;margin-right:6px"></span>`;
+    const boxKey = c => `<span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${c};vertical-align:middle;margin-right:6px"></span>`;
+    const utcStamp = ts => new Date(ts * 1000).toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
+    const pctRate = v => (v == null || !isFinite(v)) ? '—' : (Number(v) * 100).toFixed(0) + '%';
+    // The LLM is named by its model ("gpt-6-luna" → "Luna"), so a model switch renames it without a code change.
+    function traderName(key, model) {
+      if (key === 'jev') return 'Jev';
+      const last = String(model || '').split(/[-_\s]/).pop() || '';
+      return /^[a-z]{3,}$/i.test(last) ? last[0].toUpperCase() + last.slice(1).toLowerCase() : (model || 'LLM agent');
+    }
+    function verdictWords(t) {
+      if (!t || !t.verdict || t.verdict === 'insufficient data') return 'measuring';
+      if (t.verdict === 'no edge') return 'no edge';
+      return (t.tStat != null && t.tStat >= 1) ? 'edge' : 'positive, unproven';
+    }
+    // Like for like: the longest horizon BOTH traders have scored calls at.
+    function commonHorizon(tr) {
+      for (const h of ['240m', '60m', '15m']) {
+        if (['jev', 'llm'].every(k => ((((tr[k] || {}).byHorizon || {})[h]) || {}).n)) return h;
+      }
+      return null;
+    }
+
+    // Real money: cumulative % of the account from each trader's own closed trades, as a step line per trader.
+    function renderH2hRace(dr, tr, C, N) {
+      const chart = h2hChart('h2hRace');
+      const surface = cssVar('--s1') || '#0e131b';
+      const since = (dr.since || 0) * 1000;
+      const endMs = Math.max(Date.now(), since + 1);
+      const totals = {};
+      const series = ['jev', 'llm'].map(k => {
+        let cum = 0;
+        const data = since ? [{ value: [since, 0], symbol: 'none' }] : [];
+        ((tr[k] || {}).curve || []).forEach(p => {
+          if (p.accountPct == null || !isFinite(p.accountPct)) return;
+          cum += Number(p.accountPct);
+          data.push({ value: [p.ts * 1000, +cum.toFixed(4)], trade: p });
+        });
+        data.push({ value: [endMs, +cum.toFixed(4)], symbol: 'none' });
+        totals[k] = cum;
+        return {
+          name: N[k], type: 'line', step: 'end', data, symbol: 'circle', symbolSize: 8, showAllSymbol: true, z: 3,
+          lineStyle: { width: 2, color: C[k], cap: 'round', join: 'round' },
+          itemStyle: { color: C[k], borderColor: surface, borderWidth: 2 },
+          emphasis: { focus: 'series' },
+          endLabel: { show: true, formatter: () => `${N[k]} ${fmtPct(cum, 2)}`, color: '#8aa0b4',
+                      fontFamily: 'JetBrains Mono', fontSize: 10, distance: 8 },
+          markLine: k === 'jev' ? H2H_ZERO : undefined,
+        };
+      });
+      // End labels only when they cannot collide; the legend + tooltip carry identity otherwise.
+      const vals = Object.values(totals), span = Math.max(0.05, ...vals.map(Math.abs)) * 2;
+      if (Math.abs(vals[0] - vals[1]) < span * 0.12) series.forEach(sr => { sr.endLabel.show = false; });
+      const asOf = (k, x) => {
+        const d = series[k === 'jev' ? 0 : 1].data;
+        let v = 0;
+        for (const p of d) { if (p.value[0] <= x) v = p.value[1]; else break; }
+        return v;
+      };
+      chart.setOption({
+        backgroundColor: 'transparent', animationDuration: 400,
+        legend: { ...H2H_LEGEND, icon: 'rect', itemWidth: 14, itemHeight: 2, data: series.map(sr => sr.name) },
+        grid: { left: 54, right: series.some(sr => sr.endLabel.show) ? 112 : 18, top: 30, bottom: 28 },
+        tooltip: {
+          trigger: 'axis', ...H2H_TIP,
+          axisPointer: { type: 'line', snap: true, lineStyle: { color: 'rgba(120,160,200,0.35)', width: 1, type: 'solid' } },
+          formatter: params => {
+            const x = params[0].axisValue;
+            let out = `<span style="color:#8aa0b4">${esc(utcStamp(x / 1000))}</span>`;
+            ['jev', 'llm'].forEach(k => { out += `<br/>${lineKey(C[k])}<b>${fmtPct(asOf(k, x), 2)}</b> <span style="color:#8aa0b4">${esc(N[k])} so far</span>`; });
+            params.filter(p => p.data && p.data.trade && Math.abs(p.data.value[0] - x) < 60000).forEach(p => {
+              const t = p.data.trade;
+              out += `<br/><span style="color:#8aa0b4">${esc(p.seriesName)} closed ${esc((t.symbol || '').replace('-USDT', ''))}: </span>`
+                   + `<b>${fmtPct(t.accountPct, 2)}</b><span style="color:#8aa0b4"> · ${fmtR(t.r)}</span>`;
+            });
+            return out;
+          },
+        },
+        xAxis: { type: 'time', min: since || null, max: endMs, ...AXIS, splitLine: { show: false },
+                 axisLabel: { ...AXIS.axisLabel, formatter: '{MMM} {d}', hideOverlap: true } },
+        yAxis: { type: 'value', ...AXIS, splitLine: { lineStyle: { color: 'rgba(120,160,200,0.07)', type: 'solid' } },
+                 axisLabel: { ...AXIS.axisLabel, formatter: v => (v > 0 ? '+' : '') + v.toFixed(2) + '%' } },
+        series,
+      }, true);
+      chart.resize();
+    }
+
+    // Call quality: net move per call after cost at each horizon — grouped bars from one zero baseline.
+    function renderH2hCalls(tr, C, N) {
+      const chart = h2hChart('h2hCalls');
+      const hz = ['15m', '60m', '240m'];
+      const series = ['jev', 'llm'].map(k => ({
+        name: N[k], type: 'bar', barMaxWidth: 24, barGap: '12%',
+        itemStyle: { color: C[k] },
+        data: hz.map(h => {
+          const r = (((tr[k] || {}).byHorizon || {})[h]) || null;
+          if (!r || !r.n || r.netPct == null) return { value: null };
+          const v = Number(r.netPct);
+          return { value: v, row: r, itemStyle: { color: C[k], borderRadius: v >= 0 ? [4, 4, 0, 0] : [0, 0, 4, 4] } };
+        }),
+        markLine: k === 'jev' ? H2H_ZERO : undefined,
+      }));
+      chart.setOption({
+        backgroundColor: 'transparent', animationDuration: 400,
+        legend: { ...H2H_LEGEND, icon: 'roundRect', itemWidth: 10, itemHeight: 10, data: series.map(sr => sr.name) },
+        grid: { left: 54, right: 12, top: 30, bottom: 26 },
+        tooltip: {
+          trigger: 'axis', ...H2H_TIP, axisPointer: { type: 'shadow', shadowStyle: { color: 'rgba(120,160,200,0.06)' } },
+          formatter: params => {
+            let out = `<span style="color:#8aa0b4">${H2H_HZ[hz[params[0].dataIndex]]} after the call</span>`;
+            params.forEach((p, i) => {
+              const r = p.data && p.data.row, k = i === 0 ? 'jev' : 'llm';
+              out += `<br/>${boxKey(C[k])}<b>${r ? fmtPct(r.netPct, 3) : '—'}</b> <span style="color:#8aa0b4">${esc(p.seriesName)}`
+                   + (r ? ` · right way ${pctRate(r.hitRate)} · ${r.n} calls${r.t != null ? ' · t ' + Number(r.t).toFixed(2) : ''}` : '') + '</span>';
+            });
+            return out;
+          },
+        },
+        xAxis: { type: 'category', data: hz.map(h => H2H_HZ[h] + ' later'), ...AXIS, axisTick: { show: false } },
+        yAxis: { type: 'value', ...AXIS, splitLine: { lineStyle: { color: 'rgba(120,160,200,0.07)', type: 'solid' } },
+                 axisLabel: { ...AXIS.axisLabel, formatter: v => (v > 0 ? '+' : '') + v.toFixed(2) + '%' } },
+        series,
+      }, true);
+      chart.resize();
+    }
+
+    // Calibration: share of calls that went the right way, by the confidence the trader stated (50% = coin flip).
+    function renderH2hCal(tr, C, N) {
+      const chart = h2hChart('h2hCal');
+      const bandsOf = k => ((tr[k] || {}).calibration || []);
+      const bands = (bandsOf('jev').length ? bandsOf('jev') : bandsOf('llm')).map(r => r.band);
+      const series = ['jev', 'llm'].map((k, i) => ({
+        name: N[k], type: 'bar', barMaxWidth: 24, barGap: '12%',
+        itemStyle: { color: C[k], borderRadius: [4, 4, 0, 0] },
+        data: bands.map(b => {
+          const r = bandsOf(k).find(x => x.band === b);
+          return (r && r.n && r.rightWay != null) ? { value: +(r.rightWay * 100).toFixed(1), row: r } : { value: null };
+        }),
+        markLine: i === 0 ? { silent: true, symbol: 'none', lineStyle: { color: 'rgba(120,160,200,0.32)', width: 1, type: 'solid' },
+                              label: { show: true, position: 'insideEndTop', formatter: 'coin flip', color: '#50637a', fontFamily: 'JetBrains Mono', fontSize: 9 },
+                              data: [{ yAxis: 50 }] } : undefined,
+      }));
+      chart.setOption({
+        backgroundColor: 'transparent', animationDuration: 400,
+        legend: { ...H2H_LEGEND, icon: 'roundRect', itemWidth: 10, itemHeight: 10, data: series.map(sr => sr.name) },
+        grid: { left: 44, right: 12, top: 30, bottom: 26 },
+        tooltip: {
+          trigger: 'axis', ...H2H_TIP, axisPointer: { type: 'shadow', shadowStyle: { color: 'rgba(120,160,200,0.06)' } },
+          formatter: params => {
+            let out = `<span style="color:#8aa0b4">stated confidence ${esc(bands[params[0].dataIndex])}</span>`;
+            params.forEach((p, i) => {
+              const r = p.data && p.data.row, k = i === 0 ? 'jev' : 'llm';
+              out += `<br/>${boxKey(C[k])}<b>${r ? pctRate(r.rightWay) : '—'}</b> <span style="color:#8aa0b4">${esc(p.seriesName)}${r ? ` right way · ${r.n} calls` : ' · no calls'}</span>`;
+            });
+            return out;
+          },
+        },
+        xAxis: { type: 'category', data: bands, ...AXIS, axisTick: { show: false } },
+        yAxis: { type: 'value', min: 0, max: 100, interval: 25, ...AXIS,
+                 splitLine: { lineStyle: { color: 'rgba(120,160,200,0.07)', type: 'solid' } },
+                 axisLabel: { ...AXIS.axisLabel, formatter: v => v + '%' } },
+        series,
+      }, true);
+      chart.resize();
+    }
+
     function renderDualRun(s) {
-      const panel = el('dualRunPanel'), box = el('dualRunBox');
-      if (!panel || !box) return;
+      const section = el('h2hSection'), box = el('dualRunBox');
+      if (!section || !box) return;
       const dr = s && s.dualRun;
-      if (!dr || (dr.mode === 'off' && !dr.traders)) { panel.style.display = 'none'; return; }
-      panel.style.display = '';
+      if (!dr || (dr.mode === 'off' && !dr.traders)) { section.style.display = 'none'; return; }
+      section.style.display = '';
       const tr = dr.traders || {};
+      const K = ['jev', 'llm'];
+      const T = k => tr[k] || {};
+      const C = { jev: cssVar('--jev') || '#3987e5', llm: cssVar('--llm') || '#d95926' };
+      const N = { jev: traderName('jev'), llm: traderName('llm', T('llm').model) };
+      el('h2hLabel').textContent = `${N.jev} vs ${N.llm}`;
+      el('h2hTitle').textContent = `${N.jev} vs ${N.llm}`;
+      el('h2hSub').textContent = '· two traders, one account, same gates — each scored only on its own calls'
+        + (dr.since ? ` since ${utcStamp(dr.since)}` : '');
+      const H = commonHorizon(tr);
+      const hrow = k => (H ? ((T(k).byHorizon || {})[H] || {}) : {});
+
+      // Headline: the two like-for-like facts in words, then whether either record is more than noise.
+      const facts = [];
+      if (K.some(k => T(k).accountPctSum != null || T(k).closes)) {
+        facts.push(`Real money: <b>${esc(N.jev)} ${fmtPct(T('jev').accountPctSum || 0, 2)}</b> vs <b>${esc(N.llm)} ${fmtPct(T('llm').accountPctSum || 0, 2)}</b> of the account`
+          + ` <span style="color:var(--text-3)">(${T('jev').closes || 0} vs ${T('llm').closes || 0} trades)</span>`);
+      }
+      if (H) {
+        facts.push(`Calls, ${H2H_HZ[H]} later, after cost: <b>${esc(N.jev)} ${fmtPct(hrow('jev').netPct, 2)}</b> vs <b>${esc(N.llm)} ${fmtPct(hrow('llm').netPct, 2)}</b> per call`);
+      }
+      const proof = K.map(k => {
+        const t = hrow(k).t;
+        if (t == null) return `${N[k]}: still measuring`;
+        const tt = `t ${Number(t).toFixed(1)}`;
+        return t >= 1 ? `${N[k]}'s calls have an edge (${tt})` : (t <= -1 ? `${N[k]}'s calls lose money (${tt})` : `${N[k]} not proven either way (${tt})`);
+      }).join(' · ');
+      el('h2hHeadline').innerHTML = (facts.join('<br/>') || 'Measuring…')
+        + `<span class="h2h-note">${esc(proof)} — |t| ≥ 1 is where a record stops being noise, the same bar each playbook's stake is judged on.</span>`;
+
+      // Scoreboard: one tile per question, both traders in each; "ahead" marks the better number.
+      const tile = (label, cells, compare = true) => {
+        const v = K.map(k => cells[k].v);
+        const lead = (compare && v.every(x => x != null && isFinite(x)) && v[0] !== v[1]) ? (v[0] > v[1] ? 'jev' : 'llm') : null;
+        return `<div class="h2h-tile"><div class="lbl">${esc(label)}</div>` + K.map(k => {
+          const c = cells[k];
+          return `<div class="row"><span class="who"><i style="background:${C[k]}"></i>${esc(N[k])}${lead === k ? '<span class="ahead" title="the better number of the two">▲<span class="ahead-txt"> ahead</span></span>' : ''}</span>`
+               + `<span class="val ${c.cls || ''}">${c.txt}${c.sub ? `<small>${esc(c.sub)}</small>` : ''}</span></div>`;
+        }).join('') + '</div>';
+      };
+      const per = f => Object.fromEntries(K.map(k => [k, f(k)]));
+      let tiles = tile('Real money · % of account', per(k => ({ v: T(k).accountPctSum, cls: cls(T(k).accountPctSum),
+        txt: T(k).accountPctSum != null ? fmtPct(T(k).accountPctSum, 2) : '—', sub: `${T(k).closes || 0} trades` })));
+      tiles += tile('Trades won', per(k => ({ v: T(k).winRate, txt: pctRate(T(k).winRate), sub: T(k).closes ? `${T(k).wins || 0} of ${T(k).closes}` : '' })));
+      tiles += tile('Average per trade', per(k => ({ v: T(k).avgR, cls: cls(T(k).avgR), txt: fmtR(T(k).avgR), sub: 'of its risk' })));
+      if (H) {
+        tiles += tile(`Calls · net after cost (${H2H_HZ[H]})`, per(k => ({ v: hrow(k).netPct, cls: cls(hrow(k).netPct), txt: fmtPct(hrow(k).netPct, 2),
+          sub: hrow(k).t != null ? `t ${Number(hrow(k).t).toFixed(1)}` : '' })));
+        tiles += tile(`Right direction (${H2H_HZ[H]})`, per(k => ({ v: hrow(k).hitRate, txt: pctRate(hrow(k).hitRate), sub: `${hrow(k).n || 0} calls` })));
+      }
+      tiles += tile('Verdict on its calls', per(k => ({ v: null, cls: 'word', txt: esc(verdictWords(T(k))), sub: '' })), false);
+      el('h2hScore').innerHTML = tiles;
+
+      renderH2hRace(dr, tr, C, N);
+      renderH2hCalls(tr, C, N);
+      renderH2hCal(tr, C, N);
+
+      // Below the charts: Jev's live status, the numbers behind every chart, and every recent answer (collapsed).
+      const wasOpen = { nums: !!(el('h2hNums') && el('h2hNums').open), answers: !!(el('h2hAnswers') && el('h2hAnswers').open) };
       const hhmm = ts => ts ? new Date(ts * 1000).toISOString().slice(11, 16) : '';
       const modeText = { live: 'live — Jev places trial-size real entries through the same gates', shadow: 'shadow — every Jev call runs the full gate chain and is scored, no orders', off: 'off' }[dr.mode] || dr.mode;
-      let html = `<div class="edge-verdict">
-          <span class="badge ${dr.mode === 'live' ? 'v-edge' : 'v-wait'}">${esc(dr.mode || 'off')}</span>
-          <span class="vtext">${esc(modeText)}${dr.model ? ` · model <b>${esc(dr.model)}</b>` : ''}</span>
-        </div>`;
-
-      // Health of the most recent pass — the "is it doing anything?" line.
+      let html = '';
       const st = dr.status;
       if (st) {
         const oc = st.outcomes || {};
@@ -1765,77 +2069,62 @@
         if (mbits.length) bits.push('own positions: ' + mbits.join(', '));
         const age = Math.max(0, Math.round((Date.now() / 1000 - st.ts) / 60));
         html += st.state === 'ok'
-          ? `<div class="dr-status">last pass <b>${hhmm(st.ts)} UTC</b> (${age} min ago) · asked <b>${st.asked}</b>${bits.length ? ' · ' + bits.join(' · ') : ''}`
+          ? `<div class="dr-status"><span class="badge ${dr.mode === 'live' ? 'v-edge' : 'v-wait'}" title="${esc(modeText)}">${esc(dr.mode || 'off')}</span> Jev's last pass <b>${hhmm(st.ts)} UTC</b> (${age} min ago) · asked <b>${st.asked}</b>${bits.length ? ' · ' + bits.join(' · ') : ''}`
             + `${st.medianLatencyMs != null ? ` · <b>${st.medianLatencyMs} ms</b>/answer` : ''}${st.resolvedModel ? ` · ${esc(st.resolvedModel)}` : ''}${st.traced ? ' · traced' : ''}</div>`
           : `<div class="dr-status s-${esc(st.state)}">${st.state === 'idle' ? 'idle' : 'error'} since ${hhmm(st.ts)} UTC — ${esc(st.reason || 'unknown')}</div>`;
       } else {
         html += `<div class="dr-status s-idle">no pass yet — Jev runs right after each trading-agent run</div>`;
       }
 
-      // The two traders side by side.
-      const cell = (name, label) => {
-        const t = tr[name] || {};
-        return `<div class="fam">
-          <div class="fh"><span class="fname">${label}</span><span class="fv ${verdictClass(t.verdict)}">${esc(t.verdict === 'insufficient data' || !t.verdict ? 'measuring' : t.verdict)}</span></div>
-          <div class="frow"><span>Calls scored</span><b>${t.calls || 0}</b></div>
-          <div class="frow"><span>Net of cost${t.bestHorizon ? ' @' + esc(t.bestHorizon) : ''}</span><b class="${cls(t.netPct)}">${fmtPct(t.netPct, 3)}</b></div>
-          <div class="frow"><span>t</span><b>${t.tStat != null ? Number(t.tStat).toFixed(2) : '—'}</b></div>
-          <div class="frow"><span>Closes · win rate</span><b>${t.closes || 0} · ${t.winRate != null ? (t.winRate * 100).toFixed(0) + '%' : '—'}</b></div>
-          <div class="frow"><span>Avg per close</span><b class="${cls(t.avgR)}">${fmtR(t.avgR)}</b></div>
-          <div class="frow"><span>Own early closes vs exit rules</span><b class="${cls((t.exits || {}).deltaR)}">${(t.exits && t.exits.n) ? fmtR(t.exits.deltaR) + ' (' + t.exits.n + ')' : '—'}</b></div>
-        </div>`;
-      };
-      // The side-by-side covers the whole run (since Jev's first call); the footer counts only the recent answer log.
-      if (dr.since) html += `<div class="dr-hint">Each trader scored on its own calls since <b>${esc(new Date(dr.since * 1000).toISOString().slice(0, 16).replace('T', ' '))} UTC</b> (Jev's first call)</div>`;
-      html += '<div class="fam-grid">' + cell('jev', 'Jev') + cell('llm', 'LLM agent') + '</div>';
-
-      // Every horizon, like for like: how often the call pointed the right way and what it made after cost.
+      // Table twins of the three charts (the WCAG-clean way to read every value) + the exit comparison.
       const hz = ['15m', '60m', '240m'];
-      const hcell = (name, h) => {
-        const r = ((tr[name] || {}).byHorizon || {})[h];
-        if (!r || !r.n) return '<td class="grp">—</td><td>—</td><td>—</td>';
-        return `<td class="grp">${r.n}</td><td>${r.hitRate != null ? (r.hitRate * 100).toFixed(0) + '%' : '—'}</td><td class="${cls(r.netPct)}">${fmtPct(r.netPct, 3)}</td>`;
+      const hcell = (k, h) => {
+        const r = ((T(k).byHorizon || {})[h]);
+        if (!r || !r.n) return '<td class="grp">—</td><td>—</td><td>—</td><td>—</td>';
+        return `<td class="grp">${r.n}</td><td>${pctRate(r.hitRate)}</td><td class="${cls(r.netPct)}">${fmtPct(r.netPct, 3)}</td><td>${r.t != null ? Number(r.t).toFixed(2) : '—'}</td>`;
       };
-      html += `<table class="dr-hz"><thead>
-          <tr><th></th><th colspan="3" class="grp" style="text-align:center">Jev</th><th colspan="3" class="grp" style="text-align:center">LLM agent</th></tr>
-          <tr><th>after</th><th class="grp">calls</th><th>right way</th><th>net</th><th class="grp">calls</th><th>right way</th><th>net</th></tr>
-        </thead><tbody>` + hz.map(h => `<tr><td>${h}</td>${hcell('jev', h)}${hcell('llm', h)}</tr>`).join('') + `</tbody></table>
-        <div class="dr-hint">Each call's price move in the direction it chose, after round-trip cost, over the same window for both traders
-        (overlapping calls on one coin count once). "Right way" = share of calls the market moved toward.</div>`;
-
-      // Does stated confidence mean anything? Bands of the confidence each trader stated vs what happened in 1h.
-      const cal = n => ((tr[n] || {}).calibration || []);
-      const bands = cal('jev').map(r => r.band);
-      if (bands.length && (cal('jev').some(r => r.n) || cal('llm').some(r => r.n))) {
-        const ccell = (n, band) => {
-          const r = cal(n).find(x => x.band === band);
-          return (!r || !r.n) ? '<td class="grp">—</td><td>—</td>'
-            : `<td class="grp">${r.n}</td><td>${r.rightWay != null ? (r.rightWay * 100).toFixed(0) + '%' : '—'}</td>`;
-        };
-        html += `<table class="dr-hz"><thead>
-            <tr><th></th><th colspan="2" class="grp" style="text-align:center">Jev</th><th colspan="2" class="grp" style="text-align:center">LLM agent</th></tr>
+      let nums = `<table class="dr-hz"><thead>
+          <tr><th></th><th colspan="4" class="grp" style="text-align:center">${esc(N.jev)}</th><th colspan="4" class="grp" style="text-align:center">${esc(N.llm)}</th></tr>
+          <tr><th>call quality</th><th class="grp">calls</th><th>right way</th><th>net</th><th>t</th><th class="grp">calls</th><th>right way</th><th>net</th><th>t</th></tr>
+        </thead><tbody>` + hz.map(h => `<tr><td>${H2H_HZ[h]} later</td>${hcell('jev', h)}${hcell('llm', h)}</tr>`).join('') + `</tbody></table>
+        <div class="dr-hint">Each call's price move in the direction it chose, after round-trip cost, over the same window for both
+        traders (overlapping calls on one coin count once). "Right way" = share of calls the market moved toward.</div>`;
+      const cal = k => (T(k).calibration || []);
+      const bands = (cal('jev').length ? cal('jev') : cal('llm')).map(r => r.band);
+      if (bands.length) {
+        const ccell = (k, b) => { const r = cal(k).find(x => x.band === b); return (!r || !r.n) ? '<td class="grp">—</td><td>—</td>' : `<td class="grp">${r.n}</td><td>${pctRate(r.rightWay)}</td>`; };
+        nums += `<table class="dr-hz"><thead>
+            <tr><th></th><th colspan="2" class="grp" style="text-align:center">${esc(N.jev)}</th><th colspan="2" class="grp" style="text-align:center">${esc(N.llm)}</th></tr>
             <tr><th>stated confidence</th><th class="grp">calls</th><th>right way (1h)</th><th class="grp">calls</th><th>right way (1h)</th></tr>
           </thead><tbody>` + bands.map(b => `<tr><td>${esc(b)}</td>${ccell('jev', b)}${ccell('llm', b)}</tr>`).join('') + `</tbody></table>
-          <div class="dr-hint">Calibration: if confidence means something, the right-way share climbs down the table.</div>`;
+          <div class="dr-hint">If confidence meant something, the right-way share would climb with it.</div>`;
       }
+      const trades = K.flatMap(k => (T(k).curve || []).map(p => ({ ...p, k }))).sort((a, b) => b.ts - a.ts);
+      if (trades.length) {
+        nums += `<table class="dr-hz"><thead><tr><th>real trades (closed)</th><th class="grp">trader</th><th>coin</th><th>% of account</th><th>R</th></tr></thead><tbody>`
+          + trades.map(p => `<tr><td>${esc(utcStamp(p.ts))}</td><td class="grp">${boxKey(C[p.k])}${esc(N[p.k])}</td><td>${esc((p.symbol || '').replace('-USDT', ''))}</td>`
+                          + `<td class="${cls(p.accountPct)}">${p.accountPct != null ? fmtPct(p.accountPct, 2) : '—'}</td><td class="${cls(p.r)}">${fmtR(p.r)}</td></tr>`).join('')
+          + `</tbody></table>`;
+      }
+      const ex = k => T(k).exits || {};
+      nums += `<div class="edge-meta">` + K.map(k => `<span>${esc(N[k])}'s own early closes vs the exit rules <b class="${cls(ex(k).deltaR)}">${ex(k).n ? fmtR(ex(k).deltaR) + ' (' + ex(k).n + ')' : '—'}</b></span>`).join('') + `</div>`;
+      html += `<details class="h2h-more" id="h2hNums"${wasOpen.nums ? ' open' : ''}><summary>Numbers behind the charts</summary>${nums}</details>`;
 
+      // Every recent Jev answer: what it said, what the LLM said at the same time, the plan code built, what the order
+      // path did, and how the market answered. Counted over the answer log's own window (last N answers).
       const oc = dr.outcomes || {}, ag = dr.agreement || {};
       const agN = (ag.agree || 0) + (ag.disagree || 0);
-      html += `<div class="edge-meta">`
+      let ans = `<div class="edge-meta">`
             + ['placed', 'shadow', 'refused', 'stand_aside', 'error'].filter(k => oc[k]).map(k => `<span>${esc(k.replace('_', ' '))} <b>${oc[k]}</b></span>`).join('')
-            + (agN ? `<span>same side as the LLM <b>${ag.agree || 0}/${agN}</b></span>` : '')
+            + (agN ? `<span>same side as ${esc(N.llm)} <b>${ag.agree || 0}/${agN}</b></span>` : '')
             + (dr.medianLatencyMs != null ? `<span>median answer <b>${dr.medianLatencyMs} ms</b></span>` : '')
             + (dr.orderStability ? `<span title="each direction question is asked in 3 option orders and averaged">option-order sensitivity <b>±${Number(dr.orderStability.medianSpread).toFixed(2)}</b></span>` : '')
-            + (dr.recentSince ? `<span style="color:var(--text-3)">last ${dr.recentN || ''} answers · since ${esc(new Date(dr.recentSince * 1000).toISOString().slice(0, 16).replace('T', ' '))} UTC</span>` : '')
             + `</div>`;
-
-      // Every recent answer: what Jev said, what the LLM said at the same time, the plan code built, what the
-      // order path did, and how the market answered.
       const rows = dr.recent || [];
       if (rows.length) {
         const fwd = f => !f ? '<span class="pend">—</span>'
           : ['15m', '60m', '240m'].map(h => f[h] == null ? `<span class="pend">…</span>` : `<span class="${cls(f[h])}">${fmtPct(f[h], 2)}</span>`).join('');
-        html += '<div class="dr-list"><div class="dr-row dr-head"><span>UTC</span><span>coin</span><span>Jev</span><span>LLM then</span><span>plan → what happened</span><span>moved its way 15m · 1h · 4h</span></div>' + rows.map(r => {
+        ans += `<div class="dr-list"><div class="dr-row dr-head"><span>UTC</span><span>coin</span><span>Jev</span><span>${esc(N.llm)} then</span><span>plan → what happened</span><span>moved its way 15m · 1h · 4h</span></div>` + rows.map(r => {
           const p = r.probabilities || {};
           if (r.kind === 'manage') {
             // Jev looking after its OWN open position: where it stands, what it chose, what code did.
@@ -1869,12 +2158,14 @@
             <span class="dr-t">${esc(hhmm(r.ts))}</span>
             <span class="sym-cell">${coinIcon(r.symbol, 14)}${esc((r.symbol || '').replace('-USDT', ''))}</span>
             <span>${dir}${bar}</span>
-            <span class="dr-llm"><span class="dr-lbl">LLM then</span>${llm}</span>
+            <span class="dr-llm"><span class="dr-lbl">${esc(N.llm)} then</span>${llm}</span>
             <span class="dr-o" title="${esc([o.replace('_', ' '), plan, why].filter(Boolean).join(' · '))}"><span class="o-${esc(o)}">${esc(o.replace('_', ' '))}</span>${plan ? ' · ' + esc(plan) : ''}${why ? `<span class="dr-sub">${esc(why)}</span>` : ''}</span>
             <span class="dr-fwd"><span class="dr-lbl">moved its way</span>${fwd(r.fwdPct)}</span>
           </div>`;
         }).join('') + '</div>';
       }
+      const recentTxt = dr.recentSince ? ` — last ${dr.recentN || ''} answers since ${utcStamp(dr.recentSince)}` : '';
+      html += `<details class="h2h-more" id="h2hAnswers"${wasOpen.answers ? ' open' : ''}><summary>Every recent Jev answer${recentTxt}</summary>${ans}</details>`;
       box.innerHTML = html;
     }
 
