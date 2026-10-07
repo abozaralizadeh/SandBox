@@ -903,21 +903,24 @@
       const hasRoe = trades.some(t => typeof t.roePct === 'number');
       const isWin = t => t.win === true || (typeof t.pnl === 'number' && t.pnl > 0);
       // Bars show what a trade did to the ACCOUNT. ROE is the return on that position's own margin (price move
-      // × leverage): +35% ROE was +0.24% of the account on Oct 7. Never mix the two units in one chart — an
-      // older close without an account figure gets a neutral block the size of a typical bar.
-      const acctAbs = trades.filter(t => typeof t.accountPct === 'number').map(t => Math.abs(t.accountPct)).sort((a, b) => a - b);
-      const acctUnit = acctAbs.length ? acctAbs[Math.floor(acctAbs.length / 2)] : 1;
+      // × leverage): +35% ROE was +0.24% of the account on Oct 7. Never mix the two units in one chart, and never
+      // invent a size: a close with no account figure (before Sep 25 the bot did not record its sizing) is a
+      // small faded stub marked "size not recorded". Oct 7: a "typical bar" placeholder drew ~38 trades at ±0.40%.
+      const acctMax = Math.max(0, ...trades.filter(t => typeof t.accountPct === 'number').map(t => Math.abs(t.accountPct)));
+      const stub = t => hasAcct && !(hasUsd && typeof t.pnl === 'number') && typeof t.accountPct !== 'number';
       const magOf = t => {
         if (hasUsd && typeof t.pnl === 'number') return Math.abs(t.pnl);
-        if (hasAcct) return typeof t.accountPct === 'number' ? Math.abs(t.accountPct) : acctUnit;
+        if (hasAcct) return typeof t.accountPct === 'number' ? Math.abs(t.accountPct) : (acctMax || 1) * 0.12;
         if (typeof t.roePct === 'number') return Math.abs(t.roePct);
         return 1;   // no magnitude on this row (e.g. pre-roePct close) — unit block keeps win/loss readable
       };
       const x = trades.map((t, i) => t.symbol ? t.symbol.replace('-USDT', '') : ('#' + i));
       const data = trades.map(t => {
         const win = isWin(t), v = magOf(t);
+        if (stub(t)) return { value: win ? v : -v, itemStyle: { color: win ? 'rgba(0,230,168,0.25)' : 'rgba(255,59,92,0.25)',
+          borderRadius: win ? [3, 3, 0, 0] : [0, 0, 3, 3] } };
         return { value: win ? v : -v, itemStyle: { color: win ? '#00e6a8' : '#ff3b5c',
-          shadowColor: win ? 'rgba(0,230,168,0.4)' : 'rgba(255,59,92,0.4)', shadowBlur: 8, borderRadius: [3, 3, 0, 0] } };
+          shadowColor: win ? 'rgba(0,230,168,0.4)' : 'rgba(255,59,92,0.4)', shadowBlur: 8, borderRadius: win ? [3, 3, 0, 0] : [0, 0, 3, 3] } };
       });
       const sgnTick = v => (v < 0 ? '−' : '');   // losses sit below zero: their ticks carry the sign
       const fmtMag = v => hasUsd ? sgnTick(v) + Math.abs(v).toFixed(0) : (hasAcct ? sgnTick(v) + Math.abs(v).toFixed(2) + '%' : (hasRoe ? sgnTick(v) + Math.abs(v).toFixed(1) + '%' : ''));
@@ -931,6 +934,7 @@
             let s = `${esc(t.symbol||'')}<br/>${win ? '<b style="color:#00e6a8">WIN</b>' : '<b style="color:#ff3b5c">LOSS</b>'}`;
             if (hasUsd && typeof t.pnl === 'number') s += ` · ${Number(t.pnl).toFixed(2)}`;
             if (typeof t.accountPct === 'number') s += ` · <b>${t.accountPct >= 0 ? '+' : ''}${Number(t.accountPct).toFixed(2)}%</b> of the account`;
+            else if (stub(t)) s += ` · <span style="color:#8aa0b4">size not recorded (closed before Sep 25)</span>`;
             // ROE is price return × leverage on that position's margin, so show the leverage it was earned at.
             if (typeof t.roePct === 'number') s += `<br/><span style="color:#8aa0b4">ROE ${t.roePct >= 0 ? '+' : ''}${Number(t.roePct).toFixed(2)}% on its margin</span>`;
             if (fmtLev(t.leverage)) s += ` <span style="color:#a78bfa">@ ${fmtLev(t.leverage)}</span>`;
