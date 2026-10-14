@@ -71,6 +71,11 @@ repo only reads it. Never add account data or absolute amounts to the dashboard 
    persistently failing day stops re-running the whole image pipeline on every page view.
 6. Content endpoints (`/tomorrownewscontent`, `/aiblogcontent`, `/comicbookcontent`, `/traide/*`)
    are **Referer-guarded** against hotlinking; keep the guard on new data endpoints.
+7. **Every page template carries two analytics tags at the top of `<head>`:** Microsoft Clarity
+   (a separate project ID per page) and Google Analytics (one property, `G-4C6ZLXGB36`, on all
+   seven). A new template needs both. Do NOT add them to generated content or to
+   `_missing_edition_page`: those are written into the reader's iframe inside a page that is
+   already tagged, so a tag there would count every view twice.
 
 ## Gaps in the archives (every generator)
 
