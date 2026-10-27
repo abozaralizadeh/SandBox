@@ -236,6 +236,9 @@
     .dr-status { font-family: var(--mono); font-size: 0.72rem; color: var(--text-2); margin-top: 10px;
       padding: 8px 12px; border-radius: 8px; background: var(--s2); border: 1px solid var(--border); }
     .dr-status.s-idle { color: var(--amber); } .dr-status.s-error { color: var(--down); }
+    /* An archived dual run: the experiment is over and its record is frozen. Muted, dashed, moved to the page end. */
+    #dualRunPanel.archived { border-style: dashed; }
+    .tag.archived { color: var(--text-2); background: var(--s2); border: 1px solid var(--border2); margin-left: 6px; letter-spacing: 1px; }
     .dr-status b { color: var(--text); }
     .dr-hz { width: 100%; border-collapse: collapse; margin-top: 12px; font-family: var(--mono); font-size: 0.72rem; }
     .dr-hz th { color: var(--text-3); font-weight: 500; text-align: right; padding: 4px 8px; font-size: 0.64rem;
@@ -626,7 +629,7 @@
       <div class="panel" id="dualRunPanel">
         <div class="panel-head">
           <div class="panel-title t-cyan"><span class="tick"></span> <span id="h2hTitle">Dual run</span>
-            <span class="h2h-sub" id="h2hSub">· two traders, one account, same gates — each scored only on its own calls</span></div>
+            <span class="h2h-sub" id="h2hSub">· two traders, one account, same gates, each scored only on its own calls</span></div>
         </div>
         <div class="h2h-headline" id="h2hHeadline"></div>
         <div class="h2h-score" id="h2hScore"></div>
@@ -672,6 +675,15 @@
           <span style="color:var(--text-3);font-weight:400;font-family:var(--mono);font-size:0.7rem">· closing early vs letting the bracket run</span></div>
       </div>
       <div id="exitDiscBox"><div class="empty">Measuring…</div></div>
+    </div>
+
+    <!-- The judge: a decision model that gives Luna's calls a blind second opinion and triages runs (judge = judge.judge_report). -->
+    <div class="panel" id="judgePanel" style="display:none">
+      <div class="panel-head">
+        <div class="panel-title t-cyan"><span class="tick"></span> Second opinion
+          <span style="color:var(--text-3);font-weight:400;font-family:var(--mono);font-size:0.7rem">· a decision model judges each call blind, scored on what the market did</span></div>
+      </div>
+      <div id="judgeBox"><div class="empty">Measuring…</div></div>
     </div>
 
     <!-- ═══════════ MACRO CALENDAR — scheduled releases, known a year ahead ═══════════ -->
@@ -1823,6 +1835,74 @@
       box.innerHTML = html;
     }
 
+    // ── The judge: helps Luna instead of trading. Calls are judged blind to their side and scored on the settled
+    // return next to Luna's own stated confidence; run triage predicts whether a flat-book review makes a call.
+    function renderJudge(s) {
+      const panel = el('judgePanel'), box = el('judgeBox');
+      if (!panel || !box) return;
+      const j = s && s.judge;
+      if (!j || j.mode === 'off') { panel.style.display = 'none'; return; }
+      panel.style.display = '';
+      const c = j.calls || {};
+      const v = c.verdict || 'insufficient data';
+      const live = j.mode === 'live';
+      const badge = { 'informative': ['ranks calls', 'v-edge'], 'inverted': ['backwards', 'v-none'],
+                      'not demonstrated': ['no edge yet', 'v-wait'] }[v] || ['measuring', 'v-wait'];
+      const headline = {
+        'informative': 'Its blind read <b>ranks</b> Luna\'s calls: the ones it rated low did worse than the ones it rated high.'
+          + (c.shrinkLowBand ? (live ? ' Calls in its low band now trade at the explore size.' : ' In live mode, calls in its low band would trade at the explore size.') : ''),
+        'inverted': 'Its read runs <b>backwards</b> on Luna\'s calls, so nothing acts on it (Jev\'s confidence did the same).',
+        'not demonstrated': 'Not shown to rank Luna\'s calls yet, so it changes nothing. It is scored on every call until it does.',
+      }[v] || 'Collecting judged calls. Each direction call gets a second opinion that cannot see Luna\'s side, scored once the market settles.';
+      let html = `<div class="edge-verdict"><span class="badge ${badge[1]}">${esc(badge[0])}</span><span class="vtext">${headline}</span></div>`;
+      const rk = c.ranking || {}, lc = c.lunaConfidence || {};
+      const rho = r => (r && r.rho != null) ? `${r.rho >= 0 ? '+' : ''}${Number(r.rho).toFixed(2)}` : '—';
+      const tTxt = r => (r && r.t != null) ? ` <span style="color:var(--text-3);font-size:0.75rem">t ${Number(r.t).toFixed(1)}</span>` : '';
+      if (c.n) {
+        html += `<div class="xd-cmp">
+          <div class="xd-cell"><div class="xl">Calls judged</div><div class="xv">${c.n}</div></div>
+          <div class="xd-cell"><div class="xl">Judge ranks them</div><div class="xv ${cls(rk.rho)}">${rho(rk)}${tTxt(rk)}</div></div>
+          <div class="xd-cell"><div class="xl">Luna's confidence</div><div class="xv ${cls(lc.rho)}">${rho(lc)}${tTxt(lc)}</div></div>
+          <div class="xd-cell"><div class="xl">Agrees with Luna</div><div class="xv">${c.agreeShare != null ? Math.round(c.agreeShare * 100) + '%' : '—'}</div></div>
+        </div>`;
+        const bands = c.bands || {};
+        const names = [['low', 'Rated low'], ['mid', 'Rated middle'], ['high', 'Rated high']].filter(([k]) => bands[k]);
+        if (names.length) {
+          html += '<div class="fam-grid">' + names.map(([k, label]) => {
+            const b = bands[k] || {};
+            return `<div class="fam">
+              <div class="fh"><span class="fname">${label}</span></div>
+              <div class="frow"><span>Calls</span><b>${b.n || 0}</b></div>
+              <div class="frow"><span>Net after cost</span><b class="${cls(b.netPct)}">${fmtPct(b.netPct)}</b></div>
+              <div class="frow"><span>t</span><b>${b.t != null ? Number(b.t).toFixed(1) : '—'}</b></div>
+            </div>`;
+          }).join('') + '</div>';
+        }
+        const ag = c.agree || {}, dis = c.disagree || {}, bench = c.onBenchedSides || {};
+        html += `<div class="edge-meta">`
+              + (ag.n ? `<span>when it agreed <b class="${cls(ag.netPct)}">${fmtPct(ag.netPct)}</b> (${ag.n})</span>` : '')
+              + (dis.n ? `<span>when it disagreed <b class="${cls(dis.netPct)}">${fmtPct(dis.netPct)}</b> (${dis.n})</span>` : '')
+              + (bench.n ? `<span>rated high on a benched side <b class="${cls(bench.netPct)}">${fmtPct(bench.netPct)}</b> (${bench.n})</span>` : '')
+              + (c.orderSpreadP50 != null ? `<span>option-order spread <b>${Number(c.orderSpreadP50).toFixed(2)}</b></span>` : '')
+              + `</div>`;
+      }
+      const t = j.triage || {}, day = t.last24h || {}, pol = t.policy || {};
+      if (day.asked || (t.all || {}).asked) {
+        const useful = day.usefulShare != null ? Math.round(day.usefulShare * 100) + '%' : '—';
+        html += `<div class="edge-meta" style="margin-top:8px"><span style="color:var(--text-3)">run triage, 24h</span>`
+              + `<span>runs asked <b>${day.asked || 0}</b></span><span>made a call <b>${useful}</b></span>`
+              + `<span>${live ? 'skipped' : 'would skip'} <b>${live ? (day.skipped || 0) : (day.wouldSkip || 0)}</b></span>`
+              + (pol.auc != null ? `<span>AUC <b>${Number(pol.auc).toFixed(2)}</b></span>` : '')
+              + `<span>${pol.armed ? `threshold <b>${Number(pol.threshold).toFixed(2)}</b>, misses ${Math.round((pol.missShare || 0) * 100)}%` : esc(pol.reason || 'measuring')}</span>`
+              + `</div>`;
+      }
+      const st = (j.status || {}).primary || {};
+      const stTxt = st.state === 'error' ? `<b class="down">error</b> ${esc(st.reason || '')}` : (st.state === 'ok' ? `<b class="up">ok</b>${st.latencyMsP50 != null ? ' · ' + st.latencyMsP50 + ' ms' : ''}` : 'idle');
+      html += `<div class="edge-meta" style="margin-top:6px;color:var(--text-3)"><span>${esc(j.mode)} · ${esc(j.backend === 'openai' ? 'Decisions API' : 'Microsoft-Decision-1')}${j.control ? ' + control' : ''}</span><span>${stTxt}</span>`
+            + `<span>${live ? 'acts only once its own record proves it (shrink-only)' : 'records and scores only'}</span></div>`;
+      box.innerHTML = html;
+    }
+
     // ── Head to head: Jev vs the LLM agent, each judged only on its own record (dualRun = jev.dual_run_report) ──
     // Identity is a colored MARK beside the name (--jev / --llm, validated categorical slots); values stay in text
     // tokens, signed values in the page's up/down colors. Every chart has a table twin under "Numbers behind the charts".
@@ -1867,7 +1947,9 @@
       const chart = h2hChart('h2hRace');
       const surface = cssVar('--s1') || '#0e131b';
       const since = (dr.since || 0) * 1000;
-      const endMs = Math.max(Date.now(), since + 1);
+      // An archived run's race ends where the experiment did, not at today.
+      const stopMs = dr.mode === 'archived' && dr.archived && dr.archived.until ? dr.archived.until * 1000 : null;
+      const endMs = Math.max(stopMs || Date.now(), since + 1);
       const totals = {};
       const series = ['jev', 'llm'].map(k => {
         let cum = 0;
@@ -2009,17 +2091,30 @@
       const section = el('h2hSection'), box = el('dualRunBox');
       if (!section || !box) return;
       const dr = s && s.dualRun;
-      if (!dr || (dr.mode === 'off' && !dr.traders)) { section.style.display = 'none'; return; }
+      if (!dr || ((dr.mode === 'off' || dr.mode === 'archived') && !dr.traders)) { section.style.display = 'none'; return; }
       section.style.display = '';
       const tr = dr.traders || {};
       const K = ['jev', 'llm'];
       const T = k => tr[k] || {};
       const C = { jev: cssVar('--jev') || '#3987e5', llm: cssVar('--llm') || '#d95926' };
       const N = { jev: traderName('jev'), llm: traderName('llm', T('llm').model) };
-      el('h2hLabel').textContent = `${N.jev} vs ${N.llm}`;
-      el('h2hTitle').textContent = `${N.jev} vs ${N.llm}`;
-      el('h2hSub').textContent = '· two traders, one account, same gates — each scored only on its own calls'
-        + (dr.since ? ` since ${utcStamp(dr.since)}` : '');
+      // JEV_MODE=archived: the experiment is over. Its final record is frozen over Jev's own window
+      // (archived.since → archived.until), so the panel moves below the live sections and says so.
+      const arc = dr.mode === 'archived' ? (dr.archived || {}) : null;
+      const day = ts => new Date(ts * 1000).toISOString().slice(0, 10);
+      el('dualRunPanel').classList.toggle('archived', !!arc);
+      if (arc && !section.dataset.moved) {
+        const foot = document.querySelector('footer');
+        if (foot) foot.parentNode.insertBefore(section, foot);
+        section.dataset.moved = '1';
+      }
+      el('h2hLabel').textContent = arc ? `Archived experiment · ${N.jev} vs ${N.llm}` : `${N.jev} vs ${N.llm}`;
+      el('h2hTitle').innerHTML = `${esc(N.jev)} vs ${esc(N.llm)}` + (arc ? '<span class="tag archived">ARCHIVED</span>' : '');
+      el('h2hSub').textContent = arc
+        ? `· stopped experiment, ${arc.since ? day(arc.since) : '?'} to ${arc.until ? day(arc.until) : '?'}`
+          + (arc.days != null ? ` (${Math.round(arc.days)} days)` : '') + ' · final record, both traders over the same window'
+        : '· two traders, one account, same gates, each scored only on its own calls'
+          + (dr.since ? ` since ${utcStamp(dr.since)}` : '');
       const H = commonHorizon(tr);
       const hrow = k => (H ? ((T(k).byHorizon || {})[H] || {}) : {});
 
@@ -2038,7 +2133,8 @@
         const tt = `t ${Number(t).toFixed(1)}`;
         return t >= 1 ? `${N[k]}'s calls have an edge (${tt})` : (t <= -1 ? `${N[k]}'s calls lose money (${tt})` : `${N[k]} not proven either way (${tt})`);
       }).join(' · ');
-      el('h2hHeadline').innerHTML = (facts.join('<br/>') || 'Measuring…')
+      const stopped = arc ? `Stopped ${arc.until ? day(arc.until) : ''}. No new ${esc(N.jev)} calls since; this is how it finished.<br/>` : '';
+      el('h2hHeadline').innerHTML = stopped + (facts.join('<br/>') || 'Measuring…')
         + `<span class="h2h-note">${esc(proof)} — |t| ≥ 1 is where a record stops being noise, the same bar each playbook's stake is judged on.</span>`;
 
       // Scoreboard: one tile per question, both traders in each; "ahead" marks the better number.
@@ -2074,7 +2170,10 @@
       const modeText = { live: 'live — Jev places trial-size real entries through the same gates', shadow: 'shadow — every Jev call runs the full gate chain and is scored, no orders', off: 'off' }[dr.mode] || dr.mode;
       let html = '';
       const st = dr.status;
-      if (st) {
+      if (arc) {
+        html += `<div class="dr-status"><span class="badge v-wait">archived</span> ${esc(N.jev)} ran from <b>${arc.since ? utcStamp(arc.since) : '?'}</b>`
+          + ` to <b>${arc.until ? utcStamp(arc.until) : '?'}</b> · no calls, orders or position checks since · numbers frozen</div>`;
+      } else if (st) {
         const oc = st.outcomes || {};
         const bits = ['placed', 'shadow', 'refused', 'stand_aside', 'error'].filter(k => oc[k]).map(k => `${k.replace('_', ' ')} <b>${oc[k]}</b>`);
         const mg = st.managed || {};
@@ -2178,7 +2277,9 @@
         }).join('') + '</div>';
       }
       const recentTxt = dr.recentSince ? ` — last ${dr.recentN || ''} answers since ${utcStamp(dr.recentSince)}` : '';
-      html += `<details class="h2h-more" id="h2hAnswers"${wasOpen.answers ? ' open' : ''}><summary>Every recent Jev answer${recentTxt}</summary>${ans}</details>`;
+      if (!arc || rows.length) {
+        html += `<details class="h2h-more" id="h2hAnswers"${wasOpen.answers ? ' open' : ''}><summary>${arc ? 'Jev\'s last answers' : 'Every recent Jev answer'}${recentTxt}</summary>${ans}</details>`;
+      }
       box.innerHTML = html;
     }
 
@@ -2252,6 +2353,7 @@
         renderStrategyEdge(s);
         renderTakerFlow(s);
         renderExitDiscipline(s);
+        renderJudge(s);
         renderDualRun(s);
         renderMacroEvents(s);
         if (!window._tradesLoaded) { renderTrades(s.trades); }   // fast seed; loadTrades() pulls fuller history
