@@ -152,6 +152,38 @@ retype it. Constraints that were learned the hard way; do not undo them:
 - `COMICBOOK_PANEL_QUALITY` (default `high`; see *Image model capability* for `xhigh`/`max`) and `COMICBOOK_RESTYLE_ARC` (re-style a running arc
   today rather than waiting for the next arc boundary) are the two rollout dials.
 
+## AIOPS: stopping the research walk from going in circles
+
+The solver drifts if nothing holds it to the problem. Measured on the Riemann history: 40
+straight days of rigorous micro-results that never touched the conjecture, drifting saddle
+ratios (Sep 23) to auxiliary hypergeometric sums (Oct 2) to theta-kernel Turan ratios
+(Oct 16), each day proving a property of an object invented the day before.
+
+The cause was in the prompt and the memory shape. `open_leads` is REPLACED by today's
+`next_steps` every day, and the prompt said to prefer an open lead over a fresh direction, so
+the agenda could only ever go deeper. Nothing measured distance to the problem, and
+`progress_percent` was asked for as cumulative but reported fresh each day, so the page's
+headline bounced 0.3 to 0.1 to 0.01 and looked like the work was reversing.
+
+Three things now hold it:
+
+- **Lines of attack** (`memory.py`, `attack_lines`): the agent names its line in the `focus`
+  output key; the ledger counts consecutive days on it. Past `AIOPS_MAX_LINE_DAYS` (7) the
+  line goes overdue and a STOP directive is injected demanding it either close the line out
+  or abandon it. The line is NOT auto-parked at the cap, it stays active and overdue so the
+  directive keeps firing until the agent actually moves. Resuming a parked label restores its
+  old counter, so renaming a line for a day does not buy another seven.
+- **A text backstop** (`_rut_terms`): the ledger trusts the agent's own label, so this reads
+  what it actually wrote. It is a CHANGE detector, not a repetition detector: it compares the
+  distinctive vocabulary of the last 7 days against the 7 before. One window on its own always
+  looks repetitive, which is just what focused work is. Generic maths words and the problem's
+  own name are stopworded, without which it flagged 32 of 34 windows and meant nothing.
+- **`relation_to_problem`**, a required output key: one line on what today gives you toward
+  the problem. "Nothing direct yet" is an allowed answer and a useful signal.
+
+`progress_percent` now gets the previous value in the prompt and is asked to be
+non-decreasing unless the agent is retracting something, which it must then say.
+
 ## Handoffs on reasoning models
 
 Do NOT use the SDK's `remove_all_tools` as a handoff `input_filter` here. It strips

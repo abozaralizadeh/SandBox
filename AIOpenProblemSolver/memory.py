@@ -29,6 +29,18 @@ from AIOpenProblemSolver.azurestorage import load_memory_record, save_memory_rec
 
 BUCKETS = ("established", "dead_ends", "experiments", "open_leads")
 
+# The line of attack the agent is currently working, tracked across days. This is separate
+# from `open_leads` on purpose: open_leads is REPLACED by today's next_steps every day, which
+# makes the agenda a pure depth-first walk. Each day picks up yesterday's follow-up, produces
+# a deeper follow-up, and nothing ever pulls the work back toward the actual problem. Riemann
+# ran 40 straight days that way, drifting saddle ratios -> auxiliary hypergeometric sums ->
+# theta-kernel Turan ratios, every result a property of an object it had invented the day
+# before. Lines give the agenda a memory and a time limit.
+LINES_KEY = "attack_lines"
+MAX_LINES_KEPT = int(os.getenv("AIOPS_MAX_LINES_KEPT", "12"))
+# Consecutive days on one line before it is parked and the agent must work something else.
+MAX_LINE_DAYS = int(os.getenv("AIOPS_MAX_LINE_DAYS", "7"))
+
 # Compaction thresholds. Items are short one-liners, so these are generous; the point is
 # to bound the prompt, not to keep it tiny.
 MAX_ITEMS = int(os.getenv("AIOPS_MEMORY_MAX_ITEMS", "80"))
@@ -43,7 +55,8 @@ ITEM_MAX_CHARS = int(os.getenv("AIOPS_MEMORY_ITEM_MAX_CHARS", "600"))
 
 def _empty() -> Dict[str, Any]:
     return {b: [] for b in BUCKETS} | {"version": 0, "iterations_covered": 0,
-                                       "compacted_at": None, "updated_at": None}
+                                       "compacted_at": None, "updated_at": None,
+                                       LINES_KEY: []}
 
 
 def _strip_stamp(text: str) -> str:
@@ -96,6 +109,8 @@ def load_memory(problem: str) -> Dict[str, Any]:
     for key in ("version", "iterations_covered", "compacted_at", "updated_at"):
         if record.get(key) is not None:
             memory[key] = record[key]
+    raw_lines = record.get(LINES_KEY)
+    memory[LINES_KEY] = [l for l in raw_lines if isinstance(l, dict)] if isinstance(raw_lines, list) else []
     return memory
 
 
@@ -181,6 +196,113 @@ def render_memory(memory: Dict[str, Any]) -> str:
     return f"{header}\n\n" + "\n\n".join(sections)
 
 
+def active_line(memory: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """The line of attack currently being worked, if any."""
+    for line in reversed(memory.get(LINES_KEY) or []):
+        if line.get("status") == "active":
+            return line
+    return None
+
+
+def line_is_overdue(memory: Dict[str, Any], max_days: int = MAX_LINE_DAYS) -> bool:
+    """Has the active line run its allowance without being closed out?"""
+    line = active_line(memory)
+    return bool(line and int(line.get("iterations") or 0) >= max_days)
+
+
+def record_attack_line(memory: Dict[str, Any], label: str, bridge: str, stamp: str,
+                       max_days: int = MAX_LINE_DAYS) -> Dict[str, Any]:
+    """Fold today's declared line of attack into the ledger.
+
+    Same label as the active line means another day on it, so its counter rises. The line is
+    NOT auto-parked at the cap: it stays active and overdue, so the pivot directive keeps
+    firing every day until the agent actually moves. Parking on the cap would clear the flag
+    and let the next prompt go quiet while nothing had changed.
+
+    A different label parks the old line (parked, not deleted, since a parked line can be
+    resumed) and opens the new one. Resuming a parked label restores its old counter rather
+    than starting from one, otherwise an agent could sit on the same object forever by
+    renaming it for a day and coming back.
+    """
+    label = (label or "").strip()[:ITEM_MAX_CHARS]
+    if not label:
+        return memory
+
+    lines = [l for l in (memory.get(LINES_KEY) or []) if isinstance(l, dict)]
+    key = _normalize(label)
+    current = next((l for l in reversed(lines) if l.get("status") == "active"), None)
+
+    if current is not None and _normalize(current.get("label", "")) == key:
+        current["iterations"] = int(current.get("iterations") or 0) + 1
+        current["last_worked"] = stamp
+        if bridge:
+            current["bridge"] = bridge.strip()[:ITEM_MAX_CHARS]
+        memory[LINES_KEY] = lines[-MAX_LINES_KEPT:]
+        return memory
+
+    if current is not None:
+        current["status"] = "parked"
+        current["parked_reason"] = (
+            f"ran {current.get('iterations')} days without closing out"
+            if int(current.get("iterations") or 0) >= max_days
+            else "the agent moved to a different line"
+        )
+
+    resumed = next((l for l in reversed(lines)
+                    if l.get("status") == "parked" and _normalize(l.get("label", "")) == key), None)
+    if resumed is not None:
+        resumed["status"] = "active"
+        resumed["iterations"] = int(resumed.get("iterations") or 0) + 1
+        resumed["last_worked"] = stamp
+        resumed.pop("parked_reason", None)
+        if bridge:
+            resumed["bridge"] = bridge.strip()[:ITEM_MAX_CHARS]
+    else:
+        lines.append({
+            "label": label,
+            "bridge": (bridge or "").strip()[:ITEM_MAX_CHARS],
+            "started": stamp,
+            "last_worked": stamp,
+            "iterations": 1,
+            "status": "active",
+        })
+
+    memory[LINES_KEY] = lines[-MAX_LINES_KEPT:]
+    return memory
+
+
+def render_attack_lines(memory: Dict[str, Any], max_days: int = MAX_LINE_DAYS) -> str:
+    """The prompt block describing where the agenda stands."""
+    lines = [l for l in (memory.get(LINES_KEY) or []) if isinstance(l, dict)]
+    if not lines:
+        return "No line of attack recorded yet. Open one today and name it."
+
+    out: List[str] = []
+    current = active_line(memory)
+    if current:
+        n = int(current.get("iterations") or 0)
+        over = " OVER THE LIMIT, this line must end today" if n >= max_days else ""
+        out.append(
+            f"CURRENT LINE ({n} consecutive day{'s' if n != 1 else ''} of {max_days} allowed{over}): "
+            f"{current.get('label')}"
+        )
+        if current.get("bridge"):
+            out.append(f"  how it was meant to reach the problem: {current['bridge']}")
+    else:
+        out.append("CURRENT LINE: none active. You must open a new one today.")
+
+    parked = [l for l in lines if l.get("status") == "parked"][-6:]
+    if parked:
+        out.append("")
+        out.append("PARKED LINES (may be resumed, but only with a new idea that moves them):")
+        for line in parked:
+            out.append(
+                f"- {line.get('label')} ({line.get('iterations')} days, "
+                f"{line.get('parked_reason', 'parked')})"
+            )
+    return "\n".join(out)
+
+
 def _merge(memory: Dict[str, Any], parsed: Dict[str, Any], stamp: str) -> Dict[str, Any]:
     """Fold one iteration's report into the memory, newest last, without duplicates."""
     incoming = {
@@ -203,6 +325,13 @@ def _merge(memory: Dict[str, Any], parsed: Dict[str, Any], stamp: str) -> Dict[s
     # either been taken up (it is an experiment/dead end now) or been abandoned.
     if incoming["open_leads"]:
         memory["open_leads"] = [f"[{stamp}] {item}" for item in incoming["open_leads"]]
+
+    record_attack_line(
+        memory,
+        label=str(parsed.get("focus") or "").strip(),
+        bridge=str(parsed.get("relation_to_problem") or "").strip(),
+        stamp=stamp,
+    )
 
     memory["iterations_covered"] = int(memory.get("iterations_covered") or 0) + 1
     memory["updated_at"] = datetime.utcnow().isoformat()

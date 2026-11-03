@@ -1,4 +1,5 @@
 import json
+import re
 import os
 import threading
 from datetime import datetime
@@ -14,7 +15,15 @@ from AIOpenProblemSolver.azurestorage import (
     try_acquire_iteration_lock,
 )
 from AIOpenProblemSolver.graph import get_open_deep_search_agent
-from AIOpenProblemSolver.memory import load_or_seed_memory, render_memory, update_memory
+from AIOpenProblemSolver.memory import (
+    MAX_LINE_DAYS,
+    active_line,
+    line_is_overdue,
+    load_or_seed_memory,
+    render_attack_lines,
+    render_memory,
+    update_memory,
+)
 
 try:  # LangGraph >= 0.2
     from langgraph.types import Overwrite, StateSnapshot
@@ -210,6 +219,93 @@ def _recent_summaries(problem: str, limit: int = 5) -> str:
     return "\n".join(lines)
 
 
+# Words that say nothing about WHICH object is being studied, so they must not count as
+# evidence that the agent is circling the same thing. The list is deliberately long: a first
+# cut without it flagged 32 of 34 windows on real history, because "formula", "coefficient",
+# "progress" and the problem's own name appear nearly every day and mean nothing.
+_RUT_STOPWORDS = frozenset("""
+about above after again against along among around because before being below between both
+could derived derive derivation during each either every exact exactly first found further
+general given gives having identity implies indeed instead into itself large later least
+level limit local lower making matching might model models normalized number numerical
+numerically order orders other output problem proof proved proving range ratio ratios
+result results same second several should showed shows simple since slope small still
+stronger structure term terms tested testing their there these third this those
+three through today took toward under until using value values verified version where
+which while whose within without would yield yields
+analysis analytic approach argument asymptotic asymptotics bound bounded bounds class closed
+coefficient coefficients compact computation computations computed conditional conjecture
+conjectured connection constant continuous criterion decomposition derivative derivatives
+discrete dominant established estimate evidence exhibit expansion explicit extended extension
+finite formula formulas function functions global high-precision higher implication
+inequality inequalities integral method negative positive positivity precise precision
+problem product progress proves quantity recurrence region relation representation sequence series
+sharp sharper statement strong sufficient summand symbolic theorem theory transform uniform
+""".split())
+
+
+def _problem_words(problem: str) -> set:
+    """The problem's own vocabulary. "riemann" appears in almost every summary of the Riemann
+    work, so it is evidence of nothing."""
+    return {w for w in re.findall(r"[a-z][a-z-]{4,}", (problem or "").lower())}
+
+
+def _distinctive_terms(summaries: List[str], skip: set, min_share: float = 0.7) -> set:
+    """Content words shared by most of a window of summaries."""
+    if not summaries:
+        return set()
+    counts: Dict[str, int] = {}
+    for text in summaries:
+        words = {w for w in re.findall(r"[a-z][a-z-]{4,}", text)
+                 if w not in _RUT_STOPWORDS and w not in skip}
+        for w in words:
+            counts[w] = counts.get(w, 0) + 1
+    threshold = max(2, int(len(summaries) * min_share))
+    return {w for w, c in counts.items() if c >= threshold}
+
+
+def _rut_terms(problem: str, days: int) -> tuple:
+    """Terms the agent has been circling for TWO windows running, and how many days that spans.
+
+    A deterministic backstop for the attack-line ledger, which believes the label the agent
+    gives its own work. This reads what it actually wrote instead. The test is deliberately a
+    change detector, not a repetition detector: it asks whether the distinctive vocabulary of
+    the last `days` is the SAME as the vocabulary of the `days` before that. One window on its
+    own is always repetitive, which is just what focused work looks like.
+    """
+    history, _ = get_iteration_slice(problem, offset=0, limit=days * 2)
+    summaries = [(e.get("summary") or "").lower() for e in history]
+    summaries = [t for t in summaries if t]
+    if len(summaries) < days + 2:
+        return (), 0
+
+    skip = _problem_words(problem)
+    recent = _distinctive_terms(summaries[:days], skip)
+    earlier = _distinctive_terms(summaries[days:], skip)
+    carried = recent & earlier
+    return tuple(sorted(carried))[:6], len(summaries)
+
+
+def _latest_progress(problem: str) -> str:
+    """The last cumulative progress figure, for the prompt to anchor against.
+
+    Without it the agent invents a fresh number every day, so the page's headline bounced
+    0.3 -> 0.1 -> 0.01 -> 0.02 and looked like the work was going backwards.
+    """
+    try:
+        history, _ = get_iteration_slice(problem, offset=0, limit=1)
+    except Exception:
+        return "unknown"
+    if not history:
+        return "none yet (this is the first iteration)"
+    meta = _decode_metadata(history[0].get("metadata", ""))
+    value = meta.get("progress_percent")
+    try:
+        return f"{float(value):g}%"
+    except (TypeError, ValueError):
+        return "unknown"
+
+
 async def _run_iteration(problem: str, today: datetime) -> Dict[str, Any]:
     agent, browser_aclose = await get_open_deep_search_agent()
     history_snippet = _recent_summaries(problem)
@@ -217,6 +313,52 @@ async def _run_iteration(problem: str, today: datetime) -> Dict[str, Any]:
     # from spending today re-running an experiment it already ran (see memory.py).
     memory = load_or_seed_memory(problem)
     memory_snippet = render_memory(memory)
+    lines_snippet = render_attack_lines(memory)
+    previous_progress = _latest_progress(problem)
+
+    # Two independent reads on "are we going in circles": the ledger (what the agent said it
+    # was working on) and the summaries (what it actually wrote). Either one can raise the flag.
+    rut_words, rut_days = _rut_terms(problem, days=max(MAX_LINE_DAYS, 7))
+    stuck_by_ledger = line_is_overdue(memory)
+    # One distinctive word (not generic, not the problem's own name) surviving two full
+    # windows means the same object is still being turned over. On the real history that
+    # fires across the two genuine ruts and stays quiet while the work is actually moving.
+    stuck_by_text = len(rut_words) >= 1
+
+    if stuck_by_ledger or stuck_by_text:
+        current = active_line(memory)
+        evidence = []
+        if stuck_by_ledger and current:
+            evidence.append(
+                f"the line \"{current.get('label')}\" has had {current.get('iterations')} "
+                f"consecutive days"
+            )
+        if stuck_by_text:
+            evidence.append(
+                f"across the last {rut_days} days the same subject keeps coming back "
+                f"({', '.join(rut_words)}), so the vocabulary has not moved in two weeks"
+            )
+        pivot_directive = f"""
+## STOP. YOU ARE IN A RUT. (this overrides the preference for continuing an open lead)
+Evidence: {'; and '.join(evidence)}.
+
+You have been refining one object instead of attacking the problem. Each day you proved a
+property of something you invented the day before, and the distance to the actual problem
+grew. That is not progress, however rigorous each step was.
+
+Today you may NOT continue that line. Choose exactly one:
+  (a) CLOSE IT OUT. State the single theorem the line was meant to deliver, prove it or show
+      it is false, and say plainly what it gives you toward the problem. No new sub-objects.
+  (b) ABANDON IT. Say in one line why it will not reach the problem, add it to dead_ends,
+      and open a genuinely different attack. Different means a different technique family,
+      not a different parameter of the same construction.
+
+Set `focus` to the new line's label. If you pick (a) and finish, `focus` is the new line you
+open afterwards. Ignoring this and producing another refinement of the same object is the
+one outcome that counts as a wasted day.
+"""
+    else:
+        pivot_directive = ""
 
     system_prompt = f"""
 You are Open Problem Solver, a creative autonomous mathematician working to solve one of the most important open problems in mathematics.
@@ -243,14 +385,19 @@ Make tangible, ORIGINAL progress on the following problem. Do not merely summari
 ## Research Memory (accumulated across all previous iterations)
 {memory_snippet}
 
+## Lines of Attack (the agenda, tracked across days)
+{lines_snippet}
+
 ## Historical Progress (recent daily summaries)
 {history_snippet}
-
+{pivot_directive}
 ## Working With Your Memory (mandatory)
 - The memory above is your own record from previous days. Treat it as fact.
 - Do NOT re-run an experiment listed under "COMPUTATIONS ALREADY RUN" — reuse its stated result. If you genuinely need to revisit one, say why and change it substantively (wider range, different method, sharper hypothesis).
 - Do NOT re-attempt an approach listed under "ALREADY TRIED AND FAILED" unless you have a concrete new idea that defeats the specific reason it failed — and state that reason and your fix explicitly.
 - Build on "ESTABLISHED SO FAR" rather than re-deriving it, and prefer picking up an "OPEN LEAD" over inventing a fresh direction, unless you can argue the lead is exhausted.
+- A follow-up is only worth taking if it shortens the distance to the PROBLEM. Refining an object you invented yourself, and then refining that, is how a research programme dies: each step is rigorous and the whole goes nowhere. Before adopting a lead, say what it would give you toward the problem if it worked out. If you cannot, drop it and pick something else.
+- Every few days, step back and ask the blunt question: if today's result were fully proved, would anyone be closer to settling the problem? If the answer is no several days running, the line is wrong, not just slow.
 
 ## Expectations for Today
 - Run at least 3-5 computational experiments using python_math_sandbox — each one NEW relative to the memory above
@@ -268,7 +415,9 @@ When you are finished, output valid JSON (no code fences) with these keys:
 - dead_ends: array of one-line strings for every approach you tried today that did NOT work, each naming the approach AND the concrete reason it failed. Empty array if nothing failed — but a day with no failures is rare, so be honest.
 - established: array of one-line strings for results you consider settled after today (proven, or verified strongly enough to build on). Mark proven vs. verified.
 - references: array of citation strings formatted as "Title — URL". Include only sources you actually consulted.
-- progress_percent: number between 0 and 100 representing cumulative progress toward fully solving the problem. Be conservative and honest — a genuine novel partial result might be 0.1-1%. Do not inflate.
+- focus: a SHORT label (<= 80 chars) naming the line of attack you worked today, e.g. "Turan inequalities for xi coefficients". Reuse the current line's label verbatim if you continued it; use a new label when you open a new line. This is how the agenda above is tracked, so be consistent.
+- relation_to_problem: one line stating what today's result gives you toward the problem itself, if anything. Say "nothing direct yet, this is groundwork for X" when that is the truth. Do not dress up a property of an auxiliary object as progress on the problem.
+- progress_percent: number between 0 and 100 representing CUMULATIVE progress toward fully solving the problem, counting everything established to date, not just today. The last recorded value was {previous_progress}. It should normally be greater than or equal to that. Going below it means you are retracting earlier work, which is legitimate but must be said in progress_comment. Be conservative and honest: a genuine novel partial result moves this by a fraction of a percent. Do not inflate.
 - progress_comment: short (<= 120 characters) status note contextualizing the progress_percent value. Describe what was achieved, not what was attempted.
 
 Never wrap the JSON in code fences.
@@ -323,6 +472,8 @@ Task: Make original progress on the problem today. Think creatively, compute ext
     progress_comment = progress_comment.strip()
 
     metadata = {
+        "focus": str(parsed.get("focus") or "").strip(),
+        "relation_to_problem": str(parsed.get("relation_to_problem") or "").strip(),
         "next_steps": parsed.get("next_steps", []),
         "references": parsed.get("references", []),
         "experiments": parsed.get("experiments", []),

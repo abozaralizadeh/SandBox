@@ -163,3 +163,29 @@ sequenceDiagram
   (the dropdown registry). A blob container exists (`aiops_blob_name`) but is currently unused.
 - **Creativity:** a higher LLM temperature (`AIOPS_LLM_TEMPERATURE`, default 0.8) encourages
   novel mathematical approaches across iterations.
+
+## Keeping the research from circling
+
+A long-running solver drifts. On the Riemann problem it spent 40 consecutive days on
+rigorous micro-results that never touched the conjecture: saddle ratios, then auxiliary
+hypergeometric sums, then theta-kernel Turan ratios, each day a property of an object it had
+invented the day before.
+
+The agenda caused it. `open_leads` in `memory.py` is replaced by today's `next_steps` on every
+iteration, and the prompt preferred an open lead over a fresh direction, so the walk could only
+go deeper. Three mechanisms now bound it:
+
+1. `attack_lines` in the memory record. The agent names its line of attack in the `focus`
+   output key and the ledger counts consecutive days on it. Past `AIOPS_MAX_LINE_DAYS`
+   (default 7) the line is overdue and the iteration prompt carries a STOP directive: close
+   the line out, or abandon it and open a different one. The line stays active while overdue
+   so the directive repeats until the agent really moves, and a parked label that gets picked
+   up again resumes its old counter.
+2. `_rut_terms` in `prompt.py`, a deterministic backstop that reads the summaries rather than
+   trusting the label. It compares the distinctive vocabulary of the last 7 days with the 7
+   before, so it detects a lack of change rather than mere focus.
+3. `relation_to_problem`, a required output key stating what the day's work gives toward the
+   problem. Stored in the iteration metadata.
+
+`progress_percent` is anchored: the prompt carries the previous value and asks for a
+cumulative, non-decreasing figure unless the agent is explicitly retracting a result.
