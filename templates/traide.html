@@ -369,6 +369,7 @@
     .xd-cell .xl { font-family: var(--mono); font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.6px;
       color: var(--text-3); margin-bottom: 6px; }
     .xd-cell .xv { font-family: var(--mono); font-size: 1.18rem; font-weight: 700; }
+    .xd-cell .xs { font-family: var(--mono); font-size: 0.68rem; color: var(--text-3); margin-top: 4px; }
 
     /* ── strategy edge — does the DIRECTION CALL predict, and which playbook is paying? ──
        Deliberately distinct from the win/loss panel: win rate conflates the direction call with fill
@@ -681,7 +682,7 @@
     <div class="panel" id="judgePanel" style="display:none">
       <div class="panel-head">
         <div class="panel-title t-cyan"><span class="tick"></span> Second opinion
-          <span style="color:var(--text-3);font-weight:400;font-family:var(--mono);font-size:0.7rem">· a decision model judges each call blind, scored on what the market did</span></div>
+          <span style="color:var(--text-3);font-weight:400;font-family:var(--mono);font-size:0.7rem">· decision models read each of Luna's calls blind and get scored on what the market did. A helper, never a trader</span></div>
       </div>
       <div id="judgeBox"><div class="empty">Measuring…</div></div>
     </div>
@@ -1853,8 +1854,22 @@
           + (c.shrinkLowBand ? (live ? ' Calls in its low band now trade at the explore size.' : ' In live mode, calls in its low band would trade at the explore size.') : ''),
         'inverted': 'Its read runs <b>backwards</b> on Luna\'s calls, so nothing acts on it (Jev\'s confidence did the same).',
         'not demonstrated': 'Not shown to rank Luna\'s calls yet, so it changes nothing. It is scored on every call until it does.',
-      }[v] || 'Collecting judged calls. Each direction call gets a second opinion that cannot see Luna\'s side, scored once the market settles.';
+      }[v] || `Collecting judged calls (${c.n || 0} of the ${j.minSamples || 20} it needs before it is scored). Each direction call gets a second opinion that cannot see Luna's side, scored once the market settles.`;
       let html = `<div class="edge-verdict"><span class="badge ${badge[1]}">${esc(badge[0])}</span><span class="vtext">${headline}</span></div>`;
+      // who is judging: the judge and the optional control, each with its own health since the bot's last start
+      const health = st => !st || !st.state || st.state === 'idle' ? 'waiting for its first call'
+        : st.state === 'error' ? `<span class="down">error</span> ${esc(st.reason || '')}`
+        : `<span class="up">ok</span>${st.latencyMsP50 != null ? ' · ' + st.latencyMsP50 + ' ms' : ''}`;
+      const stAll = j.status || {};
+      const who = [[`Judge · ${j.backend === 'openai' ? 'Decisions API' : 'Microsoft'}`,
+                    j.model || (j.backend === 'openai' ? 'gpt-6-luna' : 'Decision-1'),
+                    (j.backend === 'openai' ? 'reads the state + 3 charts' : 'reads the state as text'), stAll.primary]];
+      if (j.control) who.push([`Control · ${j.control === 'microsoft' ? 'Microsoft' : 'Decisions API'}`,
+                               j.controlModel || (j.control === 'microsoft' ? 'Decision-1' : 'gpt-6-luna'),
+                               'same questions, as text', stAll.control]);
+      html += '<div class="xd-cmp">' + who.map(([label, model, what, st]) => `<div class="xd-cell">
+          <div class="xl">${esc(label)}</div><div class="xv" style="font-size:1rem">${esc(model)}</div>
+          <div class="xs">${esc(what)}</div><div class="xs">${health(st)}</div></div>`).join('') + '</div>';
       const rk = c.ranking || {}, lc = c.lunaConfidence || {};
       const rho = r => (r && r.rho != null) ? `${r.rho >= 0 ? '+' : ''}${Number(r.rho).toFixed(2)}` : '—';
       const tTxt = r => (r && r.t != null) ? ` <span style="color:var(--text-3);font-size:0.75rem">t ${Number(r.t).toFixed(1)}</span>` : '';
@@ -1886,6 +1901,13 @@
               + (c.orderSpreadP50 != null ? `<span>option-order spread <b>${Number(c.orderSpreadP50).toFixed(2)}</b></span>` : '')
               + `</div>`;
       }
+      const cc = j.controlCalls || {};
+      if (cc.n) {
+        const crk = cc.ranking || {};
+        html += `<div class="edge-meta" style="margin-top:8px"><span style="color:var(--text-3)">control on the same calls</span>`
+              + `<span>${esc(j.controlModel || 'control')} ranks them <b class="${cls(crk.rho)}">${rho(crk)}</b>${tTxt(crk)}</span>`
+              + `<span>${esc(cc.verdict || 'insufficient data')}</span><span>${cc.n} calls</span></div>`;
+      }
       const t = j.triage || {}, day = t.last24h || {}, pol = t.policy || {};
       if (day.asked || (t.all || {}).asked) {
         const useful = day.usefulShare != null ? Math.round(day.usefulShare * 100) + '%' : '—';
@@ -1896,10 +1918,8 @@
               + `<span>${pol.armed ? `threshold <b>${Number(pol.threshold).toFixed(2)}</b>, misses ${Math.round((pol.missShare || 0) * 100)}%` : esc(pol.reason || 'measuring')}</span>`
               + `</div>`;
       }
-      const st = (j.status || {}).primary || {};
-      const stTxt = st.state === 'error' ? `<b class="down">error</b> ${esc(st.reason || '')}` : (st.state === 'ok' ? `<b class="up">ok</b>${st.latencyMsP50 != null ? ' · ' + st.latencyMsP50 + ' ms' : ''}` : 'idle');
-      html += `<div class="edge-meta" style="margin-top:6px;color:var(--text-3)"><span>${esc(j.mode)} · ${esc(j.backend === 'openai' ? 'Decisions API' : 'Microsoft-Decision-1')}${j.control ? ' + control' : ''}</span><span>${stTxt}</span>`
-            + `<span>${live ? 'acts only once its own record proves it (shrink-only)' : 'records and scores only'}</span></div>`;
+      html += `<div class="edge-meta" style="margin-top:6px;color:var(--text-3)"><span>${esc(j.mode)}</span>`
+            + `<span>${live ? 'acts only once its own record proves it (shrink-only)' : 'records and scores only, never touches a trade'}</span></div>`;
       box.innerHTML = html;
     }
 
