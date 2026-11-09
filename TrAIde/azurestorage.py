@@ -15,6 +15,7 @@ Data contract (written by trAIde/src/dashboard_publisher.py):
 """
 
 import json
+import time
 import os
 
 from dotenv import load_dotenv
@@ -137,12 +138,31 @@ def get_equity_series(start_day=None, end_day=None) -> list:
         return []
 
 
-def _query_data_partition(partition_key: str, limit: int) -> list:
+# These partitions only ever grow (44k decisions, 18k plans), and the page polls them every
+# 60-90 seconds, so reading the whole partition to show the newest 30-40 rows was the second
+# largest reader in the app after AIOPS. RowKeys are time-ordered and fixed width, so a
+# `RowKey ge` bound is a key range the service can satisfy without handing us the history.
+# If the window turns out too narrow the query is simply repeated unbounded, so what the page
+# shows never changes, only what it costs to fetch.
+# Windows to try for the decision feed, narrowest first. Measured on the live table: 3 days
+# holds ~870 decisions, comfortably more than the route's max limit of 100, while the whole
+# partition is 44k rows / 24 MB. The wider steps exist because activity is bursty: if the bot
+# goes quiet the narrow window would come up short, and widening by a step is far cheaper than
+# falling straight back to the whole partition.
+FEED_WINDOW_DAYS = [int(d) for d in
+                    os.getenv("TRAIDE_FEED_WINDOW_DAYS", "3,21,90").split(",") if d.strip()]
+
+
+def _query_data_partition(partition_key: str, limit: int, rowkey_floor: str = None,
+                          wider_floors: list = None) -> list:
     if _table_client is None:
         return []
     try:
+        filt = f"PartitionKey eq '{partition_key}'"
+        if rowkey_floor:
+            filt += f" and RowKey ge '{rowkey_floor}'"
         rows = _table_client.query_entities(
-            query_filter=f"PartitionKey eq '{partition_key}'", results_per_page=1000
+            query_filter=filt, results_per_page=1000
         )
         items = []
         for r in rows:
@@ -154,19 +174,39 @@ def _query_data_partition(partition_key: str, limit: int) -> list:
             except (TypeError, ValueError):
                 continue
         items.sort(key=lambda d: d.get("ts", 0), reverse=True)
+        if rowkey_floor and len(items) < max(1, int(limit)):
+            # The window held fewer rows than asked for. Widen a step, and only read the whole
+            # partition once the wider windows are exhausted. The reader never sees a shorter
+            # list than before, it just costs less to find it.
+            if wider_floors:
+                return _query_data_partition(partition_key, limit,
+                                             rowkey_floor=wider_floors[0],
+                                             wider_floors=wider_floors[1:])
+            return _query_data_partition(partition_key, limit)
         return items[: max(1, int(limit))]
     except Exception as exc:
         print(f"[TrAIde] query '{partition_key}' error: {exc}")
         return []
 
 
+def _epoch_floor(days: int) -> str:
+    """RowKey floor for partitions keyed `{epoch_seconds}-...` (decision, plan)."""
+    return str(int(time.time()) - max(1, days) * 86400)
+
+
 def get_decision_feed(limit: int = 30) -> list:
     """Most recent agent decisions, newest first."""
-    return _query_data_partition(PK_DECISION, limit)
+    floors = [_epoch_floor(d) for d in FEED_WINDOW_DAYS] or [None]
+    return _query_data_partition(PK_DECISION, limit,
+                                 rowkey_floor=floors[0], wider_floors=floors[1:])
 
 
 def get_closed_trades(limit: int = 100) -> list:
-    """Most recent closed-trade outcomes, newest first."""
+    """Most recent closed-trade outcomes, newest first.
+
+    Deliberately unwindowed: the whole partition is ~410 rows / 0.17 MB, and closed trades are
+    sparse enough (about 200 days to accumulate 200) that any useful window would miss the
+    route's limit and cost an extra round trip for nothing."""
     return _query_data_partition(PK_TRADE, limit)
 
 
@@ -178,7 +218,11 @@ def get_plans(limit: int = 40, start_day=None) -> list:
     try:
         filt = f"PartitionKey eq '{PK_PLAN}'"
         if start_day is not None:
-            filt += f" and day ge {int(start_day)}"
+            # `day` is a plain property, so that clause alone still walks the partition. The
+            # RowKey bound is the one the service can seek on; both are kept so the result is
+            # identical either way.
+            filt += (f" and day ge {int(start_day)}"
+                     f" and RowKey ge '{int(start_day) * 86400}'")
         rows = _table_client.query_entities(query_filter=filt, results_per_page=1000)
         items = []
         for r in rows:

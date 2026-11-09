@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import time
 from datetime import datetime
 from io import BytesIO
 from typing import Any, Dict, List, Optional, Tuple
@@ -107,6 +108,9 @@ def save_iteration(
         "created_at": datetime.utcnow().isoformat(),
     }
     table_client.upsert_entity(entity=entity, mode=UpdateMode.MERGE)
+    # The RowKey list is cached for a minute; drop it so today's entry shows immediately
+    # instead of the page looking empty until the cache expires.
+    _invalidate_keys_cache(problem)
     #register_problem(problem)
 
 
@@ -132,30 +136,91 @@ def iteration_date_key(rowkey: str) -> str:
     return parsed.strftime("%Y%m%d") if parsed else (rowkey or "")
 
 
-def get_iterations(problem: str) -> List[Dict[str, Any]]:
-    """All iterations for a problem, newest first, **at most one per calendar day**.
+# A problem's partition holds ~500 iterations of ~20 KB each, so reading it whole costs
+# about 10 MB. Every page load used to do that two or three times over just to show five
+# entries, or one, or a single progress number: measured 10.32 MB for the page and another
+# 10.32 MB for its history fetch. Against a storage account in another region that is billed
+# egress, and it was the single largest reader in the app.
+#
+# So reads go in two steps now: pull the RowKeys only (a few tens of KB for the whole
+# partition), then fetch the handful of rows actually being shown. The key list is cached
+# briefly because a page load asks for it several times in a row.
+_KEYS_CACHE_TTL = int(os.getenv("AIOPS_KEYS_CACHE_TTL", "60"))
+_keys_cache: Dict[str, Tuple[float, List[str]]] = {}
 
-    One day = one lab-notebook entry. Runs before the single-flight lock existed could
-    race and write several rows for the same date (the frontend triggers generation from
-    a blocking request, and there are 4 gunicorn workers), so dates with more than one
-    row survive in storage. Collapsing them here — keeping the latest run of that day,
-    which is the one that saw all the earlier context — repairs the timeline for reads
-    without destroying history."""
+
+def _invalidate_keys_cache(problem: Optional[str] = None) -> None:
+    """Drop the cached RowKey list so a freshly written iteration is visible at once."""
+    if problem is None:
+        _keys_cache.clear()
+    else:
+        _keys_cache.pop(_problem_partition(problem), None)
+
+
+def iteration_rowkeys(problem: str) -> List[str]:
+    """RowKeys for a problem, newest first, at most one per calendar day.
+
+    Same de-duplication rule as `get_iterations` (keep the latest run of each day, which is
+    the one that saw all the earlier context), done on keys alone.
+    """
     partition_key = _problem_partition(problem)
-    query_filter = f"PartitionKey eq '{partition_key}'"
-    entities = table_client.query_entities(query_filter=query_filter, results_per_page=1000)
+    now = time.time()
+    cached = _keys_cache.get(partition_key)
+    if cached and cached[0] > now:
+        return cached[1]
 
-    by_day: Dict[str, Dict[str, Any]] = {}
+    entities = table_client.query_entities(
+        query_filter=f"PartitionKey eq '{partition_key}'",
+        select=["RowKey"],
+        results_per_page=1000,
+    )
+    by_day: Dict[str, str] = {}
     for entity in entities:
-        row = dict(entity)
-        day = iteration_date_key(row.get("RowKey", ""))
+        rowkey = entity.get("RowKey", "")
+        if not rowkey:
+            continue
+        day = iteration_date_key(rowkey)
         current = by_day.get(day)
-        if current is None or _iteration_sort_key(row.get("RowKey", "")) > _iteration_sort_key(current.get("RowKey", "")):
-            by_day[day] = row
+        if current is None or _iteration_sort_key(rowkey) > _iteration_sort_key(current):
+            by_day[day] = rowkey
 
-    materialized = list(by_day.values())
-    materialized.sort(key=lambda row: _iteration_sort_key(row.get("RowKey", "")), reverse=True)
-    return materialized
+    keys = sorted(by_day.values(), key=_iteration_sort_key, reverse=True)
+    _keys_cache[partition_key] = (now + _KEYS_CACHE_TTL, keys)
+    return keys
+
+
+def _fetch_iterations(problem: str, rowkeys: List[str],
+                      select: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+    """Fetch specific iteration rows, in the order given. A missing row is skipped rather
+    than failing the page: the key list can be a few seconds stale."""
+    partition_key = _problem_partition(problem)
+    rows: List[Dict[str, Any]] = []
+    for rowkey in rowkeys:
+        try:
+            if select:
+                found = list(table_client.query_entities(
+                    query_filter=f"PartitionKey eq '{partition_key}' and RowKey eq '{rowkey}'",
+                    select=select,
+                    results_per_page=1,
+                ))
+                if found:
+                    rows.append(dict(found[0]))
+            else:
+                rows.append(dict(table_client.get_entity(partition_key, rowkey)))
+        except ResourceNotFoundError:
+            continue
+        except Exception as exc:
+            print(f"Error reading iteration {rowkey}: {exc}")
+    return rows
+
+
+def get_iterations(problem: str) -> List[Dict[str, Any]]:
+    """Every iteration for a problem in full, newest first, one per calendar day.
+
+    This reads the whole partition, which is expensive. Prefer `get_iteration_slice` or
+    `latest_iteration`, which fetch only the rows they return.
+    """
+    return _fetch_iterations(problem, iteration_rowkeys(problem))
 
 
 def rowkey_for_date(problem: str, flat_date: str) -> Optional[str]:
@@ -177,16 +242,20 @@ def rowkey_for_date(problem: str, flat_date: str) -> Optional[str]:
 
 
 def get_iteration_slice(problem: str, offset: int, limit: int) -> Tuple[List[Dict[str, Any]], Optional[int]]:
-    history = get_iterations(problem)
+    """One page of iterations. Only the rows in the page are read in full."""
+    keys = iteration_rowkeys(problem)
     slice_end = offset + limit
-    window = history[offset:slice_end]
-    next_offset = slice_end if slice_end < len(history) else None
-    return window, next_offset
+    window = keys[offset:slice_end]
+    next_offset = slice_end if slice_end < len(keys) else None
+    return _fetch_iterations(problem, window), next_offset
 
 
 def latest_iteration(problem: str) -> Optional[Dict[str, Any]]:
-    entries = get_iterations(problem)
-    return entries[0] if entries else None
+    keys = iteration_rowkeys(problem)
+    if not keys:
+        return None
+    rows = _fetch_iterations(problem, keys[:1])
+    return rows[0] if rows else None
 
 
 # ---------------------------------------------------------------------------
@@ -295,10 +364,14 @@ def get_problem_details(problem: str) -> Optional[Dict[str, Any]]:
 
 
 def get_problem_progress(problem: str) -> Dict[str, Optional[Any]]:
-    history = get_iterations(problem)
-    if not history:
+    """The newest iteration's headline progress. Reads one row, and only its metadata."""
+    keys = iteration_rowkeys(problem)
+    if not keys:
         return {"progress_percent": None, "progress_comment": ""}
-    entry = history[0]   # newest — `get_iterations` returns newest first
+    rows = _fetch_iterations(problem, keys[:1], select=["metadata"])
+    if not rows:
+        return {"progress_percent": None, "progress_comment": ""}
+    entry = rows[0]
 
     metadata = _deserialize_metadata(entry.get("metadata"))
     progress_percent = metadata.get("progress_percent")

@@ -184,6 +184,41 @@ Three things now hold it:
 `progress_percent` now gets the previous value in the prompt and is asked to be
 non-decreasing unless the agent is retracting something, which it must then say.
 
+## Table egress: read keys, then rows
+
+The storage account `pkrstr` is in West Europe and the web app moved to North Europe on
+2026-09-19, so every table read is billed cross-region egress. It went from 49 GB in August to
+about 800 GB a month, 97% of it Table Storage. Measured per call on 2026-11-09:
+
+| read | before | after |
+|---|---|---|
+| `GET /ai-open-problem-solver` | 10.32 MB | 0.03 MB |
+| `GET /ai-open-problem-solver/history` | 10.32 MB | 0.09 MB |
+| `get_decision_feed` (`/traide/feed`) | 24.23 MB | 0.49 MB |
+
+Two rules came out of it, and they apply to any new reader:
+
+- **Never fetch rows you are not going to show.** AIOPS stores ~500 iterations per problem at
+  ~20 KB each, and `get_iterations` read the whole partition with every column so that callers
+  could take five of them, or one, or a single progress number. The fix is two steps:
+  `iteration_rowkeys` reads `select=["RowKey"]` only (tens of KB for the whole partition, cached
+  for `AIOPS_KEYS_CACHE_TTL`, 60s, and invalidated on write), then `_fetch_iterations` reads just
+  the rows being returned. Same output, same order, same de-duplication by day.
+- **Bound a growing partition by a RowKey range, not by slicing in Python.** TrAIde's decision
+  partition is 44k rows and the page polls it; the old code read all of it and kept the newest
+  30. RowKeys there are `{epoch_seconds}-...` and fixed width, so `RowKey ge` is a range the
+  service can seek. The window widens step by step (`TRAIDE_FEED_WINDOW_DAYS`, 3,21,90) and only
+  falls back to the whole partition when every step comes up short, so the reader can never see
+  a shorter list than before, it just costs less to find it.
+
+Not everything needs this. `comicbook` (`RowKey eq`, server-side filtered, 0.04 MB) and the
+`/aiblogindex` / `/tomorrownewsindex` / `/genbox-channels` endpoints already `select` narrowly
+and were left alone. `traidedashboard`'s trade partition is ~410 rows, so windowing it would
+only buy an extra round trip.
+
+Tables in `pkrstr` that NO code in this repo touches: `aismm`, `visits`, `pretnhistory`,
+`pretvhistory`. `traidedashboard` is written by the separate trAIde bot and only read here.
+
 ## Handoffs on reasoning models
 
 Do NOT use the SDK's `remove_all_tools` as a handoff `input_filter` here. It strips
