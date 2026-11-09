@@ -328,11 +328,24 @@ def save_memory_record(problem: str, payload: Dict[str, Any]) -> None:
     )
 
 
+# The catalogue barely changes but is read on every page load, and the scan pulled every
+# column of every row to use two of them. Narrow the projection and hold the result briefly.
+_PROBLEMS_CACHE_TTL = int(os.getenv("AIOPS_PROBLEMS_CACHE_TTL", "300"))
+_problems_cache: Tuple[float, List[Dict[str, Optional[str]]]] = (0.0, [])
+
+
 def list_problems(max_entities: int = 2000) -> List[Dict[str, Optional[str]]]:
+    global _problems_cache
+    now = time.time()
+    if _problems_cache[0] > now and _problems_cache[1]:
+        return _problems_cache[1]
+
     problems: Dict[str, Dict[str, Optional[str]]] = {}
     try:
         count = 0
-        for entity in problems_table_client.list_entities(results_per_page=1000):
+        for entity in problems_table_client.list_entities(
+            select=["problem", "description"], results_per_page=1000
+        ):
             problem = entity.get("problem")
             if not problem:
                 continue
@@ -348,7 +361,9 @@ def list_problems(max_entities: int = 2000) -> List[Dict[str, Optional[str]]]:
     except Exception as exc:
         print(f"Error retrieving problems: {exc}")
         return []
-    return sorted(problems.values(), key=lambda entry: entry["name"].lower())
+    result = sorted(problems.values(), key=lambda entry: entry["name"].lower())
+    _problems_cache = (now + _PROBLEMS_CACHE_TTL, result)
+    return result
 
 
 def get_problem_details(problem: str) -> Optional[Dict[str, Any]]:

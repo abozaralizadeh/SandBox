@@ -14,7 +14,9 @@ Data contract (written by trAIde/src/dashboard_publisher.py):
   Table PK 'meta'     RK 'state'      -> {generatedTs, schema, disclosure, indexAnchor}
 """
 
+import functools
 import json
+import threading
 import time
 import os
 
@@ -65,6 +67,54 @@ except Exception as exc:  # pragma: no cover - defensive
     _table_client = None
 
 
+# ---------------------------------------------------------------------------
+# Read-through cache
+# ---------------------------------------------------------------------------
+# The dashboard polls /traide/live every 30s, /traide/equity and /traide/trades every 60s and
+# /traide/plans every 90s, and it does that PER OPEN TAB. The storage account is in another
+# region from the web app, so every one of those reads is billed egress. Caching here rather
+# than in the routes means any number of tabs (and any other caller) costs one read per TTL.
+#
+# Each of the 4 gunicorn workers keeps its own cache, so the real ceiling is 4 reads per TTL,
+# not 1. That is still far below one read per tab per poll.
+#
+# The published data only changes when the bot republishes live.json, so a few tens of seconds
+# of staleness is invisible: the page already shows a "generated at" timestamp from the payload.
+_CACHE_TTL = int(os.getenv("TRAIDE_CACHE_TTL", "45"))
+# The decision feed is not fetched by the page at all, so nothing is waiting on it being fresh.
+_FEED_CACHE_TTL = int(os.getenv("TRAIDE_FEED_CACHE_TTL", "300"))
+
+_cache: dict = {}
+_cache_lock = threading.Lock()
+
+
+def _cached(ttl_getter):
+    """Memoize a reader on its arguments for `ttl_getter()` seconds.
+
+    Results are handed out shared, not copied: every caller in this app passes them straight
+    to jsonify and none of them mutate. Keep it that way, or copy at the call site.
+    """
+    def decorate(fn):
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            key = (fn.__name__, args, tuple(sorted(kwargs.items())))
+            now = time.time()
+            with _cache_lock:
+                hit = _cache.get(key)
+                if hit is not None and hit[0] > now:
+                    return hit[1]
+            value = fn(*args, **kwargs)
+            with _cache_lock:
+                _cache[key] = (now + ttl_getter(), value)
+                if len(_cache) > 256:          # bound it; keys vary with limit/start_day
+                    for k, v in [(k, v) for k, v in _cache.items() if v[0] <= now]:
+                        _cache.pop(k, None)
+            return value
+        wrapper.cache_clear = lambda: _cache.clear()
+        return wrapper
+    return decorate
+
+
 def is_configured() -> bool:
     return _container_client is not None and _table_client is not None
 
@@ -79,11 +129,13 @@ def _download_json(blob_name: str):
         return None
 
 
+@_cached(lambda: _CACHE_TTL)
 def get_live_snapshot() -> dict:
     """The whole current snapshot (fast path). Returns {} when nothing has been published yet."""
     return _download_json("live.json") or {}
 
 
+@_cached(lambda: _CACHE_TTL)
 def get_rollup(period: str) -> dict:
     """Pre-bucketed series for one of daily|weekly|monthly|alltime. {} on miss."""
     if period not in _VALID_PERIODS:
@@ -91,6 +143,7 @@ def get_rollup(period: str) -> dict:
     return _download_json(f"rollups/{period}.json") or {}
 
 
+@_cached(lambda: _CACHE_TTL)
 def get_equity_series(start_day=None, end_day=None) -> list:
     """Durable daily index series, ascending by day. Range-bounded by zero-padded day RowKeys."""
     if _table_client is None:
@@ -194,6 +247,7 @@ def _epoch_floor(days: int) -> str:
     return str(int(time.time()) - max(1, days) * 86400)
 
 
+@_cached(lambda: _FEED_CACHE_TTL)
 def get_decision_feed(limit: int = 30) -> list:
     """Most recent agent decisions, newest first."""
     floors = [_epoch_floor(d) for d in FEED_WINDOW_DAYS] or [None]
@@ -201,6 +255,7 @@ def get_decision_feed(limit: int = 30) -> list:
                                  rowkey_floor=floors[0], wider_floors=floors[1:])
 
 
+@_cached(lambda: _CACHE_TTL)
 def get_closed_trades(limit: int = 100) -> list:
     """Most recent closed-trade outcomes, newest first.
 
@@ -210,6 +265,7 @@ def get_closed_trades(limit: int = 100) -> list:
     return _query_data_partition(PK_TRADE, limit)
 
 
+@_cached(lambda: _CACHE_TTL)
 def get_plans(limit: int = 40, start_day=None) -> list:
     """Durable research plans, newest first. Accumulates past the producer's local cap, so this
     spans several days. `start_day` (epoch day) bounds how far back to read."""
@@ -240,6 +296,7 @@ def get_plans(limit: int = 40, start_day=None) -> list:
         return []
 
 
+@_cached(lambda: _CACHE_TTL)
 def get_meta() -> dict:
     """Singleton publisher state (generatedTs, disclosure, schema). {} on miss."""
     if _table_client is None:

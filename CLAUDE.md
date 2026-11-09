@@ -216,6 +216,15 @@ Not everything needs this. `comicbook` (`RowKey eq`, server-side filtered, 0.04 
 and were left alone. `traidedashboard`'s trade partition is ~410 rows, so windowing it would
 only buy an extra round trip.
 
+A read-through cache sits in front of the TrAIde readers (`_cached`, `TRAIDE_CACHE_TTL` 45s,
+`TRAIDE_FEED_CACHE_TTL` 300s for the feed nothing polls). The dashboard polls per OPEN TAB, so
+without it ten tabs cost ten reads a cycle; with it they cost one. Each of the 4 gunicorn
+workers has its own cache, so the real ceiling is 4 reads per TTL. Results are shared, not
+copied, because every caller hands them straight to `jsonify` and none mutate: keep it that
+way or copy at the call site. `live.json` does carry `trades` (60) and `feed` (30), but the
+durable `trade` partition holds 410 and the route allows up to 200, so the snapshot is not a
+drop-in substitute for `/traide/trades`.
+
 Tables in `pkrstr` that NO code in this repo touches: `aismm`, `visits`, `pretnhistory`,
 `pretvhistory`. `traidedashboard` is written by the separate trAIde bot and only read here.
 
