@@ -132,6 +132,9 @@ retype it. Constraints that were learned the hard way; do not undo them:
 - **`render_directive` must be brand-free.** Naming a studio/franchise/living artist trips the
   image safety layer and returns a blank panel. Describe technique, material and proportions
   instead — it also renders more distinctly.
+- **Panel GENERATION still carries no text** (`compose_image_prompt` appends the no-text clause).
+  Lettering is a SEPARATE edit pass afterwards, see *Lettering* below. Do not merge the two: a
+  panel prompt that also asks for dialogue gets you neither a clean scene nor clean letters.
 - **Never prompt for "a character reference sheet".** That phrase has a stronger visual prior
   (clean flat turnaround on white) than any style adjective, and that sheet is reference #1 for
   every panel of the arc, so its look propagates everywhere. Use `sheet_conceit` — an artefact
@@ -227,6 +230,42 @@ drop-in substitute for `/traide/trades`.
 
 Tables in `pkrstr` that NO code in this repo touches: `aismm`, `visits`, `pretnhistory`,
 `pretvhistory`. `traidedashboard` is written by the separate trAIde bot and only read here.
+
+## Lettering: the model draws the balloons, not CSS
+
+Dialogue and captions used to be HTML boxes laid over the panel by CSS. They are now drawn INTO
+the art by the image model, as a second `images.edit` pass over the finished panel
+(`ComicBook/lettering.py` builds the prompt, `letter_image` in `getimage.py` makes the call,
+`letter_panels` in `agent_tools.py` runs them).
+
+**Why the model and not Pillow.** A balloon has to point at the right character, and only
+something that can see the panel knows which figure is which. A Pillow prototype placed balloons
+in the lowest-detail region and guessed the tails, which put one character's line over another's
+head about half the time. The model reads the cast description, finds that person in the frame
+and aims the tail at them. Measured on `arc_20261111_35e835`: English, Italian and Persian all
+spelled correctly, Persian as properly joined right-to-left script with the ezafe kept, and every
+line attributed to the right speaker, including the panel the Pillow version got backwards.
+
+Things that matter if you touch this:
+
+- **Letter from `base_image_url`, never from an already-lettered copy.** Each panel keeps the
+  untouched art there and every language letters from it. Letter the English result again for
+  Italian and you get two sets of balloons stacked on one picture.
+- **`panels_for_html` blanks dialogue/caption/sfx for panels that were lettered**, or every line
+  prints twice, once inside the picture and once in a CSS box. The panel objects themselves keep
+  their text: the Reteller reads them to build the beat sheet, and a panel whose lettering failed
+  still needs its overlay.
+- **Failure is per panel and never fatal.** `letter_image` returns None on any error, including
+  moderation, and unlike `create_image_with_reference` it does NOT fall back to a prompt-only
+  generate: the prompt describes balloons, so a fallback would throw the artwork away and draw
+  something else. A panel that fails keeps its art and its HTML overlay.
+- **Lettering calls run concurrently** (`COMICBOOK_LETTERING_CONCURRENCY`, 3). They are
+  independent, unlike panel generation which chains references through the last few panels. Keep
+  the cap low: the 2.5 image deployment 429s under load.
+- It is one extra edit per panel PER LANGUAGE, so an episode costs 3x the lettering calls.
+  `COMICBOOK_LETTERING=false` turns the whole thing off and restores the CSS overlay.
+- The baked-in text cannot reflow, so the mobile rule (text below the photo) no longer applies to
+  a lettered panel: the words are in the picture at whatever size the panel renders.
 
 ## Handoffs on reasoning models
 

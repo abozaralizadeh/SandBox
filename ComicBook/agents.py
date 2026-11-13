@@ -734,8 +734,10 @@ IMPORTANT RULES:
 - The art style is applied automatically and identically to every panel. Do not restate it.
 - NEVER include any text, dialogue, speech bubbles, captions, letters, words, or written \
   language in image prompts. The images should be PURELY VISUAL — characters, environments, \
-  actions, expressions only. Text overlays are added separately by the layout system. A \
-  no-text instruction is appended to every prompt automatically — you do not need to add one.
+  actions, expressions only. A no-text instruction is appended to every prompt automatically, \
+  so you do not need to add one. The dialogue and captions you pass to assemble_layout are \
+  lettered into the finished panels afterwards, in a separate pass that draws real speech \
+  balloons; asking for words here as well would only fight it.
 - Your final response after calling assemble_layout should confirm the comic was assembled.
 
 HANDOFF — gated; do these IN ORDER and do not skip ahead:

@@ -263,6 +263,50 @@ async def create_image_with_reference(prompt: str, reference_url: str, size: str
         return await create_image(prompt, size, quality)
 
 
+async def letter_image(reference_url: str, prompt: str, size: str = "square",
+                       quality: str = "high") -> Optional[str]:
+    """Draw lettering onto an EXISTING panel and return the new blob URL, or None.
+
+    Deliberately unlike `create_image_with_reference`: that one falls back to a prompt-only
+    generate when the edit fails, which here would be catastrophic. The prompt describes
+    balloons and dialogue, not a scene, so a fallback would throw the panel's artwork away and
+    draw something else entirely. Lettering is an enhancement, so every failure path returns
+    None and the caller keeps the original art plus the HTML overlay.
+    """
+    model = _get_model()
+    if model == "dall-e-3":
+        return None
+    reference_bytes = await _download_image_bytes(reference_url)
+    if not reference_bytes:
+        return None
+
+    async def _edit():
+        with _image_gen_span("letter", model, _resolve_size(size), _resolve_quality(quality),
+                             references=1) as span:
+            _set_span_input(span, prompt)
+            ref = BytesIO(reference_bytes)
+            ref.name = "panel.png"
+            result = await _get_client().images.edit(
+                model=model,
+                prompt=prompt,
+                size=_resolve_size(size),
+                quality=_resolve_quality(quality),
+                image=ref,
+            )
+            url = await asyncio.to_thread(_upload_result, result)
+            _set_span_output(span, url)
+            return url
+
+    try:
+        return await _call_with_retries(_edit, attempts=_IMAGE_ATTEMPTS, label="letter")
+    except ContentModerationError:
+        print("[ComicBook:getimage] lettering blocked by content safety; keeping the plain panel")
+        return None
+    except Exception as exc:
+        print(f"[ComicBook:getimage] lettering failed, keeping the plain panel: {str(exc)[:180]}")
+        return None
+
+
 async def create_image_with_references(
     prompt: str,
     image_urls: list[str],

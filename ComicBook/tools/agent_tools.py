@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
 from datetime import datetime
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from agents.tool import function_tool
 
@@ -44,9 +45,11 @@ from ComicBook.style import (
     scrub_generic_style_tokens,
     starved_families,
 )
+from ComicBook.lettering import build_lettering_prompt, cast_block
 from ComicBook.tools.getimage import (
     ContentModerationError,
     create_image,
+    letter_image,
     create_image_with_reference,
     create_image_with_references,
     make_placeholder_image_url,
@@ -79,7 +82,78 @@ _RECENT_PANEL_REFS = max(0, int(os.environ.get("COMICBOOK_RECENT_PANEL_REFS", "5
 # costs the least important references rather than the character anchors.
 _MAX_REFERENCE_IMAGES = 16
 
+# Lettering: the balloons and caption are drawn INTO the panel by the image model instead of
+# being HTML boxes laid over it by CSS. The model is what makes this work: a balloon has to
+# point at the right character, and only something that can see the panel knows which figure is
+# which. Measured on a live arc, it spelled English, Italian and Persian correctly (Persian as
+# properly joined right-to-left script) and attributed every line to the right speaker.
+#
+# One edit per panel PER LANGUAGE, because the text is baked in. They are independent of each
+# other (unlike panel generation, which chains references), so they run concurrently.
+_LETTERING = os.environ.get("COMICBOOK_LETTERING", "true").strip().lower() not in ("false", "0", "no")
+# The 2.5 image deployment 429s under load, so do not open the floodgates.
+_LETTERING_CONCURRENCY = max(1, int(os.environ.get("COMICBOOK_LETTERING_CONCURRENCY", "3")))
+
 logger = logging.getLogger("ComicBook")
+
+
+async def letter_panels(panels: list, lang: str, arc: Optional[dict],
+                        quality: str = "high") -> int:
+    """Letter every panel that has text, in place. Returns how many succeeded.
+
+    Each panel keeps `base_image_url`, the untouched art. Every language letters FROM that,
+    never from an already-lettered copy, or the Italian balloons would land on top of the
+    English ones. A panel whose lettering fails keeps its plain art and is left for the HTML
+    overlay to caption, so a failure costs polish and never the page.
+    """
+    if not _LETTERING:
+        return 0
+    cast = cast_block((arc or {}).get("characters", ""))
+    jobs = []
+    for panel in panels:
+        base = panel.get("base_image_url") or panel.get("image_url") or ""
+        panel["base_image_url"] = base
+        panel["lettered"] = False
+        prompt = build_lettering_prompt(panel, cast, lang)
+        if base and prompt:
+            jobs.append((panel, base, prompt))
+    if not jobs:
+        return 0
+
+    sem = asyncio.Semaphore(_LETTERING_CONCURRENCY)
+
+    async def run(panel, base, prompt):
+        async with sem:
+            url = await letter_image(base, prompt, panel.get("size", "square"), quality=quality)
+        if url:
+            panel["image_url"] = url
+            panel["lettered"] = True
+            return True
+        return False
+
+    results = await asyncio.gather(*(run(*j) for j in jobs), return_exceptions=True)
+    done = sum(1 for r in results if r is True)
+    logger.info("  -> lettering (%s): %d/%d panels lettered by the image model",
+                 lang, done, len(jobs))
+    return done
+
+
+def panels_for_html(panels: list) -> list:
+    """Copies for rendering, with the text stripped from panels the model already lettered.
+
+    The words are inside the picture now, so leaving them in the HTML too would print every
+    line twice. The originals keep their text: the Reteller reads them to build the beat sheet,
+    and a panel that failed to letter still needs its overlay.
+    """
+    out = []
+    for panel in panels:
+        copy = dict(panel)
+        if copy.get("lettered"):
+            copy["dialogue"] = ""
+            copy["caption"] = ""
+            copy["sfx"] = ""
+        out.append(copy)
+    return out
 
 
 def build_comic_tools(state: Dict[str, Any], target_date: datetime) -> Dict[str, Any]:
@@ -618,7 +692,9 @@ def build_comic_tools(state: Dict[str, Any], target_date: datetime) -> Dict[str,
         arc_theme = _parse_arc_theme(state["arc"])
         actual_title = state["arc"].get("title", arc_title) if state["arc"] else arc_title
         actual_ep = state["episode_number"]
-        html = _assemble_html(actual_title, actual_ep, date, recap, teaser, panels, theme=arc_theme)
+        await letter_panels(panels, "en", state["arc"], quality=_PANEL_QUALITY)
+        html = _assemble_html(actual_title, actual_ep, date, recap, teaser,
+                              panels_for_html(panels), theme=arc_theme)
         state["assembled_panels"] = panels
         state["assembled_recap"] = recap
         state["assembled_teaser"] = teaser
@@ -820,9 +896,21 @@ def build_comic_tools(state: Dict[str, Any], target_date: datetime) -> Dict[str,
             native,
             title=main_title,
         )
+        # Letter this language from the ORIGINAL art. `_apply_reteller_output` rebuilds the
+        # panels from the English ones, which by now carry the English lettering in image_url,
+        # so the untouched base has to be carried across by panel number.
+        base_by_number = {p.get("number"): p.get("base_image_url") or p.get("image_url")
+                          for p in panels}
+        for tp in t_panels:
+            base = base_by_number.get(tp.get("number"))
+            if base:
+                tp["base_image_url"] = base
+                tp["image_url"] = base
+        await letter_panels(t_panels, lang, a, quality=_PANEL_QUALITY)
         html = _assemble_html(
             t_title, state["episode_number"], target_date.strftime("%Y-%m-%d"),
-            t_recap, t_teaser, t_panels, lang=lang, theme=_parse_arc_theme(a), subtitle=episode_subtitle,
+            t_recap, t_teaser, panels_for_html(t_panels), lang=lang,
+            theme=_parse_arc_theme(a), subtitle=episode_subtitle,
         )
         state[f"html_{lang}"] = html
         logger.info("  -> Localized (%s) HTML assembled: %d chars (subtitle=%s)",
