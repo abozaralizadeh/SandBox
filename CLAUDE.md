@@ -96,6 +96,14 @@ and every generator keeps its own `azurestorage.py` unchanged.
   script lists any it finds missing. The plan job does nothing while `SANDBOX_ENV_NAMES` is empty.
 - **Scheduled workflows in a public repo die after 60 days without a commit.** The weekly
   `keepalive` job re-enables the workflow through the API.
+- **GitHub's scheduler is late and lossy on this account.** Measured 2026-11-23: the
+  `abozaralizadeh.github.io` cron `17 4 * * *` really runs between 12:37 and 14:43 UTC, and
+  Felinquent's `17 */6 * * *` runs about 2 of its 4 slots a day, an hour late. Generate had no
+  scheduled run at all in its first 4 hours. That is why the crons are hourly and `needed.py`
+  makes every run idempotent: any run that fires before UTC midnight does the day's work. If a
+  day's content is late, look at `gh run list --workflow generate.yml` for `schedule` events
+  before suspecting the code. The robust fix is an outside trigger (a Cloudflare cron calling
+  `workflow_dispatch`), which needs a GitHub token with Actions write on this repo.
 - **DNS** for sandboxes.live is on Cloudflare (Free plan, nameservers
   `max`/`rita.ns.cloudflare.com`, registrar still GoDaddy). The apex has GitHub Pages' four A
   records (185.199.108-111.153) and `www` is a CNAME to `abozaralizadeh.github.io`, all
