@@ -41,5 +41,19 @@ Things that bit along the way:
 - Two systems generating the same day at the same time would double the cost, so Actions only
   publishes until a single switch says it's its turn.
 
+- The trading dashboard's price charts went blank about half the time once they were served
+  from Cloudflare. The exchange we read candles from rate-limits by IP, and a Worker shares its
+  outgoing IPs with a huge number of other Workers. The old server had an IP all to itself, so
+  this never showed up before. The fix: retry briefly, fall back to a second exchange, and keep
+  the last good chart for a few minutes. Thirty calls in a row, thirty charts.
+
+The cut-over itself, on Nov 23: test everything on beta.sandboxes.live first, compare the new
+data URLs against the live old server one by one (28 of 28 identical, trAIde matched on shape
+because its numbers move every few seconds), switch off the five Logic Apps, let Actions take
+over generation, then point the domain at GitHub Pages through Cloudflare. Nobody visiting
+would have noticed a thing. The last bit of tidying was deleting the beta hostname, because a
+DNS record that points at GitHub Pages without a site claiming it is an open door: anyone could
+put their own Pages site on it.
+
 Numbers for the post: 7,607 published files (about 140 MB) cover the full archive, from 983
 English front pages to 579 comic pages and 3,929 research entries.

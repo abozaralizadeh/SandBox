@@ -211,7 +211,9 @@ Azure OpenAI (through APIM) and Azure Storage stay exactly where they were:
 | **Cloudflare Worker** (`worker/`) | Answers the data URLs the pages fetch (`/tomorrownewscontent`, `/aiblogindex`, `/traide/*`, ...) on the same domain, from the static copy in blob storage, with edge caching |
 | **GitHub Actions** (`.github/workflows/generate.yml`) | Runs the generators on the same schedule the old Azure Logic Apps used, then publishes the static copy with `sitepub.py` |
 
-Setup, once:
+This has been live since 2026-11-23. sandboxes.live's DNS is on Cloudflare, and the five Logic
+Apps that used to trigger generation are disabled. What it took, for the record (or to set it up
+again):
 
 ```bash
 bash scripts/sync_github_secrets.sh                      # App Service settings -> Actions secrets
@@ -220,6 +222,8 @@ gh workflow run generate.yml -f full=true -f publish_only=true   # backfill the 
 gh variable set GENERATE_ENABLED --body true             # let Actions generate (turn the Logic Apps off first)
 ```
 
-Run a generator by hand: `python -m jobs.run comicbook` (generates if missing, then publishes).
+Run a generator by hand: `python -m jobs.run comicbook` (generates if missing, then publishes),
+or in Actions: `gh workflow run generate.yml -f project=comicbook` (add `-f force=true` to run even
+when today's content is already published).
 Republish without generating: `python sitepub.py all` (add `--full` for the whole archive,
 `--out DIR` for a dry run into a folder).

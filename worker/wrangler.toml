@@ -7,20 +7,11 @@ account_id = "c8d630fdf3e93d055bdb7d308523ec6a"
 # Only the routes below reach this Worker; the pages themselves come from GitHub Pages.
 workers_dev = false
 
-# Only these paths go through the Worker. A route on a hostname whose DNS record is not proxied
-# by Cloudflare does nothing, so the sandboxes.live routes sit idle until the cut-over.
+# Only these paths go through the Worker. A route only fires on a hostname whose DNS record is
+# PROXIED by Cloudflare. (beta.sandboxes.live was the test hostname before the cut-over; its
+# record was removed afterwards, since a CNAME to github.io that Pages no longer claims can be
+# taken over by anyone's Pages site.)
 routes = [
-  { pattern = "beta.sandboxes.live/tomorrownewscontent*", zone_name = "sandboxes.live" },
-  { pattern = "beta.sandboxes.live/tomorrownewsindex*", zone_name = "sandboxes.live" },
-  { pattern = "beta.sandboxes.live/aiblogcontent*", zone_name = "sandboxes.live" },
-  { pattern = "beta.sandboxes.live/aiblogindex*", zone_name = "sandboxes.live" },
-  { pattern = "beta.sandboxes.live/comicbookcontent*", zone_name = "sandboxes.live" },
-  { pattern = "beta.sandboxes.live/comicbookindex*", zone_name = "sandboxes.live" },
-  { pattern = "beta.sandboxes.live/cbimg*", zone_name = "sandboxes.live" },
-  { pattern = "beta.sandboxes.live/get-string*", zone_name = "sandboxes.live" },
-  { pattern = "beta.sandboxes.live/genbox-*", zone_name = "sandboxes.live" },
-  { pattern = "beta.sandboxes.live/ai-open-problem-solver/*", zone_name = "sandboxes.live" },
-  { pattern = "beta.sandboxes.live/traide/*", zone_name = "sandboxes.live" },
   { pattern = "sandboxes.live/tomorrownewscontent*", zone_name = "sandboxes.live" },
   { pattern = "sandboxes.live/tomorrownewsindex*", zone_name = "sandboxes.live" },
   { pattern = "sandboxes.live/aiblogcontent*", zone_name = "sandboxes.live" },

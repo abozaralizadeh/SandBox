@@ -543,12 +543,21 @@ const traidePlans: Handler = async (req, url, env) => {
 };
 
 // TrAIde/market.py: public candles, proxied because KuCoin sends no CORS headers.
-const INTERVALS: Record<string, [string, string]> = {
-  "15min": ["15min", "15m"],
-  "1hour": ["1hour", "1h"],
-  "4hour": ["4hour", "4h"],
+//
+// KuCoin first, because the bot trades there and the chart has to line up with its
+// entry/TP/SL. From a Worker that is harder than it was from the App Service: Cloudflare's
+// egress IPs are shared, KuCoin answers about half the calls with 429, and Binance refuses
+// Cloudflare outright (403). So KuCoin gets a quick retry, OKX (same BTC-USDT symbols, prices
+// within a few basis points) is the next source, and the last good chart is kept for
+// LAST_GOOD_TTL so a bad moment shows slightly older candles instead of an empty chart.
+const INTERVALS: Record<string, [string, string, string]> = {
+  // display -> [kucoin type, okx bar, binance interval]
+  "15min": ["15min", "15m", "15m"],
+  "1hour": ["1hour", "1H", "1h"],
+  "4hour": ["4hour", "4H", "4h"],
 };
 const MAX_CANDLES = 160;
+const LAST_GOOD_TTL = 900;
 
 export function validSymbol(symbol: string): boolean {
   const parts = symbol.split("-");
@@ -559,13 +568,39 @@ export function validSymbol(symbol: string): boolean {
 
 type Candle = { t: number; o: number; h: number; l: number; c: number };
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 async function fromKucoin(symbol: string, ktype: string): Promise<Candle[]> {
-  const res = await fetch(`https://api.kucoin.com/api/v1/market/candles?type=${ktype}&symbol=${symbol}`);
+  const url = `https://api.kucoin.com/api/v1/market/candles?type=${ktype}&symbol=${symbol}`;
+  let res = await fetch(url);
+  for (const wait of [250, 750]) {
+    if (res.status !== 429) break;
+    await sleep(wait);
+    res = await fetch(url);
+  }
   if (!res.ok) throw new Error(`kucoin ${res.status}`);
-  const rows = ((await res.json()) as { data?: string[][] }).data ?? [];
+  const body = (await res.json()) as { code?: string; msg?: string; data?: string[][] };
+  if (!body.data?.length) throw new Error(`kucoin ${body.code} ${body.msg ?? "no data"}`);
   const out: Candle[] = [];
-  for (const r of rows) {
+  for (const r of body.data) {
+    // KuCoin rows are [time(s), open, CLOSE, high, low, ...], newest first.
     const c = { t: parseInt(r[0], 10), o: +r[1], c: +r[2], h: +r[3], l: +r[4] };
+    if ([c.t, c.o, c.c, c.h, c.l].every(Number.isFinite)) out.push(c);
+  }
+  return out.sort((a, b) => a.t - b.t);
+}
+
+async function fromOkx(symbol: string, bar: string): Promise<Candle[]> {
+  const res = await fetch(
+    `https://www.okx.com/api/v5/market/candles?instId=${symbol}&bar=${bar}&limit=${MAX_CANDLES}`,
+  );
+  if (!res.ok) throw new Error(`okx ${res.status}`);
+  const body = (await res.json()) as { code?: string; msg?: string; data?: string[][] };
+  if (!body.data?.length) throw new Error(`okx ${body.code} ${body.msg || "no data"}`);
+  const out: Candle[] = [];
+  for (const r of body.data) {
+    // OKX rows are [time(ms), open, high, low, close, ...], newest first.
+    const c = { t: Math.floor(Number(r[0]) / 1000), o: +r[1], h: +r[2], l: +r[3], c: +r[4] };
     if ([c.t, c.o, c.c, c.h, c.l].every(Number.isFinite)) out.push(c);
   }
   return out.sort((a, b) => a.t - b.t);
@@ -590,17 +625,35 @@ const traideCandles: Handler = async (req, url, env) => {
   let interval = url.searchParams.get("interval") || "1hour";
   if (!(interval in INTERVALS)) interval = "1hour";
   if (!validSymbol(symbol)) return json({ symbol, interval, candles: [] }, 200, 45);
-  const [ktype, biv] = INTERVALS[interval];
+  const [ktype, okxBar, biv] = INTERVALS[interval];
+  const sources: [string, () => Promise<Candle[]>][] = [
+    ["kucoin", () => fromKucoin(symbol, ktype)],
+    ["okx", () => fromOkx(symbol, okxBar)],
+    ["binance", () => fromBinance(symbol, biv)],
+  ];
+  const lastGoodKey = new Request(`https://candles.internal/${symbol}/${interval}`);
   let candles: Candle[] = [];
-  for (const source of [() => fromKucoin(symbol, ktype), () => fromBinance(symbol, biv)]) {
+  for (const [name, source] of sources) {
     try {
-      candles = await source();
+      candles = (await source()).slice(-MAX_CANDLES);
       if (candles.length) break;
-    } catch {
+    } catch (err) {
+      console.log(`candles ${symbol} ${interval}: ${name} failed: ${(err as Error).message}`);
       candles = [];
     }
   }
-  return json({ symbol, interval, candles: candles.slice(-MAX_CANDLES) }, 200, 45);
+  if (candles.length) {
+    await caches.default.put(lastGoodKey, json({ symbol, interval, candles }, 200, LAST_GOOD_TTL));
+    return json({ symbol, interval, candles }, 200, 45);
+  }
+  const stale = await caches.default.match(lastGoodKey);
+  if (stale) {
+    console.log(`candles ${symbol} ${interval}: every source failed, serving the last good chart`);
+    const body = await stale.text();
+    return text(body, 200, { "content-type": "application/json" }, 5);
+  }
+  // Nothing at all: keep the empty answer out of the edge cache for long.
+  return json({ symbol, interval, candles: [] }, 200, 5);
 };
 
 // ---------------------------------------------------------------------------
