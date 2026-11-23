@@ -125,9 +125,11 @@ and every generator keeps its own `azurestorage.py` unchanged.
   GoDaddy/Azure leftovers. `beta.sandboxes.live` was the test hostname and was DELETED after
   the cut-over: a CNAME to github.io that Pages no longer claims can be taken over by anyone
   who adds that domain to their own Pages site. Don't leave one behind if you add a test host.
-- **What stays in Azure from the old setup:** the App Service `genbox` (still running, no
-  traffic since the DNS moved; deleting it is Abozar's call, and `sync_github_secrets.sh`
-  needs it, so re-run that first if a setting changed) and the five disabled Logic Apps.
+- **What stays in Azure from the old setup:** the App Service `genbox`, STOPPED on 2026-11-24
+  so nothing can generate there behind Actions' back (its URL answers 403), and the five disabled
+  Logic Apps. A stopped app still bills: its P1v3 plan `asp-genbox` costs the same until it is
+  deleted or scaled down, and that is Abozar's call. Its settings still read fine while stopped,
+  which `sync_github_secrets.sh` relies on, so re-run that first if a setting changed.
 
 ## Core architecture pattern (all generators)
 
