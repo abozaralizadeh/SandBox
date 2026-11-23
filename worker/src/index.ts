@@ -11,6 +11,9 @@
 //  * trAIde. The bot writes its own table and `live.json`, so this Worker reads them live with a
 //    read-only SAS that covers only those two (TRAIDE_TABLE_SAS, TRAIDE_BLOB_SAS).
 //
+// It also has one cron (wrangler.toml) that starts the Generate workflow on GitHub every hour,
+// because GitHub's own scheduler runs this account's crons hours late or skips them.
+//
 // Answers are cached at the edge (Cache API), so a busy page costs one storage read per TTL
 // per Cloudflare location, not one per visitor.
 
@@ -22,6 +25,8 @@ export interface Env {
   AIOPS_DEFAULT_PROBLEM: string;
   TRAIDE_TABLE_SAS?: string; // secret, read-only on the trAIde table
   TRAIDE_BLOB_SAS?: string; // secret, read-only on the trAIde container
+  GH_REPO: string; // owner/name of the repo whose Generate workflow the cron starts
+  GH_DISPATCH_TOKEN?: string; // secret, fine-grained token: Actions read/write on GH_REPO only
 }
 
 type Handler = (req: Request, url: URL, env: Env) => Promise<Response>;
@@ -688,7 +693,59 @@ const ROUTES: Record<string, Handler> = {
 // Anything time-relative ("today", "no date") is cached short by its own max-age.
 const CACHEABLE = new Set(Object.keys(ROUTES).filter((p) => p !== "/genbox-video" && p !== "/genbox-audio"));
 
+// ---------------------------------------------------------------------------
+// The generation trigger (cron)
+// ---------------------------------------------------------------------------
+// GitHub's scheduler is late and lossy on this account: crons run hours late or not at all.
+// So this Worker's cron starts the Generate workflow itself (workflow_dispatch), on the same
+// cadence as the `cron:` lines in .github/workflows/generate.yml, which stay as a fallback.
+// It decides nothing: the workflow's planner (jobs/needed.py) skips a project whose content is
+// already published, and its concurrency group stops two runs of a project overlapping.
+
+// Projects due at a UTC hour. Mirrors generate.yml (and the Logic Apps before it).
+export function dueProjects(hour: number): string[] {
+  const due = ["tomorrownews"]; // hourly (Scheduler01)
+  if (hour % 3 === 0) due.push("aiblog"); // every 3 h from 00 (Scheduler02)
+  if (hour % 4 === 1) due.push("comicbook"); // 01, 05, ... 21 (Scheduler04)
+  if (hour % 3 === 0) due.push("genbox"); // every 3 h from 00 (Scheduler00)
+  due.push("aiops"); // hourly (Scheduler03)
+  return due;
+}
+
+async function dispatchGenerate(env: Env, hour: number): Promise<void> {
+  if (!env.GH_DISPATCH_TOKEN) {
+    console.log("generate trigger: GH_DISPATCH_TOKEN is not set, nothing started");
+    return;
+  }
+  const failed: string[] = [];
+  for (const project of dueProjects(hour)) {
+    const res = await fetch(
+      `https://api.github.com/repos/${env.GH_REPO}/actions/workflows/generate.yml/dispatches`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${env.GH_DISPATCH_TOKEN}`,
+          accept: "application/vnd.github+json",
+          "x-github-api-version": "2022-11-28",
+          "user-agent": "sandbox-data-worker",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ ref: "main", inputs: { project } }),
+      },
+    );
+    const detail = res.ok ? "" : ` ${(await res.text()).slice(0, 200)}`;
+    console.log(`generate trigger: ${project} -> ${res.status}${detail}`);
+    if (!res.ok) failed.push(`${project} ${res.status}`);
+  }
+  // Throwing marks the cron run as failed in the Cloudflare dashboard, so a dead token shows.
+  if (failed.length) throw new Error(`generate trigger failed: ${failed.join(", ")}`);
+}
+
 export default {
+  async scheduled(event: ScheduledController, env: Env): Promise<void> {
+    await dispatchGenerate(env, new Date(event.scheduledTime).getUTCHours());
+  },
+
   async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(req.url);
     const path = url.pathname.replace(/\/+$/, "") || "/";

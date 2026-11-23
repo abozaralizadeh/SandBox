@@ -208,7 +208,7 @@ Azure OpenAI (through APIM) and Azure Storage stay exactly where they were:
 | Piece | What it does |
 |---|---|
 | **GitHub Pages** (`.github/workflows/pages.yml`) | Serves the seven pages, rendered once from `templates/` by `scripts/build_site.py` |
-| **Cloudflare Worker** (`worker/`) | Answers the data URLs the pages fetch (`/tomorrownewscontent`, `/aiblogindex`, `/traide/*`, ...) on the same domain, from the static copy in blob storage, with edge caching |
+| **Cloudflare Worker** (`worker/`) | Answers the data URLs the pages fetch (`/tomorrownewscontent`, `/aiblogindex`, `/traide/*`, ...) on the same domain, from the static copy in blob storage, with edge caching. Its hourly cron also starts the Generate workflow, because GitHub's own scheduler runs late |
 | **GitHub Actions** (`.github/workflows/generate.yml`) | Runs the generators on the same schedule the old Azure Logic Apps used, then publishes the static copy with `sitepub.py` |
 
 This has been live since 2026-11-23. sandboxes.live's DNS is on Cloudflare, and the five Logic
@@ -218,6 +218,7 @@ again):
 ```bash
 bash scripts/sync_github_secrets.sh                      # App Service settings -> Actions secrets
 cd worker && npm install && npx wrangler deploy && bash set_secrets.sh
+npx wrangler secret put GH_DISPATCH_TOKEN                # fine-grained token, Actions write on this repo only
 gh workflow run generate.yml -f full=true -f publish_only=true   # backfill the archive
 gh variable set GENERATE_ENABLED --body true             # let Actions generate (turn the Logic Apps off first)
 ```

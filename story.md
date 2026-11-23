@@ -55,5 +55,14 @@ would have noticed a thing. The last bit of tidying was deleting the beta hostna
 DNS record that points at GitHub Pages without a site claiming it is an open door: anyone could
 put their own Pages site on it.
 
+One more thing showed up on day one: GitHub's scheduler. The workflow said "every hour" and
+nothing ran for four hours. Looking at my other repos explained it: a job set for 04:17 UTC
+really runs around 13:00, and one set for every six hours manages about two runs a day. It's
+best effort, and on a busy platform best effort means late. So the Cloudflare Worker, which was
+only meant to answer data requests, got a second job: a cron that pokes the workflow every hour
+through GitHub's API. Cloudflare's crons fire on the minute. GitHub's schedule stays as a
+backup, and since every run first checks whether today's content already exists, two triggers
+for the same hour cost a few seconds, not a second newspaper.
+
 Numbers for the post: 7,607 published files (about 140 MB) cover the full archive, from 983
 English front pages to 579 comic pages and 3,929 research entries.

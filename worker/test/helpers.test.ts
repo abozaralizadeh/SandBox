@@ -2,7 +2,7 @@
 // the Flask app URL by URL (same bodies, status codes and Timestamp/Edition-Missing/Arc-Id
 // headers); these pin down the small conversions that comparison depends on.
 import { describe, expect, it } from "vitest";
-import { derivedName, parseWall, problemSlug, splitArc, stamp, tnBase, validSymbol } from "../src/index";
+import { derivedName, dueProjects, parseWall, problemSlug, splitArc, stamp, tnBase, validSymbol } from "../src/index";
 
 describe("parseWall (Python's fromisoformat, as the pages use it)", () => {
   it("reads the local ISO time the pages send", () => {
@@ -53,5 +53,18 @@ describe("candles symbol guard", () => {
     expect(validSymbol("BTC")).toBe(false);
     expect(validSymbol("BTC-USDT-X")).toBe(false);
     expect(validSymbol("../etc-x")).toBe(false);
+  });
+});
+
+describe("generation trigger cadence", () => {
+  it("matches the cron lines in generate.yml", () => {
+    expect(dueProjects(0)).toEqual(["tomorrownews", "aiblog", "genbox", "aiops"]);
+    expect(dueProjects(1)).toEqual(["tomorrownews", "comicbook", "aiops"]);
+    expect(dueProjects(2)).toEqual(["tomorrownews", "aiops"]);
+    expect(dueProjects(21)).toEqual(["tomorrownews", "aiblog", "comicbook", "genbox", "aiops"]);
+  });
+  it("starts every project at least once a day", () => {
+    const seen = new Set(Array.from({ length: 24 }, (_, h) => dueProjects(h)).flat());
+    expect([...seen].sort()).toEqual(["aiblog", "aiops", "comicbook", "genbox", "tomorrownews"]);
   });
 });

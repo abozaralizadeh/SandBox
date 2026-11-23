@@ -102,8 +102,19 @@ and every generator keeps its own `azurestorage.py` unchanged.
   scheduled run at all in its first 4 hours. That is why the crons are hourly and `needed.py`
   makes every run idempotent: any run that fires before UTC midnight does the day's work. If a
   day's content is late, look at `gh run list --workflow generate.yml` for `schedule` events
-  before suspecting the code. The robust fix is an outside trigger (a Cloudflare cron calling
-  `workflow_dispatch`), which needs a GitHub token with Actions write on this repo.
+  before suspecting the code.
+- **So the Worker starts generation too.** Its cron (`15 * * * *`, `[triggers]` in
+  `wrangler.toml`, 1 of the Free plan's 5 per account) calls `workflow_dispatch` once per
+  project due that hour; `dueProjects` in `worker/src/index.ts` mirrors the `cron:` lines and a
+  test pins it, so change both together. GitHub's own crons stay as a fallback. Doubled runs are
+  harmless: the planner skips published projects, the per-project concurrency group stops two
+  runs of a project overlapping, and every generator reads its cache first. The token is the
+  Worker secret `GH_DISPATCH_TOKEN`, a fine-grained PAT with Actions read/write on this repo only,
+  with a 366-day expiry (`wrangler secret list` shows it is set, GitHub's token page shows when it
+  expires). When it dies, the cron runs show as failed in the
+  Cloudflare dashboard and `npx wrangler tail` logs `generate trigger: <project> -> 401`; make a
+  new one and `npx wrangler secret put GH_DISPATCH_TOKEN` from `worker/`. Without the secret the
+  cron logs that and does nothing, and generation falls back to GitHub's schedule.
 - **DNS** for sandboxes.live is on Cloudflare (Free plan, nameservers
   `max`/`rita.ns.cloudflare.com`, registrar still GoDaddy). The apex has GitHub Pages' four A
   records (185.199.108-111.153) and `www` is a CNAME to `abozaralizadeh.github.io`, all

@@ -1,5 +1,6 @@
 # SandBox's data URLs at the edge. See src/index.ts for what each route does.
 # Deploy: npm run deploy. Secrets (read-only trAIde SAS): ./set_secrets.sh
+# The generation trigger's GitHub token: npx wrangler secret put GH_DISPATCH_TOKEN
 name = "sandbox-data"
 main = "src/index.ts"
 compatibility_date = "2026-09-01"
@@ -31,6 +32,13 @@ COMIC_CONTAINER_URL = "https://pkrstr.blob.core.windows.net/comicbook-html"
 TRAIDE_TABLE_URL = "https://pkrstr.table.core.windows.net/traidedashboard"
 TRAIDE_BLOB_URL = "https://pkrstr.blob.core.windows.net/traide-dashboard"
 AIOPS_DEFAULT_PROBLEM = "Riemann Hypothesis"
+GH_REPO = "abozaralizadeh/SandBox"
+
+# Starts the Generate workflow every hour (dueProjects in src/index.ts picks which projects),
+# because GitHub's own schedule runs late or not at all on this account. The Free plan allows
+# 5 cron triggers per account, and this uses one.
+[triggers]
+crons = ["15 * * * *"]
 
 [observability]
 enabled = true
