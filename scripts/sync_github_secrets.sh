@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Copy the App Service's settings into GitHub Actions secrets for the Generate workflow.
 #
-# Run it yourself, from the repo root, with `az` and `gh` signed in. It reads each value
+# Run it from the repo root, with `az` and `gh` signed in. It reads each value
 # from Azure and hands it straight to `gh secret set` on stdin, so nothing is printed.
 # Re-run it whenever you change a setting (or before you delete the App Service, since
 # after that this is the only copy of the settings outside your .env).
@@ -32,4 +32,12 @@ for s in json.load(sys.stdin):
 subprocess.run(["gh", "variable", "set", "SANDBOX_ENV_NAMES", "--repo", repo,
                 "--body", ",".join(sorted(names))], check=True, stdout=subprocess.DEVNULL)
 print(f"{len(names)} secrets set on {repo}, plus SANDBOX_ENV_NAMES")
+# The Generate workflow names every secret it passes on (never toJSON(secrets), which GitHub
+# flags as malicious). A setting that is not listed there never reaches the jobs.
+wf = open(".github/workflows/generate.yml").read()
+missing = [n for n in names if f"secrets.{n} " not in wf and f"secrets.{n}}}" not in wf]
+if missing:
+    print("NOT passed on by .github/workflows/generate.yml, add a line for each:")
+    for n in missing:
+        print(f"          {n}: ${{{{ secrets.{n} }}}}")
 ' "$SKIP" "$REPO"

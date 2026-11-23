@@ -80,13 +80,56 @@ jobs:
         if: matrix.project == 'aiblog' || matrix.project == 'aiops'
         continue-on-error: true
         run: python -m playwright install --with-deps chromium
-      - name: Load settings
-        env:
-          SECRETS_JSON: ${{ toJSON(secrets) }}
-          ENV_NAMES: ${{ vars.SANDBOX_ENV_NAMES }}
-        run: python3 jobs/export_env.py
       - name: Generate and publish
+        # Each setting is named here, in its original spelling (secret lookups ignore case).
+        # Never pass toJSON(secrets): GitHub flags that as a secret-stealing workflow and
+        # holds every run for manual approval. A new setting needs a line here as well as
+        # scripts/sync_github_secrets.sh, which warns about names missing from this list.
         env:
+          AIOPS_DEFAULT_PROBLEM: ${{ secrets.AIOPS_DEFAULT_PROBLEM }}
+          AIOPS_PAGE_SIZE: ${{ secrets.AIOPS_PAGE_SIZE }}
+          API_KEY: ${{ secrets.API_KEY }}
+          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+          AZURE_OPENAI_API_KEY_DALLE: ${{ secrets.AZURE_OPENAI_API_KEY_DALLE }}
+          AZURE_OPENAI_API_KEY_SORA: ${{ secrets.AZURE_OPENAI_API_KEY_SORA }}
+          AZURE_OPENAI_API_VERSION: ${{ secrets.AZURE_OPENAI_API_VERSION }}
+          AZURE_OPENAI_API_VERSION_SORA: ${{ secrets.AZURE_OPENAI_API_VERSION_SORA }}
+          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+          AZURE_OPENAI_ENDPOINT_DALLE: ${{ secrets.AZURE_OPENAI_ENDPOINT_DALLE }}
+          AZURE_OPENAI_ENDPOINT_SORA: ${{ secrets.AZURE_OPENAI_ENDPOINT_SORA }}
+          AZURE_OPENAI_MAX_TOKENS: ${{ secrets.AZURE_OPENAI_MAX_TOKENS }}
+          AZURE_OPENAI_MODEL: ${{ secrets.AZURE_OPENAI_MODEL }}
+          AZURE_OPENAI_MODEL_DALLE: ${{ secrets.AZURE_OPENAI_MODEL_DALLE }}
+          AZURE_OPENAI_MODEL_NAME: ${{ secrets.AZURE_OPENAI_MODEL_NAME }}
+          AZURE_OPENAI_MODEL_TTS: ${{ secrets.AZURE_OPENAI_MODEL_TTS }}
+          AZURE_OPENAI_RESOURCE: ${{ secrets.AZURE_OPENAI_RESOURCE }}
+          AZURE_OPENAI_SYSTEM_MESSAGE: ${{ secrets.AZURE_OPENAI_SYSTEM_MESSAGE }}
+          AZURE_OPENAI_TEMPERATURE: ${{ secrets.AZURE_OPENAI_TEMPERATURE }}
+          AZURE_OPENAI_TOP_P: ${{ secrets.AZURE_OPENAI_TOP_P }}
+          GENBOX_GENERATION_INTERVAL_DAYS: ${{ secrets.GENBOX_GENERATION_INTERVAL_DAYS }}
+          GENBOX_VIDEO_CUTOFF_DATE: ${{ secrets.GENBOX_VIDEO_CUTOFF_DATE }}
+          GENBOX_VIDEO_ENABLED: ${{ secrets.GENBOX_VIDEO_ENABLED }}
+          GENBOX_VIDEO_MAX_CLIPS: ${{ secrets.GENBOX_VIDEO_MAX_CLIPS }}
+          GRAPH_RECURSION_LIMIT: ${{ secrets.GRAPH_RECURSION_LIMIT }}
+          HIDE_TRAIDE_PAGE: ${{ secrets.HIDE_TRAIDE_PAGE }}
+          HISTORY_LEN: ${{ secrets.HISTORY_LEN }}
+          LANGCHAIN_API_KEY: ${{ secrets.LANGCHAIN_API_KEY }}
+          LANGCHAIN_ENDPOINT: ${{ secrets.LANGCHAIN_ENDPOINT }}
+          LANGCHAIN_PROJECT: ${{ secrets.LANGCHAIN_PROJECT }}
+          LANGCHAIN_TRACING_V2: ${{ secrets.LANGCHAIN_TRACING_V2 }}
+          OAIENDPOINT: ${{ secrets.OAIENDPOINT }}
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+          aiblog_blob_name: ${{ secrets.aiblog_blob_name }}
+          aiblog_table_name: ${{ secrets.aiblog_table_name }}
+          aiops_blob_name: ${{ secrets.aiops_blob_name }}
+          aiops_problem_table_name: ${{ secrets.aiops_problem_table_name }}
+          aiops_table_name: ${{ secrets.aiops_table_name }}
+          connection_string: ${{ secrets.connection_string }}
+          genbox_table_name: ${{ secrets.genbox_table_name }}
+          genbox_video_blob_name: ${{ secrets.genbox_video_blob_name }}
+          table_name: ${{ secrets.table_name }}
+          tomorrownews_blob_name: ${{ secrets.tomorrownews_blob_name }}
+          tomorrownews_table_name: ${{ secrets.tomorrownews_table_name }}
           DEBUG: "false"
           GENERATE_ENABLED: ${{ vars.GENERATE_ENABLED }}
           PUBLISH_ONLY: ${{ inputs.publish_only }}

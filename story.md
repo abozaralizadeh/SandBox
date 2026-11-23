@@ -29,7 +29,10 @@ without anyone noticing.
 Things that bit along the way:
 
 - GitHub stores secret names in upper case. Half of our settings are lower case
-  (`connection_string`). A small step now restores the original spelling.
+  (`connection_string`). My first fix handed the job all secrets at once and restored the
+  spelling in a script. GitHub took one look and marked the workflow "may be malicious",
+  because dumping every secret is exactly what secret-stealing workflows do. Fair enough. Now
+  the workflow names each secret on its own line.
 - Scheduled workflows in a public repo switch themselves off after 60 days with no commits.
   A weekly job re-enables it.
 - The generators were built for a web server, so the slow parts run in background threads and

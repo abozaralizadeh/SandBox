@@ -80,9 +80,11 @@ and every generator keeps its own `azurestorage.py` unchanged.
   `GENERATE_ENABLED` is `true`; until then the jobs only publish. Never let the Logic Apps and
   Actions both generate: TomorrowNews and AIBlog have no cross-process lock.
 - **Settings.** `scripts/sync_github_secrets.sh` copies the App Service settings into Actions
-  secrets and writes `SANDBOX_ENV_NAMES`, because GitHub upper-cases secret names and several
-  of ours are lower case (`connection_string`, ...). `jobs/export_env.py` restores the spelling.
-  The plan job does nothing while `SANDBOX_ENV_NAMES` is empty.
+  secrets and writes `SANDBOX_ENV_NAMES` (names only). The job names every secret in its `env:`
+  block in the original spelling (`connection_string: ${{ secrets.connection_string }}`, lookups
+  ignore case). **Never pass `toJSON(secrets)`**: GitHub marked that version of the workflow "may
+  be malicious" and held every run for approval. A new setting needs a line there too; the sync
+  script lists any it finds missing. The plan job does nothing while `SANDBOX_ENV_NAMES` is empty.
 - **Scheduled workflows in a public repo die after 60 days without a commit.** The weekly
   `keepalive` job re-enables the workflow through the API.
 - DNS for sandboxes.live moved from GoDaddy to Cloudflare (zone on the Free plan, nameservers
