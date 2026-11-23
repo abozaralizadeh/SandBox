@@ -4,12 +4,15 @@ Guidance for Claude Code when working in this repository.
 
 ## What this repo is
 
-SandBox is a single Flask app (`main.py`) hosting six independent AI subprojects, deployed to
-Azure App Service (web app "genbox", domain SandBoxes.Live) via `azure-pipelines.yml` on every
-push to `main`. There is **no scheduler anywhere**: all content is generated lazily when the
-first visitor of the day requests it, then cached in Azure Table Storage. GenBox publishes on a
-cadence (`GENBOX_GENERATION_INTERVAL_DAYS`, default 1) — still lazily, but only on dates that
-land on the interval grid; see `GenBox/schedule.py`.
+SandBox is a single Flask app (`main.py`) hosting six independent AI subprojects. It was
+deployed to Azure App Service (web app "genbox" in `sandbox_rg`, domain SandBoxes.Live) via
+`azure-pipelines.yml`, and is moving off it to GitHub Pages + a Cloudflare Worker + GitHub
+Actions (see *Hosting off the App Service* below). The generators are lazy: content for a date
+is made by the first request that finds it missing, then cached in Azure Table Storage. What
+made those requests on a timer were five **Azure Logic Apps** in `sandbox_rg`
+(Scheduler00..04, see the table in *Hosting*), not visitors. GenBox publishes on a cadence
+(`GENBOX_GENERATION_INTERVAL_DAYS`, 7 in production) and only on dates that land on the
+interval grid; see `GenBox/schedule.py`.
 
 Run locally:
 
@@ -37,6 +40,54 @@ The 1-hour gunicorn timeout is deliberate — it matches the ComicBook generatio
 `/Users/abozar/Documents/Projects/trAIde`; its `dashboard_publisher.py` writes a sanitized,
 privacy-safe projection (indexed equity starting at 100, no dollar amounts) to Azure, and this
 repo only reads it. Never add account data or absolute amounts to the dashboard payload. Leverage arrives as ratios only (per-position/order/closed `leverage`, top-level `leverage` block: `exposureX` = position value ÷ account value, `riskPerTradePct`, `maxEntryLeverage`, …) and renders as the Leverage KPI tile, the violet `2×` chips (open positions, resting orders, recently closed, decision feed) and the `@ 3×` suffix on the trade-outcome tooltip (ROE is price return × leverage; since Oct 7 the outcome bars and the closed-trade cards lead with `accountPct` — the trade's P&L as % of the account — and show ROE as a labelled detail; a row without `accountPct` — closes before Sep 25 — is a faded "size not recorded" stub, never an invented height) in `templates/traide.html`; a payload without it must still render (the chips and tile simply stay empty/`—`). The Jev dual run (trAIde `JEV_MODE`) adds a top-level `dualRun` block (mode, model, per-trader calls/verdict/net %/t/closes/win rate/R, outcome counts, agreement, median latency, the 25 latest Jev answers — ratios, labels and gate codes only) rendered by `renderDualRun` as its own hidden-until-used section right under Performance (`#h2hSection`, titled "Jev vs <name>" — the LLM is named by `traders.llm.model`, `gpt-6-luna` → "Luna"): a plain-words headline, a scoreboard of tiles (the better number marked), a real-money race from each trader's `curve` (cumulative `accountPct`), call quality from `byHorizon` (incl. `t`) and a calibration chart from `calibration` — ECharts, trader identity in the validated `--jev` (blue) / `--llm` (orange) tokens, text in text tokens, a table twin for every chart under "Numbers behind the charts" — then the last-pass `status` line, `orderStability`, each trader's `exits` vs the exit rules, and, collapsed (open state kept across refreshes), `recent` rows: `kind: "entry"` with Jev's probabilities, the LLM's same-time call `llm`, the plan, what happened, the closed trade's `result` and `fwdPct`, or `kind: "manage"` — Jev reviewing its own open position (action, probabilities, R now/best, thesis intact, outcome) — the list is capped at 60vh like the other long lists; like everything on this page it comes only from the published `live.json` blob, never from the bot), and a `trader: "jev"` field on Jev's positions, resting entries, closes and feed rows rendered as the blue `JEV` chip (`jevTag`, Jev's `--jev` identity hue); LLM rows carry no field, so older payloads render unchanged. Since Oct 27 trAIde runs `JEV_MODE=archived`: `dualRun.mode` is `"archived"` with an `archived` block (`since`, `until`, `days`, `frozenAt`) and no `status`; the record is frozen bot-side. `renderDualRun` then moves `#h2hSection` just above the footer once, labels it "Archived experiment", adds an ARCHIVED tag and a dashed border (`#dualRunPanel.archived`), replaces the last-pass line with the run's dates, hides the answers list when it is empty, and ends the race at `archived.until`. `mode: "archived"` without `traders` hides the section like `off`. The judge (trAIde `JUDGE_MODE`, a helper for the LLM, not a second trader) adds a top-level `judge` block (mode, backend, control, per-backend `status`, `calls` and `controlCalls` scoreboards: rank correlation and t for the judge and for the LLM's own confidence, low/mid/high bands, agree share, order spread; `triage` 24h counts) rendered by `renderJudge` as the "Second opinion" panel (`#judgePanel`) right after Exit discipline. Since Nov 3 the block also names the models (`model`, `controlModel`: deployment names only, never a url or key) and `minSamples`; the panel shows a "who is judging" cell per backend (model, what it reads, its own `status` health) and, once the control has scored calls, a "control on the same calls" line. A payload without those fields falls back to the backend's default model name. Ratios, counts and labels only, never `$`. `mode: "off"` (or no block) hides it, so older payloads render unchanged.
+
+## Hosting off the App Service (Nov 2026)
+
+Only the App Service goes. Azure OpenAI (through APIM) and the `pkrstr` storage account stay,
+and every generator keeps its own `azurestorage.py` unchanged.
+
+- **Pages.** `scripts/build_site.py` renders the seven templates once (only `index.html`'s
+  `hide_traide` and the AIOPS seed use Jinja; the AIOPS page loads its description and progress
+  itself) and copies `static/`. `.github/workflows/pages.yml` deploys it. GitHub Pages serves
+  `/tomorrownews` from `tomorrownews.html`, so URLs don't change. `/genbox` is `tv.html`.
+- **Data URLs.** The Cloudflare Worker in `worker/` is routed ONLY on the data paths
+  (`wrangler.toml`), so the pages' `fetch()` calls stay same-origin and unchanged. It reads a
+  static copy of everything from the public blob container `sandbox-site`, written by
+  `sitepub.py` (layout in its docstring), and trAIde live from its table/blob with two
+  read-only SAS secrets (`worker/set_secrets.sh`). Referer guards run before the edge cache.
+  It was checked URL by URL against the Flask test client: same bodies, status codes and
+  `Timestamp` / `Edition-Missing` / `Arc-Id` headers. Keep it that way when changing either.
+  One deliberate difference: `/ai-open-problem-solver/history` always says `generating:false`.
+- **Generation.** `.github/workflows/generate.yml` replaces the Logic Apps, same cadence:
+
+  | Logic App | Called | Every | Actions cron (UTC) |
+  |---|---|---|---|
+  | Scheduler01 | `/tomorrownewscontent` | 1 h | `7 * * * *` |
+  | Scheduler02 | `/aiblogcontent` | 3 h | `37 */3 * * *` |
+  | Scheduler04 | `/comicbookcontent` | 4 h | `23 1-23/4 * * *` |
+  | Scheduler00 | `/genbox-video-status` | 3 h | `52 */3 * * *` |
+  | Scheduler03 | AIOPS `history?ensure_latest=true` per problem | 1 h | `47 * * * *` |
+
+  `jobs/needed.py` (stdlib only, runs before any install) maps the cron to its project and
+  skips it if today's content is already in the published indexes, so the hourly crons cost
+  seconds. `jobs/run.py` calls the same entry points the routes did and then publishes. GenBox
+  and AIOPS hand their slow work to daemon threads; `jobs/run.py` collects the threads whose
+  target is in our packages and joins them, or the job would exit and kill the work. The
+  GenBox job also makes the decision text itself: before, only a visitor's `/get-string` did.
+  TomorrowNews uses `_generate_all`, because `gettomorrownews` stops at a cached English
+  edition and a failed Persian or Italian one was never retried by the Logic App.
+- **The overlap switch.** Generation in Actions only happens when the repo variable
+  `GENERATE_ENABLED` is `true`; until then the jobs only publish. Never let the Logic Apps and
+  Actions both generate: TomorrowNews and AIBlog have no cross-process lock.
+- **Settings.** `scripts/sync_github_secrets.sh` copies the App Service settings into Actions
+  secrets and writes `SANDBOX_ENV_NAMES`, because GitHub upper-cases secret names and several
+  of ours are lower case (`connection_string`, ...). `jobs/export_env.py` restores the spelling.
+  The plan job does nothing while `SANDBOX_ENV_NAMES` is empty.
+- **Scheduled workflows in a public repo die after 60 days without a commit.** The weekly
+  `keepalive` job re-enables the workflow through the API.
+- DNS for sandboxes.live moved from GoDaddy to Cloudflare (zone on the Free plan, nameservers
+  `max`/`rita.ns.cloudflare.com`). The Worker routes only fire on PROXIED hostnames, so a
+  DNS-only apex keeps serving the App Service. `beta.sandboxes.live` is the test hostname.
 
 ## Core architecture pattern (all generators)
 

@@ -198,3 +198,28 @@ AZURE_OPENAI_MODEL_SORA=sora-2   # single value applies to all, or give one per 
 `gunicorn --bind=0.0.0.0 --timeout 3600 --workers 4 --threads 2 main:app`
 
 (The 1-hour worker timeout matches the ComicBook generation budget so a long comic run is not cut off; see `startup.sh`.)
+
+---
+## Hosting: GitHub Pages + Cloudflare + Actions
+
+The site no longer needs a web server. Three pieces replace the Azure App Service, while
+Azure OpenAI (through APIM) and Azure Storage stay exactly where they were:
+
+| Piece | What it does |
+|---|---|
+| **GitHub Pages** (`.github/workflows/pages.yml`) | Serves the seven pages, rendered once from `templates/` by `scripts/build_site.py` |
+| **Cloudflare Worker** (`worker/`) | Answers the data URLs the pages fetch (`/tomorrownewscontent`, `/aiblogindex`, `/traide/*`, ...) on the same domain, from the static copy in blob storage, with edge caching |
+| **GitHub Actions** (`.github/workflows/generate.yml`) | Runs the generators on the same schedule the old Azure Logic Apps used, then publishes the static copy with `sitepub.py` |
+
+Setup, once:
+
+```bash
+bash scripts/sync_github_secrets.sh                      # App Service settings -> Actions secrets
+cd worker && npm install && npx wrangler deploy && bash set_secrets.sh
+gh workflow run generate.yml -f full=true -f publish_only=true   # backfill the archive
+gh variable set GENERATE_ENABLED --body true             # let Actions generate (turn the Logic Apps off first)
+```
+
+Run a generator by hand: `python -m jobs.run comicbook` (generates if missing, then publishes).
+Republish without generating: `python sitepub.py all` (add `--full` for the whole archive,
+`--out DIR` for a dry run into a folder).

@@ -1,0 +1,112 @@
+name: Generate
+
+# Makes each day's content and publishes the static copy the Cloudflare Worker serves.
+# Replaces the five Azure Logic Apps (Scheduler00..04) that pinged the App Service.
+#
+# Generation only happens when the repo variable GENERATE_ENABLED is "true". Until then the
+# jobs only publish, so they never race the App Service while both are running.
+
+on:
+  schedule:
+    # Keep these strings in sync with CRONS in jobs/needed.py.
+    - cron: "7 * * * *"        # TomorrowNews, hourly        (was Scheduler01)
+    - cron: "37 */3 * * *"     # AIBlog, every 3 hours       (was Scheduler02)
+    - cron: "23 1-23/4 * * *"  # ComicBook, every 4 hours    (was Scheduler04)
+    - cron: "52 */3 * * *"     # GenBox, every 3 hours       (was Scheduler00)
+    - cron: "47 * * * *"       # AIOPS, hourly               (was Scheduler03)
+    - cron: "11 4 * * 1"       # weekly keepalive
+  workflow_dispatch:
+    inputs:
+      project:
+        type: choice
+        options: [all, tomorrownews, aiblog, comicbook, genbox, aiops]
+        default: all
+      force:
+        description: Run even if today's content is already published
+        type: boolean
+        default: false
+      publish_only:
+        description: Skip generation, only republish
+        type: boolean
+        default: false
+      full:
+        description: Republish the whole archive, not just the last two days (backfill)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: write   # the keepalive job re-enables this workflow
+
+jobs:
+  plan:
+    # SANDBOX_ENV_NAMES is written by scripts/sync_github_secrets.sh: no settings, no runs.
+    if: github.event.schedule != '11 4 * * 1' && vars.SANDBOX_ENV_NAMES != ''
+    runs-on: ubuntu-latest
+    outputs:
+      projects: ${{ steps.plan.outputs.projects }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: jobs
+      - id: plan
+        env:
+          SCHEDULE: ${{ github.event.schedule }}
+          PROJECT: ${{ inputs.project }}
+          FORCE: ${{ inputs.force }}
+          GENBOX_GENERATION_INTERVAL_DAYS: ${{ vars.GENBOX_GENERATION_INTERVAL_DAYS }}
+        run: python3 jobs/needed.py --schedule "$SCHEDULE" --project "$PROJECT" --force "${FORCE:-false}" >> "$GITHUB_OUTPUT"
+
+  run:
+    needs: plan
+    if: needs.plan.outputs.projects != '[]' && needs.plan.outputs.projects != ''
+    strategy:
+      fail-fast: false
+      matrix:
+        project: ${{ fromJSON(needs.plan.outputs.projects) }}
+    concurrency:
+      group: generate-${{ matrix.project }}
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Browser for the research agents (optional, runs carry on without it)
+        if: matrix.project == 'aiblog' || matrix.project == 'aiops'
+        continue-on-error: true
+        run: python -m playwright install --with-deps chromium
+      - name: Load settings
+        env:
+          SECRETS_JSON: ${{ toJSON(secrets) }}
+          ENV_NAMES: ${{ vars.SANDBOX_ENV_NAMES }}
+        run: python3 jobs/export_env.py
+      - name: Generate and publish
+        env:
+          DEBUG: "false"
+          GENERATE_ENABLED: ${{ vars.GENERATE_ENABLED }}
+          PUBLISH_ONLY: ${{ inputs.publish_only }}
+          FULL: ${{ inputs.full }}
+        run: |
+          args=()
+          if [ "$GENERATE_ENABLED" != "true" ] || [ "$PUBLISH_ONLY" = "true" ]; then
+            args+=(--publish-only)
+          fi
+          if [ "$FULL" = "true" ]; then
+            args+=(--full)
+          fi
+          python -m jobs.run "${{ matrix.project }}" "${args[@]}"
+
+  # GitHub turns off scheduled workflows in a public repo after 60 days without a commit.
+  # Re-enabling it through the API once a week keeps the schedule alive.
+  keepalive:
+    if: github.event.schedule == '11 4 * * 1'
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/generate.yml/enable"

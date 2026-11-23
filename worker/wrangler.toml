@@ -1,0 +1,45 @@
+# SandBox's data URLs at the edge. See src/index.ts for what each route does.
+# Deploy: npm run deploy. Secrets (read-only trAIde SAS): ./set_secrets.sh
+name = "sandbox-data"
+main = "src/index.ts"
+compatibility_date = "2026-09-01"
+account_id = "c8d630fdf3e93d055bdb7d308523ec6a"
+# Only the routes below reach this Worker; the pages themselves come from GitHub Pages.
+workers_dev = false
+
+# Only these paths go through the Worker. A route on a hostname whose DNS record is not proxied
+# by Cloudflare does nothing, so the sandboxes.live routes sit idle until the cut-over.
+routes = [
+  { pattern = "beta.sandboxes.live/tomorrownewscontent*", zone_name = "sandboxes.live" },
+  { pattern = "beta.sandboxes.live/tomorrownewsindex*", zone_name = "sandboxes.live" },
+  { pattern = "beta.sandboxes.live/aiblogcontent*", zone_name = "sandboxes.live" },
+  { pattern = "beta.sandboxes.live/aiblogindex*", zone_name = "sandboxes.live" },
+  { pattern = "beta.sandboxes.live/comicbookcontent*", zone_name = "sandboxes.live" },
+  { pattern = "beta.sandboxes.live/comicbookindex*", zone_name = "sandboxes.live" },
+  { pattern = "beta.sandboxes.live/cbimg*", zone_name = "sandboxes.live" },
+  { pattern = "beta.sandboxes.live/get-string*", zone_name = "sandboxes.live" },
+  { pattern = "beta.sandboxes.live/genbox-*", zone_name = "sandboxes.live" },
+  { pattern = "beta.sandboxes.live/ai-open-problem-solver/*", zone_name = "sandboxes.live" },
+  { pattern = "beta.sandboxes.live/traide/*", zone_name = "sandboxes.live" },
+  { pattern = "sandboxes.live/tomorrownewscontent*", zone_name = "sandboxes.live" },
+  { pattern = "sandboxes.live/tomorrownewsindex*", zone_name = "sandboxes.live" },
+  { pattern = "sandboxes.live/aiblogcontent*", zone_name = "sandboxes.live" },
+  { pattern = "sandboxes.live/aiblogindex*", zone_name = "sandboxes.live" },
+  { pattern = "sandboxes.live/comicbookcontent*", zone_name = "sandboxes.live" },
+  { pattern = "sandboxes.live/comicbookindex*", zone_name = "sandboxes.live" },
+  { pattern = "sandboxes.live/cbimg*", zone_name = "sandboxes.live" },
+  { pattern = "sandboxes.live/get-string*", zone_name = "sandboxes.live" },
+  { pattern = "sandboxes.live/genbox-*", zone_name = "sandboxes.live" },
+  { pattern = "sandboxes.live/ai-open-problem-solver/*", zone_name = "sandboxes.live" },
+  { pattern = "sandboxes.live/traide/*", zone_name = "sandboxes.live" },
+]
+
+[vars]
+BLOB_BASE = "https://pkrstr.blob.core.windows.net/sandbox-site"
+COMIC_CONTAINER_URL = "https://pkrstr.blob.core.windows.net/comicbook-html"
+TRAIDE_TABLE_URL = "https://pkrstr.table.core.windows.net/traidedashboard"
+TRAIDE_BLOB_URL = "https://pkrstr.blob.core.windows.net/traide-dashboard"
+AIOPS_DEFAULT_PROBLEM = "Riemann Hypothesis"
+
+[observability]
+enabled = true
